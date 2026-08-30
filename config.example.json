@@ -1,0 +1,7 @@
+{
+  "telegram_token": "PASTE_FROM_BOTFATHER",
+  "teacher_password": "pick-something-long",
+  "port": 8080,
+  "min_photo_width": 800,
+  "timezone_offset_hours": 5
+}
