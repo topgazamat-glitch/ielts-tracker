@@ -33,6 +33,11 @@ def load_config():
         "min_photo_width": 800,
         # messages the system sends on its own - off until you turn it on
         "automation": False,
+        # hourly chasing in the run-up to a deadline
+        "chase_hours": 6,        # start this many hours before the deadline
+        "chase_threshold": 80,   # only chase students below this percent done
+        "chase_max": 5,          # never send more than this many per deadline
+
         "timezone_offset_hours": 5,  # Tashkent
     }
     if os.path.exists(CONFIG_PATH):
@@ -482,3 +487,60 @@ def mark_sent(db, kind, key):
         (kind, str(key), iso(now())),
     )
     db.commit()
+
+
+# ------------------------------------------------------- homework sets
+
+def homework_items(db, group_id, due_at):
+    """The items a teacher posted together: same group, same deadline."""
+    if due_at is None:
+        return db.execute(
+            "SELECT * FROM assignments WHERE group_id=? AND published=1 AND closed=0"
+            " AND due_at IS NULL ORDER BY id", (group_id,)
+        ).fetchall()
+    return db.execute(
+        "SELECT * FROM assignments WHERE group_id=? AND published=1 AND closed=0"
+        " AND due_at=? ORDER BY id", (group_id, due_at)
+    ).fetchall()
+
+
+def open_sets(db, group_id):
+    """Open homework grouped by deadline, soonest first."""
+    rows = db.execute(
+        "SELECT DISTINCT due_at FROM assignments WHERE group_id=? AND published=1"
+        " AND closed=0 ORDER BY due_at IS NULL, due_at", (group_id,)
+    ).fetchall()
+    return [(r["due_at"], homework_items(db, group_id, r["due_at"])) for r in rows]
+
+
+def set_progress(db, student_id, items):
+    """Which items of a set this student has sent something for."""
+    if not items:
+        return {"done": 0, "total": 0, "percent": None, "remaining": [], "done_ids": set()}
+    ids = [a["id"] for a in items]
+    rows = db.execute(
+        "SELECT DISTINCT assignment_id FROM submissions WHERE student_id=?"
+        " AND assignment_id IN (%s)" % ",".join("?" * len(ids)),
+        [student_id] + ids,
+    ).fetchall()
+    done_ids = {r["assignment_id"] for r in rows}
+    remaining = [a for a in items if a["id"] not in done_ids]
+    return {
+        "done": len(done_ids),
+        "total": len(items),
+        "percent": round(100 * len(done_ids) / len(items)),
+        "remaining": remaining,
+        "done_ids": done_ids,
+    }
+
+
+def group_set_progress(db, group_id, items):
+    """Every active student's progress on one homework set, worst first."""
+    out = []
+    for st in db.execute(
+        "SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name", (group_id,)
+    ).fetchall():
+        p = set_progress(db, st["id"], items)
+        out.append({"student": st, **p})
+    out.sort(key=lambda r: (r["percent"] if r["percent"] is not None else 0, r["student"]["name"]))
+    return out

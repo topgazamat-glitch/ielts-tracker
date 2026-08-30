@@ -33,7 +33,7 @@ def page(title, body, active=""):
 <link rel="stylesheet" href="/static/style.css"></head><body>
 <header class="top"><span class="brand">Teaching Assistant</span><nav>
 {nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/groups', 'Groups')}
-{nav('/assignments', 'Assignments')}{nav('/vocab', 'Vocabulary')}{nav('/roster', 'Students')}</nav>
+{nav('/assignments', 'Assignments')}{nav('/homework', 'Homework')}{nav('/vocab', 'Vocabulary')}{nav('/roster', 'Students')}</nav>
 <span class="right"><a href="/logout">Sign out</a></span></header>
 <main>{body}</main></body></html>"""
 
@@ -497,7 +497,8 @@ cannot see it or submit to it until you press Publish.</p></div>
 <label class="f">One item per line — numbering is optional
 <textarea name="items" rows="6" style="width:100%"
 placeholder="1. Task 2 essay – Technology&#10;2. Grammar handout page 45&#10;3. Vocabulary unit 4 – write 10 sentences"></textarea></label>
-<div style="margin-top:10px"><button>Post list</button></div></form>
+<div style="margin-top:10px"><button onclick="this.disabled=true;this.form.submit()">
+Post list</button></div></form>
 <p class="sub" style="margin:10px 0 0">Each line becomes its own item, so students pick
 which one they are sending and you get a separate score for each.</p></div>
 <h2>All assignments</h2>
@@ -749,6 +750,46 @@ def act_student_upload(req, db, token):
     return redirect(f"/s/{token}?ok={len(accepted)}&r={rejected}")
 
 
+def view_homework(req, db):
+    """Who has handed in what, per homework set, worst student first."""
+    blocks = ""
+    for g in db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall():
+        sets = core.open_sets(db, g["id"])
+        if not sets:
+            continue
+        for due_at, items in sets:
+            prog = core.group_set_progress(db, g["id"], items)
+            if not prog:
+                continue
+            finished = sum(1 for r in prog if r["percent"] == 100)
+            avg = round(sum(r["percent"] for r in prog) / len(prog))
+            head = "".join(f'<th title="{E(a["title"])}">{E(a["title"][:14])}</th>' for a in items)
+            body = ""
+            for r in prog:
+                cells = "".join(
+                    '<td style="text-align:center">'
+                    + ("&#9989;" if a["id"] in r["done_ids"] else
+                       '<span style="color:var(--muted)">&#11036;</span>')
+                    + "</td>"
+                    for a in items
+                )
+                cls = ' class="pill risk"' if r["percent"] < 50 else ' class="pill"'
+                body += (f'<tr><td><a href="/students/{r["student"]["id"]}">'
+                         f'{E(r["student"]["name"])}</a></td>{cells}'
+                         f'<td><span{cls}>{r["percent"]}%</span></td></tr>')
+            blocks += f"""<h2>{E(g["name"])} — due {E((due_at or "no deadline")[:10])}</h2>
+<p class="sub">{len(items)} task(s) · {finished} of {len(prog)} students finished everything ·
+group average {avg}%</p>
+<div class="tablewrap"><table><tr><th>Student</th>{head}<th>Done</th></tr>{body}</table></div>"""
+    if not blocks:
+        blocks = ('<div class="card"><p style="margin:0">No open homework. '
+                  'Post a list on the Assignments page.</p></div>')
+    body = f"""<h1>Homework</h1>
+<p class="sub">A tick means the student has sent something for that item. Rows are
+ordered worst first, so whoever needs chasing is at the top.</p>{blocks}"""
+    return html_response(page("Homework", body, "Homework"))
+
+
 # ----------------------------------------------------------------- actions
 
 def act_grade(req, db):
@@ -828,6 +869,8 @@ def act_new_assignment(req, db):
     due = f.get("due", [""])[0]
     due_iso = f"{due}T23:59:00+00:00" if due else None
     publish_now = f.get("publish", [""])[0] == "1"
+    if already_set(db, int(gid), title, due_iso):
+        return redirect("/assignments")
     aid = db.execute(
         "INSERT INTO assignments (group_id, title, task_type, due_at, created_at, published)"
         " VALUES (?,?,?,?,?,?)",
@@ -872,6 +915,15 @@ def parse_list(text):
     return items
 
 
+def already_set(db, group_id, title, due_iso):
+    """Guards against a double-click posting the same list twice."""
+    return db.execute(
+        "SELECT id FROM assignments WHERE group_id=? AND title=? AND closed=0"
+        " AND (due_at IS ? OR due_at=?)",
+        (group_id, title, due_iso, due_iso),
+    ).fetchone() is not None
+
+
 def act_new_list(req, db):
     f = req["form"]
     gid = f.get("group_id", [None])[0]
@@ -883,6 +935,8 @@ def act_new_list(req, db):
     publish_now = f.get("publish", [""])[0] == "1"
     created = []
     for title in items:
+        if already_set(db, int(gid), title, due_iso):
+            continue
         created.append(db.execute(
             "INSERT INTO assignments (group_id, title, task_type, due_at, created_at, published)"
             " VALUES (?,?,?,?,?,?)",
@@ -961,6 +1015,7 @@ ROUTES = [
     ("GET", r"^/students/(\d+)$", view_student),
     ("GET", r"^/assignments$", view_assignments),
     ("GET", r"^/roster$", view_roster),
+    ("GET", r"^/homework$", view_homework),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
     ("GET", r"^/skip$", act_skip),

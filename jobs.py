@@ -82,6 +82,88 @@ def missed_nudges(db, token, cfg):
     return sent
 
 
+def hourly_chase(db, token, cfg):
+    """In the final hours before a deadline, chase whoever is behind.
+
+    Guarded three ways: only inside waking hours (the caller checks), at most
+    once per clock hour, and never more than `chase_max` times per deadline.
+    """
+    sent = 0
+    now = core.now()
+    window_end = core.iso(now + timedelta(hours=cfg.get("chase_hours", 6)))
+    hour_bucket = now.strftime("%Y-%m-%dT%H")
+    threshold = cfg.get("chase_threshold", 80)
+    cap = cfg.get("chase_max", 5)
+
+    groups = db.execute(
+        "SELECT DISTINCT group_id FROM assignments WHERE closed=0 AND published=1"
+    ).fetchall()
+    for g in groups:
+        for due_at, items in core.open_sets(db, g["group_id"]):
+            if not due_at or due_at <= core.iso(now) or due_at > window_end:
+                continue
+            for row in core.group_set_progress(db, g["group_id"], items):
+                st = row["student"]
+                if not st["telegram_id"] or row["percent"] >= threshold:
+                    continue
+                already = db.execute(
+                    "SELECT COUNT(*) c FROM notifications WHERE kind='chase' AND key LIKE ?",
+                    (f"{due_at}:{st['id']}:%",),
+                ).fetchone()["c"]
+                if already >= cap:
+                    continue
+                key = f"{due_at}:{st['id']}:{hour_bucket}"
+                if core.already_sent(db, "chase", key):
+                    continue
+                names = ", ".join(a["title"] for a in row["remaining"])
+                _send(token, st["telegram_id"], _phrase_fmt(
+                    st["lang"], "chase", done=row["done"], total=row["total"],
+                    due=" (%s)" % due_at[:10], items=names))
+                core.mark_sent(db, "chase", key)
+                sent += 1
+    return sent
+
+
+def deadline_summary(db, token, cfg):
+    """Once a deadline passes, send the teacher the full roll-call."""
+    import json
+    teachers = json.loads(core.meta_get(db, "teachers", "[]"))
+    if not teachers:
+        return 0
+    now = core.now()
+    since = core.iso(now - timedelta(hours=30))
+    sent = 0
+    rows = db.execute(
+        "SELECT DISTINCT group_id, due_at FROM assignments WHERE published=1"
+        " AND due_at IS NOT NULL AND due_at <= ? AND due_at >= ?",
+        (core.iso(now), since),
+    ).fetchall()
+    for r in rows:
+        key = f"{r['group_id']}:{r['due_at']}"
+        if core.already_sent(db, "summary", key):
+            continue
+        items = core.homework_items(db, r["group_id"], r["due_at"])
+        if not items:
+            core.mark_sent(db, "summary", key)
+            continue
+        prog = core.group_set_progress(db, r["group_id"], items)
+        gname = db.execute("SELECT name FROM groups WHERE id=?", (r["group_id"],)).fetchone()
+        lines = [f"Deadline passed - {gname['name'] if gname else ''} ({r['due_at'][:10]})",
+                 f"{len(items)} task(s) set"]
+        for row in prog:
+            mark = "OK" if row["percent"] == 100 else f"{row['percent']}%"
+            missing = ("" if not row["remaining"]
+                       else " - missing: " + ", ".join(a["title"] for a in row["remaining"]))
+            lines.append(f"{row['student']['name']}: {row['done']}/{row['total']} ({mark}){missing}")
+        done_all = sum(1 for row in prog if row["percent"] == 100)
+        lines.append(f"{done_all} of {len(prog)} finished everything.")
+        for tid in teachers:
+            _send(token, tid, "\n".join(lines)[:4000])
+        core.mark_sent(db, "summary", key)
+        sent += 1
+    return sent
+
+
 def teacher_digest(db, token, cfg):
     """Once a week: who is slipping, and how big the queue is."""
     week = (core.now() + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%G-W%V")
@@ -128,6 +210,11 @@ def _phrase(lang, kind, title):
     return table.get(lang, table["en"]).format(title=title)
 
 
+def _phrase_fmt(lang, kind, **kw):
+    import bot
+    return bot.t(lang, "hw_" + kind, **kw)
+
+
 def backup(db_path=None):
     """A consistent copy of the database, even while it is being written to."""
     db_path = db_path or core.DB_PATH
@@ -162,7 +249,9 @@ def tick(cfg):
             done["messages"] = "disabled (set automation: true in config.json)"
         elif token and QUIET_START <= local_hour(cfg) < QUIET_END:
             done["due_soon"] = due_soon_reminders(db, token, cfg)
+            done["chase"] = hourly_chase(db, token, cfg)
             done["missed"] = missed_nudges(db, token, cfg)
+            done["summary"] = deadline_summary(db, token, cfg)
             done["digest"] = teacher_digest(db, token, cfg)
     finally:
         db.close()

@@ -46,7 +46,12 @@ T = {
         'chart_caption': 'Average {avg}/10 · last 3 {last3}/10 · completion {completion}%',
         "new_assignment": "New assignment: {title}{due}\nSend a photo when it is ready.",
         "homework_list": "Homework{due}:",
-        "help": "Send a photo of your homework.\n/progress - your chart\n/vocab - word practice\n/language",
+        'hw_none': 'Nothing to do right now.',
+        'hw_head': 'Homework{due} — {done}/{total} done',
+        'hw_left': 'Still to send: {items}',
+        'hw_all': 'All done. Nicely finished.',
+        'hw_chase': '{done}/{total} done{due}. Still missing: {items}',
+        "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
         "ask_name": "Добро пожаловать! Как вас зовут (имя и фамилия)?",
@@ -77,6 +82,11 @@ T = {
         'chart_caption': 'Средний {avg}/10 · последние 3 {last3}/10 · сдано {completion}%',
         "new_assignment": "Новое задание: {title}{due}\nОтправьте фото, когда будет готово.",
         "homework_list": "Домашнее задание{due}:",
+        'hw_none': 'Сейчас заданий нет.',
+        'hw_head': 'Домашнее задание{due} — сделано {done}/{total}',
+        'hw_left': 'Осталось отправить: {items}',
+        'hw_all': 'Всё сделано. Отлично.',
+        'hw_chase': 'Сделано {done}/{total}{due}. Не хватает: {items}',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -108,6 +118,11 @@ T = {
         'chart_caption': "O'rtacha {avg}/10 · oxirgi 3 ta {last3}/10 · topshirilgan {completion}%",
         "new_assignment": "Yangi topshiriq: {title}{due}\nTayyor bo'lganda rasmini yuboring.",
         "homework_list": "Uy vazifasi{due}:",
+        'hw_none': "Hozircha topshiriq yo'q.",
+        'hw_head': 'Uy vazifasi{due} — {done}/{total} bajarildi',
+        'hw_left': 'Yuborish kerak: {items}',
+        'hw_all': 'Hammasi bajarildi. Barakalla.',
+        'hw_chase': '{done}/{total} bajarildi{due}. Qolgani: {items}',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -338,6 +353,18 @@ def group_chart_png(db, group):
     )
 
 
+def remaining_text(db, student, due_at):
+    """What is left in this deadline's set, after a submission lands."""
+    lang = student["lang"]
+    items = core.homework_items(db, student["group_id"], due_at)
+    p = core.set_progress(db, student["id"], items)
+    head = t(lang, "hw_head", due=due_label(due_at), done=p["done"], total=p["total"])
+    if not p["remaining"]:
+        return head + "\n" + t(lang, "hw_all")
+    names = ", ".join(a["title"] for a in p["remaining"])
+    return head + "\n" + t(lang, "hw_left", items=names)
+
+
 def announce_assignment(token, db, assignment_id):
     """Tell a group that a new assignment is open. Returns how many were told."""
     a = db.execute("SELECT * FROM assignments WHERE id=?", (assignment_id,)).fetchone()
@@ -371,6 +398,25 @@ def teacher_report(db, token, tid):
 
 
 # ---------------------------------------------------------------- handlers
+
+def due_label(due_at):
+    return " (%s)" % due_at[:10] if due_at else ""
+
+
+def checklist_text(db, student, lang):
+    """Every open set, with a tick or an empty box per item."""
+    sets = core.open_sets(db, student["group_id"])
+    if not sets:
+        return t(lang, "hw_none")
+    blocks = []
+    for due_at, items in sets:
+        p = core.set_progress(db, student["id"], items)
+        lines = [t(lang, "hw_head", due=due_label(due_at), done=p["done"], total=p["total"])]
+        for a in items:
+            lines.append(("\u2705 " if a["id"] in p["done_ids"] else "\u2b1c ") + a["title"])
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
 
 def join_group(db, token, tid, name, code, lang):
     g = db.execute(
@@ -433,6 +479,11 @@ def handle_text(db, token, msg):
             send(token, tid, t(lang, "vocab_stats", known=v["known"], total=v["total"],
                                mastery=v["mastery"], accuracy=v["accuracy"], due=v["due"]))
         return
+
+    if text.startswith("/homework") or text.startswith("/hw"):
+        if not student:
+            return send(token, tid, t(lang, "no_group"))
+        return send(token, tid, checklist_text(db, student, lang))
 
     if text.startswith("/vocab"):
         if not student:
@@ -544,10 +595,15 @@ def handle_photo(db, token, msg):
         return send(token, tid, t(lang, "no_assignment"))
     kb = None
     if len(opens) > 1:
-        kb = [[{"text": a["title"][:60], "callback_data": f"pick:{sub_id}:{a['id']}"}]
+        done_ids = set()
+        for _due, items in core.open_sets(db, student["group_id"]):
+            done_ids |= core.set_progress(db, student["id"], items)["done_ids"]
+        kb = [[{"text": (("\u2705 " if a["id"] in done_ids else "\u2b1c ") + a["title"])[:60],
+                "callback_data": f"pick:{sub_id}:{a['id']}"}]
               for a in opens[:12]]
         return send(token, tid, t(lang, "which"), keyboard=kb)
-    return send(token, tid, t(lang, "received", title=opens[0]["title"]))
+    send(token, tid, t(lang, "received", title=opens[0]["title"]))
+    return send(token, tid, remaining_text(db, student, opens[0]["due_at"]))
 
 
 def handle_callback(db, token, cq):
@@ -610,8 +666,9 @@ def handle_callback(db, token, cq):
             (int(aid), int(sub_id), student["id"]),
         )
         db.commit()
-        a = db.execute("SELECT title FROM assignments WHERE id=?", (int(aid),)).fetchone()
-        return send(token, tid, t(student["lang"], "reassigned", title=a["title"]))
+        a = db.execute("SELECT * FROM assignments WHERE id=?", (int(aid),)).fetchone()
+        send(token, tid, t(student["lang"], "reassigned", title=a["title"]))
+        return send(token, tid, remaining_text(db, student, a["due_at"]))
 
 
 # -------------------------------------------------------------------- loop
