@@ -58,6 +58,11 @@ T = {
         'rating_you': 'You are {rank} of {total}.',
         'improve': 'Send an improved version',
         'typed': 'Type the English word for: {prompt}',
+        'vq_mode': 'How do you want to practise?',
+        'vq_len': 'How many words?',
+        'vq_scope': 'Which words?',
+        'vq_gap': 'Fill the gap:',
+        'vq_w2m': 'What does this word mean?',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -101,6 +106,11 @@ T = {
         'rating_you': 'Вы {rank} из {total}.',
         'improve': 'Отправить исправленный вариант',
         'typed': 'Напишите английское слово: {prompt}',
+        'vq_mode': 'Как будем тренироваться?',
+        'vq_len': 'Сколько слов?',
+        'vq_scope': 'Какие слова?',
+        'vq_gap': 'Заполните пропуск:',
+        'vq_w2m': 'Что означает это слово?',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -144,6 +154,11 @@ T = {
         'rating_you': "Siz {total} tadan {rank}-o'rindasiz.",
         'improve': 'Tuzatilgan variantni yuborish',
         'typed': "Inglizcha so'zni yozing: {prompt}",
+        'vq_mode': 'Qanday mashq qilamiz?',
+        'vq_len': "Nechta so'z?",
+        'vq_scope': "Qaysi so'zlar?",
+        'vq_gap': "Bo'sh joyni to'ldiring:",
+        'vq_w2m': "Bu so'z nimani anglatadi?",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -371,9 +386,50 @@ def lang_keyboard():
              {"text": "O'zbek", "callback_data": "lang:uz"}]]
 
 
-def start_quiz(db, token, student, list_id):
+MODE_LABELS = {
+    "en": {"m2w": "Meaning \u2192 word", "w2m": "Word \u2192 meaning",
+           "type": "Spell it", "gap": "Fill the gap", "mix": "Mixed"},
+    "ru": {"m2w": "Значение \u2192 слово", "w2m": "Слово \u2192 значение",
+           "type": "Написать слово", "gap": "Заполнить пропуск", "mix": "Смешанный"},
+    "uz": {"m2w": "Ma'no \u2192 so'z", "w2m": "So'z \u2192 ma'no",
+           "type": "So'zni yozing", "gap": "Bo'sh joyni to'ldirish", "mix": "Aralash"},
+}
+SCOPE_LABELS = {
+    "en": {"all": "Whole unit", "due": "Due for review", "new": "New words"},
+    "ru": {"all": "Весь юнит", "due": "На повторение", "new": "Новые слова"},
+    "uz": {"all": "Butun bo'lim", "due": "Takrorlash", "new": "Yangi so'zlar"},
+}
+
+
+def offer_modes(db, token, student, list_id):
     lang = student["lang"]
-    words = core.pick_quiz_words(db, student["id"], list_id)
+    labels = MODE_LABELS.get(lang, MODE_LABELS["en"])
+    kb = [[{"text": labels["mix"], "callback_data": f"vm:{list_id}:mix"}],
+          [{"text": labels["m2w"], "callback_data": f"vm:{list_id}:m2w"},
+           {"text": labels["w2m"], "callback_data": f"vm:{list_id}:w2m"}],
+          [{"text": labels["type"], "callback_data": f"vm:{list_id}:type"},
+           {"text": labels["gap"], "callback_data": f"vm:{list_id}:gap"}]]
+    return send(token, student["telegram_id"], t(lang, "vq_mode"), keyboard=kb)
+
+
+def offer_scope(db, token, student, list_id, mode):
+    lang = student["lang"]
+    labels = SCOPE_LABELS.get(lang, SCOPE_LABELS["en"])
+    kb = [[{"text": labels["all"], "callback_data": f"vs:{list_id}:{mode}:all"}],
+          [{"text": labels["due"], "callback_data": f"vs:{list_id}:{mode}:due"},
+           {"text": labels["new"], "callback_data": f"vs:{list_id}:{mode}:new"}]]
+    return send(token, student["telegram_id"], t(lang, "vq_scope"), keyboard=kb)
+
+
+def offer_length(db, token, student, list_id, mode, scope):
+    kb = [[{"text": str(n), "callback_data": f"vg:{list_id}:{mode}:{scope}:{n}"}
+           for n in core.QUIZ_LENGTHS]]
+    return send(token, student["telegram_id"], t(student["lang"], "vq_len"), keyboard=kb)
+
+
+def start_quiz(db, token, student, list_id, mode="mix", scope="all", count=10):
+    lang = student["lang"]
+    words = core.scope_words(db, student["id"], list_id, scope, count)
     if not words:
         return send(token, student["telegram_id"], t(lang, "vocab_none"))
     sid = db.execute(
@@ -382,7 +438,7 @@ def start_quiz(db, token, student, list_id):
     ).lastrowid
     db.commit()
     set_state(db, student["telegram_id"], "quiz", {
-        "session": sid, "list": list_id,
+        "session": sid, "list": list_id, "mode": mode,
         "queue": [w["id"] for w in words], "idx": 0, "correct": 0,
     })
     ask_question(db, token, student)
@@ -400,22 +456,33 @@ def ask_question(db, token, student):
         st["idx"] = idx + 1
         set_state(db, tid, "quiz", st)
         return ask_question(db, token, student)
-    st["current"] = word["id"]
+
     prog = db.execute(
         "SELECT streak FROM word_progress WHERE student_id=? AND word_id=?",
         (student["id"], word["id"]),
     ).fetchone()
-    # once a word is recognised reliably, ask them to produce it from memory
-    typed = bool(prog and prog["streak"] >= 3)
-    st["typed"] = typed
+    mode = core.pick_mode(st.get("mode", "mix"), word, prog["streak"] if prog else 0)
+
+    st["current"] = word["id"]
+    st["typed"] = mode in ("type", "gap")
     set_state(db, tid, "quiz", st)
-    head = t(lang, "vocab_q", i=idx + 1, n=len(queue), prompt=word["translation"])
-    if typed:
-        return send(token, tid, head + "\n\n" + t(lang, "typed", prompt=word["translation"]),
-                    markup=main_keyboard(lang))
+
+    counter = t(lang, "vocab_q", i=idx + 1, n=len(queue), prompt="").strip()
+    if mode == "gap":
+        body = t(lang, "vq_gap") + "\n\n" + core.gap_sentence(word)
+        return send(token, tid, counter + "\n\n" + body, markup=main_keyboard(lang))
+    if mode == "type":
+        body = t(lang, "typed", prompt=word["translation"])
+        return send(token, tid, counter + "\n\n" + body, markup=main_keyboard(lang))
+
+    if mode == "w2m":
+        prompt, options, label = word["term"], "translation", t(lang, "vq_w2m")
+    else:
+        prompt, options, label = word["translation"], "term", ""
     opts = core.quiz_options(db, st["list"], word)
-    kb = [[{"text": o["term"][:60], "callback_data": f"q:{st['session']}:{o['id']}"}]
+    kb = [[{"text": o[options][:60], "callback_data": f"q:{st['session']}:{o['id']}"}]
           for o in opts]
+    head = counter + "\n\n" + (label + "\n\n" if label else "") + prompt
     send(token, tid, head, keyboard=kb)
 
 
@@ -425,7 +492,7 @@ def answer_typed(db, token, student, text):
     word = db.execute("SELECT * FROM words WHERE id=?", (st.get("current"),)).fetchone()
     if not word:
         return
-    guess = " ".join(text.strip().lower().split())
+    guess = " ".join(text.strip().lower().split()).strip(".,!?;:")
     correct = guess == word["term"].strip().lower()
     core.record_answer(db, student["id"], word["id"], correct)
     lang = student["lang"]
@@ -741,7 +808,7 @@ def handle_text(db, token, msg):
         if not lists:
             return send(token, tid, t(lang, "vocab_none"))
         if len(lists) == 1:
-            return start_quiz(db, token, student, lists[0]["id"])
+            return offer_modes(db, token, student, lists[0]["id"])
         kb = [[{"text": wl["title"][:40], "callback_data": f"vl:{wl['id']}"}] for wl in lists]
         return send(token, tid, t(lang, "vocab_pick"), keyboard=kb)
 
@@ -931,7 +998,28 @@ def handle_callback(db, token, cq):
     if data.startswith("vl:"):
         student = student_of(db, tid)
         if student:
-            start_quiz(db, token, student, int(data.split(":")[1]))
+            offer_modes(db, token, student, int(data.split(":")[1]))
+        return
+
+    if data.startswith("vm:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, mode = data.split(":")
+            offer_scope(db, token, student, int(lid), mode)
+        return
+
+    if data.startswith("vs:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, mode, scope = data.split(":")
+            offer_length(db, token, student, int(lid), mode, scope)
+        return
+
+    if data.startswith("vg:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, mode, scope, n = data.split(":")
+            start_quiz(db, token, student, int(lid), mode, scope, int(n))
         return
 
     if data.startswith("q:"):

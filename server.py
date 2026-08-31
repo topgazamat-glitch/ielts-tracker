@@ -565,11 +565,14 @@ def view_vocab(req, db):
 Words they get wrong come back the next day; words they know come back later and later.</p>
 <div class="card"><form method="post" action="/vocab/new">
 <div class="inline" style="margin-bottom:10px">
-<label class="f">List title<input name="title" placeholder="Unit 4 – Environment" required></label>
+<label class="f">List title<input name="title" placeholder="Unit 15" required></label>
+<label class="f">Book<input name="source" placeholder="4000 Essential Words 1"></label>
+<label class="f">Unit<input name="unit" placeholder="15" style="width:80px"></label>
 <label class="f">Group<select name="group_id">{opts}</select></label></div>
-<label class="f">One word per line, as <code>word = meaning</code> (a dash also works)
+<label class="f">One per line: <code>word = meaning</code>, or
+<code>word = meaning | example sentence</code> to unlock fill-the-gap
 <textarea name="words" rows="8" style="width:100%"
-placeholder="scarce = tanqis / дефицитный&#10;mitigate = yumshatmoq / смягчать"></textarea></label>
+placeholder="abandon = tashlab ketmoq / покидать | They had to abandon the car.&#10;absolute = mutlaq / абсолютный"></textarea></label>
 <div style="margin-top:10px"><button>Create list</button></div></form></div>
 <div class="tablewrap"><table><tr><th>List</th><th>Group</th><th>Words</th>
 <th>Practising</th><th>Status</th></tr>
@@ -592,9 +595,10 @@ def view_word_list(req, db, wid):
         hard = acc is not None and acc < 60
         flag = '<span class="pill risk">hard</span>' if hard else ""
         shown = "—" if acc is None else f"{acc}%"
+        gap = "&#10003;" if w["example"] else '<span class="sub">—</span>'
         rows += (
             f'<tr><td>{E(w["term"])}</td><td class="sub">{E(w["translation"])}</td>'
-            f'<td>{agg["known"] or 0}</td><td>{shown}</td><td>{flag}</td></tr>'
+            f'<td>{gap}</td><td>{agg["known"] or 0}</td><td>{shown}</td><td>{flag}</td></tr>'
         )
     body = f"""<h1>{E(wl["title"])}</h1>
 <p class="sub">{E(group_name(db, wl["group_id"]))} · the “hard” flag marks words the
@@ -603,25 +607,40 @@ group answers correctly less than 60% of the time — worth reteaching.</p>
 <label class="f" style="flex:1">Add more words (one per line, <code>word = meaning</code>)
 <textarea name="words" rows="3" style="width:100%"></textarea></label>
 <button>Add</button></form></div>
-<div class="tablewrap"><table><tr><th>Word</th><th>Meaning</th><th>Students who know it</th>
-<th>Group accuracy</th><th></th></tr>
+<div class="tablewrap"><table><tr><th>Word</th><th>Meaning</th><th>Gap mode</th>
+<th>Students who know it</th><th>Group accuracy</th><th></th></tr>
 {rows or '<tr><td colspan=5 class="sub">Empty list.</td></tr>'}</table></div>"""
     return html_response(page(wl["title"], body, "Vocabulary"))
 
 
 def parse_words(text):
-    """Accepts 'word = meaning', 'word - meaning' or a tab between them."""
+    """One word per line. Accepts:
+
+        word = meaning
+        word = meaning | example sentence
+        word <tab> meaning <tab> example sentence
+
+    An example sentence unlocks the fill-the-gap mode for that word.
+    """
     out = []
     for line in (text or "").splitlines():
         line = line.strip()
         if not line:
             continue
-        for sep in ("\t", " = ", "=", " - ", " – ", " — "):
-            if sep in line:
-                term, _, meaning = line.partition(sep)
-                if term.strip() and meaning.strip():
-                    out.append((term.strip()[:80], meaning.strip()[:120]))
-                break
+        parts = None
+        if "\t" in line:
+            parts = [p.strip() for p in line.split("\t")]
+        else:
+            for sep in (" = ", "=", " - ", " \u2013 ", " \u2014 "):
+                if sep in line:
+                    head, _, rest = line.partition(sep)
+                    parts = [head.strip()] + [p.strip() for p in rest.split("|", 1)]
+                    break
+        if not parts or len(parts) < 2 or not parts[0] or not parts[1]:
+            continue
+        term, meaning = parts[0][:80], parts[1][:200]
+        example = parts[2][:300] if len(parts) > 2 and parts[2] else None
+        out.append((term, meaning, example))
     return out
 
 
@@ -633,12 +652,15 @@ def act_new_word_list(req, db):
     if not title or not pairs:
         return redirect("/vocab")
     wid = db.execute(
-        "INSERT INTO word_lists (group_id, title, created_at) VALUES (?,?,?)",
-        (int(gid) if gid else None, title, core.iso(core.now())),
+        "INSERT INTO word_lists (group_id, title, created_at, source, unit)"
+        " VALUES (?,?,?,?,?)",
+        (int(gid) if gid else None, title, core.iso(core.now()),
+         (f.get("source", [""])[0] or "").strip()[:80] or None,
+         (f.get("unit", [""])[0] or "").strip()[:40] or None),
     ).lastrowid
-    for i, (term, meaning) in enumerate(pairs):
-        db.execute("INSERT INTO words (list_id, term, translation, ord) VALUES (?,?,?,?)",
-                   (wid, term, meaning, i))
+    for i, (term, meaning, example) in enumerate(pairs):
+        db.execute("INSERT INTO words (list_id, term, translation, example, ord)"
+                   " VALUES (?,?,?,?,?)", (wid, term, meaning, example, i))
     db.commit()
     return redirect(f"/vocab/{wid}")
 
@@ -646,9 +668,9 @@ def act_new_word_list(req, db):
 def act_add_words(req, db, wid):
     pairs = parse_words(req["form"].get("words", [""])[0])
     start = db.execute("SELECT COUNT(*) c FROM words WHERE list_id=?", (wid,)).fetchone()["c"]
-    for i, (term, meaning) in enumerate(pairs):
-        db.execute("INSERT INTO words (list_id, term, translation, ord) VALUES (?,?,?,?)",
-                   (wid, term, meaning, start + i))
+    for i, (term, meaning, example) in enumerate(pairs):
+        db.execute("INSERT INTO words (list_id, term, translation, example, ord)"
+                   " VALUES (?,?,?,?,?)", (wid, term, meaning, example, start + i))
     db.commit()
     return redirect(f"/vocab/{wid}")
 

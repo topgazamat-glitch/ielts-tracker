@@ -240,6 +240,14 @@ def migrate(db):
         created_at TEXT NOT NULL
     );
     """)
+    wcols = {r["name"] for r in db.execute("PRAGMA table_info(words)")}
+    if "example" not in wcols:
+        db.execute("ALTER TABLE words ADD COLUMN example TEXT")
+    lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
+    if "source" not in lcols:
+        db.execute("ALTER TABLE word_lists ADD COLUMN source TEXT")
+    if "unit" not in lcols:
+        db.execute("ALTER TABLE word_lists ADD COLUMN unit TEXT")
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "published" not in acols:
         # assignments that already existed were live, so they stay live
@@ -665,3 +673,64 @@ def due_in_words(due_at):
     if hours < 24:
         return "%d hours left" % int(hours)
     return "%d days left" % round(hours / 24)
+
+
+# --------------------------------------------------------- quiz modes
+
+QUIZ_MODES = {
+    "m2w": "Meaning to word",       # shows the meaning, pick the English word
+    "w2m": "Word to meaning",       # shows the word, pick the meaning
+    "type": "Spell it",             # shows the meaning, type the word
+    "gap": "Fill the gap",          # example sentence with the word removed
+    "mix": "Mixed",                 # a bit of everything, hardest last
+}
+QUIZ_LENGTHS = (5, 10, 20)
+
+
+def gap_sentence(word):
+    """The example with the word blanked out, or None if it cannot be made."""
+    example = word["example"] if "example" in word.keys() else None
+    if not example:
+        return None
+    term = word["term"].strip()
+    low, lowterm = example.lower(), term.lower()
+    i = low.find(lowterm)
+    if i < 0:
+        return None
+    return example[:i] + "_" * max(4, len(term)) + example[i + len(term):]
+
+
+def pick_mode(mode, word, streak):
+    """For 'mix', choose a mode that suits how well the word is known."""
+    if mode != "mix":
+        if mode == "gap" and gap_sentence(word) is None:
+            return "m2w"
+        return mode
+    if streak >= 3 and gap_sentence(word) is not None:
+        return "gap"
+    if streak >= 2:
+        return "type"
+    if streak >= 1:
+        return "w2m"
+    return "m2w"
+
+
+def scope_words(db, student_id, list_id, scope, count):
+    """scope: 'due' (review), 'new' (never seen) or 'all'."""
+    rows = db.execute(
+        "SELECT w.*, p.next_due, p.seen, p.streak FROM words w"
+        " LEFT JOIN word_progress p ON p.word_id=w.id AND p.student_id=?"
+        " WHERE w.list_id=?", (student_id, list_id)
+    ).fetchall()
+    stamp = iso(now())
+    import random
+    if scope == "due":
+        pool = [w for w in rows if w["next_due"] and w["next_due"] <= stamp]
+    elif scope == "new":
+        pool = [w for w in rows if not w["seen"]]
+    else:
+        pool = list(rows)
+    if not pool:
+        pool = list(rows)
+    random.shuffle(pool)
+    return pool[:count]
