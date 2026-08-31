@@ -33,7 +33,7 @@ def page(title, body, active=""):
 <link rel="stylesheet" href="/static/style.css"></head><body>
 <header class="top"><span class="brand">Teaching Assistant</span><nav>
 {nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/groups', 'Groups')}
-{nav('/assignments', 'Assignments')}{nav('/homework', 'Homework')}{nav('/vocab', 'Vocabulary')}{nav('/roster', 'Students')}</nav>
+{nav('/assignments', 'Assignments')}{nav('/homework', 'Homework')}{nav('/ratings', 'Ratings')}{nav('/questions', 'Questions')}{nav('/vocab', 'Vocabulary')}{nav('/roster', 'Students')}</nav>
 <span class="right"><a href="/logout">Sign out</a></span></header>
 <main>{body}</main></body></html>"""
 
@@ -189,7 +189,10 @@ def view_queue(req, db):
     <div class="card">
       <div style="font-weight:600">{E(student["name"])}</div>
       <div class="sub" style="margin:2px 0 0">{E(group_name(db, student["group_id"]))} ·
-        {E(assignment["title"]) if assignment else "unassigned"}</div>
+        {E(assignment["title"]) if assignment else "unassigned"}
+        {'<span class="pill risk">late</span>' if sub["late"] else ''}
+        {'<span class="pill mute">speaking</span>' if sub["kind"] == "voice" else ''}
+        {'<span class="pill mute">resubmission</span>' if sub["improves"] else ''}</div>
       <div class="sub" style="margin:6px 0 0">{E(prev)}</div>
     </div>
     <form method="post" action="/grade" id="gform" class="card">
@@ -418,6 +421,19 @@ box.value = location.origin + box.value;
 function copyLink() {{
   box.select(); navigator.clipboard.writeText(box.value);
 }}
+</script>
+<h2>Parent link</h2>
+<div class="card">
+<p class="sub" style="margin:0 0 8px">Optional. A parent who taps this gets a weekly
+summary of {E(s["name"])}'s completion and average — nothing else.</p>
+<input readonly id="klink" value="/start P{E(core.parent_token(db, s['id']))}"
+       style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:13px">
+</div>
+<script>
+const kb = document.getElementById('klink');
+const botUser = "{E(core.meta_get(db, 'bot_username', '') or '')}";
+kb.value = botUser ? "https://t.me/" + botUser + "?start=P{E(core.parent_token(db, s['id']))}"
+                   : "Run the bot once to generate this link";
 </script>
 <h2>Settings</h2>
 <div class="card"><form method="post" action="/students/{s['id']}/update" class="inline">
@@ -790,6 +806,105 @@ ordered worst first, so whoever needs chasing is at the top.</p>{blocks}"""
     return html_response(page("Homework", body, "Homework"))
 
 
+
+def view_ratings(req, db):
+    """Live standings: completion first, then average score."""
+    gid = req["query"].get("group", [None])[0]
+    gid = int(gid) if gid and gid.isdigit() else None
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    tabs = '<a href="/ratings">All groups</a> · ' + " · ".join(
+        f'<a href="/ratings?group={g["id"]}">{E(g["name"])}</a>' for g in groups)
+    rows = core.rating_rows(db, gid)
+    medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
+    body_rows = ""
+    for r in rows:
+        st = r["student"]
+        comp = r["completion"] if r["completion"] is not None else 0
+        bar = (f'<div style="background:var(--line);border-radius:4px;height:8px;width:90px">'
+               f'<div style="background:{"var(--warn)" if comp < 50 else "var(--accent)"};'
+               f'height:8px;border-radius:4px;width:{comp}%"></div></div>')
+        streak = f'&#128293; {r["streak"]}' if r["streak"] >= 2 else ""
+        body_rows += (
+            f'<tr><td>{medals.get(r["rank"], str(r["rank"]) + ".")}</td>'
+            f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>'
+            f'<td>{E(group_name(db, st["group_id"]))}</td>'
+            f'<td>{bar}</td><td>{comp}%</td>'
+            f'<td>{score_pill(r["average"])}</td><td>{r["graded"]}</td>'
+            f'<td>{r["missed"]}</td><td>{streak}</td><td>{r["vocab"]}</td></tr>'
+        )
+    dl = f'/export.csv?group={gid}' if gid else '/export.csv'
+    body = f"""<h1>Ratings</h1>
+<p class="sub">Ranked by homework completed first, then average score — effort is the
+part a student controls. {tabs}</p>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Group</th>
+<th>Completion</th><th></th><th>Average</th><th>Graded</th><th>Missed</th>
+<th>Streak</th><th>Words</th></tr>
+{body_rows or '<tr><td colspan=10 class="sub">Nobody has joined yet.</td></tr>'}</table></div>
+<p><a href="{dl}">Download as CSV</a> — opens in Excel.</p>"""
+    return html_response(page("Ratings", body, "Ratings"))
+
+
+def view_questions(req, db):
+    rows = ""
+    for q in db.execute(
+        "SELECT q.*, s.name FROM questions q JOIN students s ON s.id=q.student_id"
+        " ORDER BY q.answered_at IS NOT NULL, q.created_at DESC LIMIT 100"
+    ).fetchall():
+        if q["answer"]:
+            action = f'<span class="sub">{E(q["answer"][:120])}</span>'
+        else:
+            action = (f'<form method="post" action="/questions/{q["id"]}/answer" class="inline">'
+                      f'<input name="answer" placeholder="Your answer" style="flex:1;min-width:220px">'
+                      f'<button>Send</button></form>')
+        rows += (f'<tr><td>{E(q["name"])}</td><td>{E(q["text"][:200])}</td>'
+                 f'<td>{E(q["created_at"][:16].replace("T", " "))}</td><td>{action}</td></tr>')
+    body = f"""<h1>Questions</h1>
+<p class="sub">Students ask with the “Ask teacher” button. Your answer goes back to
+them in Telegram.</p>
+<div class="tablewrap"><table><tr><th>Student</th><th>Question</th><th>Asked</th>
+<th>Answer</th></tr>
+{rows or '<tr><td colspan=4 class="sub">No questions yet.</td></tr>'}</table></div>"""
+    return html_response(page("Questions", body, "Questions"))
+
+
+def act_answer_question(req, db, qid):
+    answer = (req["form"].get("answer", [""])[0] or "").strip()
+    if not answer:
+        return redirect("/questions")
+    q = db.execute("SELECT * FROM questions WHERE id=?", (qid,)).fetchone()
+    if not q:
+        return redirect("/questions")
+    db.execute("UPDATE questions SET answer=?, answered_at=? WHERE id=?",
+               (answer, core.iso(core.now()), qid))
+    db.commit()
+    token = core.load_config().get("telegram_token")
+    st = db.execute("SELECT telegram_id, lang FROM students WHERE id=?",
+                    (q["student_id"],)).fetchone()
+    if token and st and st["telegram_id"]:
+        import bot
+        bot.send(token, st["telegram_id"], bot.t(st["lang"], "ask_answer", answer=answer))
+    return redirect("/questions")
+
+
+def view_export(req, db):
+    gid = req["query"].get("group", [None])[0]
+    gid = int(gid) if gid and gid.isdigit() else None
+    out = ["rank,name,group,completion_percent,average_score,graded,missed,streak,words_known"]
+    for r in core.rating_rows(db, gid):
+        st = r["student"]
+        name = '"%s"' % st["name"].replace('"', "'")
+        out.append(",".join(str(x) for x in [
+            r["rank"], name, '"%s"' % group_name(db, st["group_id"]),
+            r["completion"] if r["completion"] is not None else "",
+            r["average"] if r["average"] is not None else "",
+            r["graded"], r["missed"], r["streak"], r["vocab"],
+        ]))
+    payload = "\n".join(out).encode("utf-8-sig")   # BOM so Excel reads it correctly
+    return 200, [("Content-Type", "text/csv; charset=utf-8"),
+                 ("Content-Disposition", 'attachment; filename="ratings.csv"'),
+                 ("Content-Length", str(len(payload)))], payload
+
+
 # ----------------------------------------------------------------- actions
 
 def act_grade(req, db):
@@ -837,7 +952,8 @@ def notify_graded(db, sid):
     ]
     import bot  # local import keeps the web app importable without the bot
 
-    bot.send_score(token, row["telegram_id"], row["lang"], row["title"], row["score"], tags, row["note"])
+    bot.send_score(token, row["telegram_id"], row["lang"], row["title"], row["score"],
+                   tags, row["note"], sid)
 
 
 def act_skip(req, db):
@@ -1016,6 +1132,10 @@ ROUTES = [
     ("GET", r"^/assignments$", view_assignments),
     ("GET", r"^/roster$", view_roster),
     ("GET", r"^/homework$", view_homework),
+    ("GET", r"^/ratings$", view_ratings),
+    ("GET", r"^/questions$", view_questions),
+    ("GET", r"^/export\.csv$", view_export),
+    ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
     ("GET", r"^/skip$", act_skip),
@@ -1063,7 +1183,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*not_found())
         with open(full, "rb") as fh:
             data = fh.read()
-        self._send(200, [("Content-Type", "image/jpeg"), ("Content-Length", str(len(data))),
+        ctype = ("audio/ogg" if name.endswith((".oga", ".ogg"))
+                 else "image/png" if name.endswith(".png") else "image/jpeg")
+        self._send(200, [("Content-Type", ctype), ("Content-Length", str(len(data))),
                          ("Cache-Control", "private, max-age=3600")], data)
 
     def _student_get(self, path, query):

@@ -164,6 +164,54 @@ def deadline_summary(db, token, cfg):
     return sent
 
 
+def parent_weekly(db, token, cfg):
+    """A short weekly note to any parent who has used their link."""
+    week = (core.now() + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%G-W%V")
+    sent = 0
+    for p in db.execute(
+        "SELECT * FROM parents WHERE telegram_id IS NOT NULL"
+    ).fetchall():
+        key = f"{p['id']}:{week}"
+        if core.already_sent(db, "parent", key):
+            continue
+        st = db.execute("SELECT * FROM students WHERE id=?", (p["student_id"],)).fetchone()
+        if not st:
+            core.mark_sent(db, "parent", key)
+            continue
+        s = core.student_stats(db, st["id"])
+        msg = ("Weekly summary for %s\n"
+               "Homework completed: %s%%\n"
+               "Average score: %s/10\n"
+               "Missed: %d") % (
+            st["name"],
+            s["completion"] if s["completion"] is not None else "-",
+            s["average"] if s["average"] is not None else "-",
+            s["missed"])
+        _send(token, p["telegram_id"], msg)
+        core.mark_sent(db, "parent", key)
+        sent += 1
+    return sent
+
+
+def vocab_due(db, token, cfg):
+    """Once a day, tell students how many words are waiting for review."""
+    day = (core.now() + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%Y-%m-%d")
+    sent = 0
+    for st in db.execute(
+        "SELECT * FROM students WHERE active=1 AND telegram_id IS NOT NULL"
+    ).fetchall():
+        key = f"{st['id']}:{day}"
+        if core.already_sent(db, "vocabdue", key):
+            continue
+        v = core.vocab_stats(db, st["id"])
+        core.mark_sent(db, "vocabdue", key)
+        if v["due"] >= 5:
+            _send(token, st["telegram_id"],
+                  "%d words are ready to review. Tap Practise words." % v["due"])
+            sent += 1
+    return sent
+
+
 def teacher_digest(db, token, cfg):
     """Once a week: who is slipping, and how big the queue is."""
     week = (core.now() + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%G-W%V")
@@ -253,6 +301,8 @@ def tick(cfg):
             done["missed"] = missed_nudges(db, token, cfg)
             done["summary"] = deadline_summary(db, token, cfg)
             done["digest"] = teacher_digest(db, token, cfg)
+            done["parents"] = parent_weekly(db, token, cfg)
+            done["vocab_due"] = vocab_due(db, token, cfg)
     finally:
         db.close()
     return done

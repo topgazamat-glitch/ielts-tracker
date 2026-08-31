@@ -51,6 +51,13 @@ T = {
         'hw_left': 'Still to send: {items}',
         'hw_all': 'All done. Nicely finished.',
         'hw_chase': '{done}/{total} done{due}. Still missing: {items}',
+        'ask_prompt': 'What is your question? Write it in one message.',
+        'ask_sent': 'Sent to your teacher. You will get an answer here.',
+        'ask_answer': 'Your teacher answered:\\n\\n{answer}',
+        'rating_head': 'Class standings — {group}',
+        'rating_you': 'You are {rank} of {total}.',
+        'improve': 'Send an improved version',
+        'typed': 'Type the English word for: {prompt}',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -87,6 +94,13 @@ T = {
         'hw_left': 'Осталось отправить: {items}',
         'hw_all': 'Всё сделано. Отлично.',
         'hw_chase': 'Сделано {done}/{total}{due}. Не хватает: {items}',
+        'ask_prompt': 'Какой у вас вопрос? Напишите одним сообщением.',
+        'ask_sent': 'Отправлено преподавателю. Ответ придёт сюда.',
+        'ask_answer': 'Преподаватель ответил:\\n\\n{answer}',
+        'rating_head': 'Рейтинг группы — {group}',
+        'rating_you': 'Вы {rank} из {total}.',
+        'improve': 'Отправить исправленный вариант',
+        'typed': 'Напишите английское слово: {prompt}',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -123,6 +137,13 @@ T = {
         'hw_left': 'Yuborish kerak: {items}',
         'hw_all': 'Hammasi bajarildi. Barakalla.',
         'hw_chase': '{done}/{total} bajarildi{due}. Qolgani: {items}',
+        'ask_prompt': 'Savolingiz nima? Bitta xabarda yozing.',
+        'ask_sent': "O'qituvchiga yuborildi. Javob shu yerga keladi.",
+        'ask_answer': "O'qituvchi javob berdi:\\n\\n{answer}",
+        'rating_head': 'Guruh reytingi — {group}',
+        'rating_you': "Siz {total} tadan {rank}-o'rindasiz.",
+        'improve': 'Tuzatilgan variantni yuborish',
+        'typed': "Inglizcha so'zni yozing: {prompt}",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -149,19 +170,24 @@ def call(token, method, **params):
         return {"ok": False, "error": str(e)}
 
 
-def send(token, chat_id, text, keyboard=None):
-    return call(token, "sendMessage", chat_id=chat_id, text=text,
-                reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+def send(token, chat_id, text, keyboard=None, markup=None):
+    if markup is None and keyboard:
+        markup = {"inline_keyboard": keyboard}
+    return call(token, "sendMessage", chat_id=chat_id, text=text, reply_markup=markup)
 
 
-def send_score(token, chat_id, lang, title, score, tags, note):
-    """Called by the dashboard right after the teacher saves a grade."""
-    lines = [t(lang or "en", "scored", title=title or "homework", score=f"{score:g}")]
+def send_score(token, chat_id, lang, title, score, tags, note, sub_id=None):
+    """Called right after a grade is saved, from the dashboard or from Telegram."""
+    lang = lang or "en"
+    lines = [t(lang, "scored", title=title or "homework", score=f"{score:g}")]
     if tags:
         lines.append("• " + "\n• ".join(tags))
     if note:
         lines.append(note)
-    send(token, chat_id, "\n\n".join(lines))
+    kb = None
+    if sub_id and score is not None and score < 8:
+        kb = [[{"text": t(lang, "improve"), "callback_data": f"imp:{sub_id}"}]]
+    send(token, chat_id, "\n\n".join(lines), keyboard=kb)
 
 
 def send_photo(token, chat_id, png_bytes, caption=""):
@@ -190,6 +216,60 @@ def send_photo(token, chat_id, png_bytes, caption=""):
             return json.load(r)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def notify_teachers_new(db, token, sub_id):
+    """Push a new submission to the teacher with 1-10 buttons underneath."""
+    teachers = json.loads(core.meta_get(db, "teachers", "[]"))
+    if not teachers:
+        return 0
+    sub = db.execute(
+        "SELECT s.*, st.name, g.name gname, a.title FROM submissions s"
+        " JOIN students st ON st.id=s.student_id"
+        " LEFT JOIN groups g ON g.id=st.group_id"
+        " LEFT JOIN assignments a ON a.id=s.assignment_id WHERE s.id=?",
+        (sub_id,),
+    ).fetchone()
+    if not sub:
+        return 0
+    f = db.execute(
+        "SELECT telegram_file_id FROM files WHERE submission_id=? ORDER BY ord LIMIT 1",
+        (sub_id,),
+    ).fetchone()
+    caption = "%s · %s\n%s%s" % (sub["name"], sub["gname"] or "-",
+                                 sub["title"] or "unassigned",
+                                 "  (LATE)" if sub["late"] else "")
+    kb = [[{"text": str(n), "callback_data": f"g:{sub_id}:{n}"} for n in (1, 2, 3, 4, 5)],
+          [{"text": str(n), "callback_data": f"g:{sub_id}:{n}"} for n in (6, 7, 8, 9, 10)]]
+    markup = {"inline_keyboard": kb}
+    for tid in teachers:
+        if f and f["telegram_file_id"]:
+            method = "sendVoice" if sub["kind"] == "voice" else "sendPhoto"
+            key = "voice" if sub["kind"] == "voice" else "photo"
+            call(token, method, chat_id=tid, caption=caption, reply_markup=markup,
+                 **{key: f["telegram_file_id"]})
+        else:
+            send(token, tid, caption, markup=markup)
+    return len(teachers)
+
+
+def grade_submission(db, token, sub_id, score):
+    """Score a submission from Telegram and tell the student straight away."""
+    db.execute(
+        "UPDATE submissions SET status='graded', score=?, graded_at=? WHERE id=?",
+        (float(score), core.iso(core.now()), sub_id),
+    )
+    db.commit()
+    row = db.execute(
+        "SELECT s.score, s.note, st.telegram_id, st.lang, a.title FROM submissions s"
+        " JOIN students st ON st.id=s.student_id"
+        " LEFT JOIN assignments a ON a.id=s.assignment_id WHERE s.id=?",
+        (sub_id,),
+    ).fetchone()
+    if row and row["telegram_id"]:
+        send_score(token, row["telegram_id"], row["lang"], row["title"],
+                   row["score"], [], row["note"], sub_id)
+    return row
 
 
 def download_photo(token, file_id, dest_name):
@@ -240,6 +320,43 @@ def open_assignments(db, group_id):
 
 # ------------------------------------------------------------ vocabulary
 
+BUTTONS = {
+    "en": ["\U0001F4CB What's left", "\U0001F4CA My progress",
+           "\U0001F4DA Practise words", "\U0001F3C6 Rating",
+           "\u2753 Ask teacher"],
+    "ru": ["\U0001F4CB Что осталось", "\U0001F4CA Мой прогресс",
+           "\U0001F4DA Учить слова", "\U0001F3C6 Рейтинг",
+           "\u2753 Вопрос учителю"],
+    "uz": ["\U0001F4CB Nima qoldi", "\U0001F4CA Natijam",
+           "\U0001F4DA So'z mashqi", "\U0001F3C6 Reyting",
+           "\u2753 Savol berish"],
+}
+# every label, in every language, mapped to the command it stands for
+BUTTON_COMMANDS = {}
+for _lang, _labels in BUTTONS.items():
+    for _cmd, _label in zip(("/homework", "/progress", "/vocab", "/rating", "/ask"), _labels):
+        BUTTON_COMMANDS[_label] = _cmd
+
+
+def main_keyboard(lang):
+    b = BUTTONS.get(lang, BUTTONS["en"])
+    return {"keyboard": [[b[0], b[1]], [b[2], b[3]], [b[4]]],
+            "resize_keyboard": True, "is_persistent": True}
+
+
+def set_commands(token):
+    """The menu button next to the message box."""
+    for lang, labels in (("en", None), ("ru", None), ("uz", None)):
+        call(token, "setMyCommands", language_code=lang, commands=[
+            {"command": "homework", "description": "what is left to do"},
+            {"command": "progress", "description": "my scores and chart"},
+            {"command": "vocab", "description": "practise vocabulary"},
+            {"command": "rating", "description": "class standings"},
+            {"command": "ask", "description": "ask the teacher a question"},
+            {"command": "language", "description": "change language"},
+        ])
+
+
 def lang_keyboard():
     return [[{"text": "English", "callback_data": "lang:en"},
              {"text": "Русский", "callback_data": "lang:ru"},
@@ -275,13 +392,45 @@ def ask_question(db, token, student):
         st["idx"] = idx + 1
         set_state(db, tid, "quiz", st)
         return ask_question(db, token, student)
-    opts = core.quiz_options(db, st["list"], word)
     st["current"] = word["id"]
+    prog = db.execute(
+        "SELECT streak FROM word_progress WHERE student_id=? AND word_id=?",
+        (student["id"], word["id"]),
+    ).fetchone()
+    # once a word is recognised reliably, ask them to produce it from memory
+    typed = bool(prog and prog["streak"] >= 3)
+    st["typed"] = typed
     set_state(db, tid, "quiz", st)
+    head = t(lang, "vocab_q", i=idx + 1, n=len(queue), prompt=word["translation"])
+    if typed:
+        return send(token, tid, head + "\n\n" + t(lang, "typed", prompt=word["translation"]),
+                    markup=main_keyboard(lang))
+    opts = core.quiz_options(db, st["list"], word)
     kb = [[{"text": o["term"][:60], "callback_data": f"q:{st['session']}:{o['id']}"}]
           for o in opts]
-    send(token, tid, t(lang, "vocab_q", i=idx + 1, n=len(queue),
-                       prompt=word["translation"]), keyboard=kb)
+    send(token, tid, head, keyboard=kb)
+
+
+def answer_typed(db, token, student, text):
+    tid = student["telegram_id"]
+    step, st = get_state(db, tid)
+    word = db.execute("SELECT * FROM words WHERE id=?", (st.get("current"),)).fetchone()
+    if not word:
+        return
+    guess = " ".join(text.strip().lower().split())
+    correct = guess == word["term"].strip().lower()
+    core.record_answer(db, student["id"], word["id"], correct)
+    lang = student["lang"]
+    if correct:
+        st["correct"] += 1
+        send(token, tid, t(lang, "vocab_right"))
+    else:
+        send(token, tid, t(lang, "vocab_wrong", term=word["term"]))
+    st["idx"] += 1
+    st.pop("current", None)
+    st["typed"] = False
+    set_state(db, tid, "quiz", st)
+    ask_question(db, token, student)
 
 
 def answer_question(db, token, student, chosen_id):
@@ -403,6 +552,36 @@ def due_label(due_at):
     return " (%s)" % due_at[:10] if due_at else ""
 
 
+def rating_text(db, student):
+    """Top of the class, plus the student's own line, always visible."""
+    lang = student["lang"]
+    g = db.execute("SELECT name FROM groups WHERE id=?", (student["group_id"],)).fetchone()
+    rows = core.rating_rows(db, student["group_id"])
+    if not rows:
+        return t(lang, "hw_none")
+    lines = [t(lang, "rating_head", group=g["name"] if g else "")]
+    medals = {1: "\U0001F947", 2: "\U0001F948", 3: "\U0001F949"}
+    mine = next((r for r in rows if r["student"]["id"] == student["id"]), None)
+    for r in rows[:5]:
+        mark = medals.get(r["rank"], "%d." % r["rank"])
+        you = "  \u2190" if mine and r["rank"] == mine["rank"] else ""
+        lines.append("%s %s — %s%% done, %s/10%s" % (
+            mark, r["student"]["name"], r["completion"] if r["completion"] is not None else 0,
+            r["average"] if r["average"] is not None else "-", you))
+    if mine and mine["rank"] > 5:
+        lines.append("...")
+        lines.append("%d. %s — %s%% done, %s/10  \u2190" % (
+            mine["rank"], mine["student"]["name"],
+            mine["completion"] if mine["completion"] is not None else 0,
+            mine["average"] if mine["average"] is not None else "-"))
+    if mine:
+        lines.append("")
+        lines.append(t(lang, "rating_you", rank=mine["rank"], total=len(rows)))
+        if mine["streak"] >= 2:
+            lines.append("\U0001F525 %d in a row" % mine["streak"])
+    return "\n".join(lines)
+
+
 def checklist_text(db, student, lang):
     """Every open set, with a tick or an empty box per item."""
     sets = core.open_sets(db, student["group_id"])
@@ -411,7 +590,11 @@ def checklist_text(db, student, lang):
     blocks = []
     for due_at, items in sets:
         p = core.set_progress(db, student["id"], items)
-        lines = [t(lang, "hw_head", due=due_label(due_at), done=p["done"], total=p["total"])]
+        left = core.due_in_words(due_at)
+        head_due = due_label(due_at)
+        if left:
+            head_due = " (%s, %s)" % (due_at[:10], left)
+        lines = [t(lang, "hw_head", due=head_due, done=p["done"], total=p["total"])]
         for a in items:
             lines.append(("\u2705 " if a["id"] in p["done_ids"] else "\u2b1c ") + a["title"])
         blocks.append("\n".join(lines))
@@ -436,22 +619,69 @@ def join_group(db, token, tid, name, code, lang):
         )
     db.commit()
     set_state(db, tid, None)
-    send(token, tid, t(lang, "joined", group=g["name"]))
+    send(token, tid, t(lang, "joined", group=g["name"]), markup=main_keyboard(lang))
     return send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
 
 
 def handle_text(db, token, msg):
     tid = msg["from"]["id"]
     text = (msg.get("text") or "").strip()
+    text = BUTTON_COMMANDS.get(text, text)
     student = student_of(db, tid)
     lang = student["lang"] if student else "en"
     step, payload = get_state(db, tid)
+
+    # a teacher answering a question, or anyone mid-question, is handled first
+    if step == "answer" and text and not text.startswith("/"):
+        qid = payload.get("question")
+        q = db.execute("SELECT * FROM questions WHERE id=?", (qid,)).fetchone()
+        set_state(db, tid, None)
+        if q:
+            db.execute("UPDATE questions SET answer=?, answered_at=? WHERE id=?",
+                       (text, core.iso(core.now()), qid))
+            db.commit()
+            target = db.execute("SELECT telegram_id, lang FROM students WHERE id=?",
+                                (q["student_id"],)).fetchone()
+            if target and target["telegram_id"]:
+                send(token, target["telegram_id"],
+                     t(target["lang"], "ask_answer", answer=text))
+            return send(token, tid, "Answer sent.")
+        return send(token, tid, "That question is gone.")
+
+    if step == "ask" and text and not text.startswith("/"):
+        set_state(db, tid, None)
+        if not student:
+            return send(token, tid, t(lang, "no_group"))
+        qid = db.execute(
+            "INSERT INTO questions (student_id, text, created_at) VALUES (?,?,?)",
+            (student["id"], text[:1000], core.iso(core.now())),
+        ).lastrowid
+        db.commit()
+        for teacher in json.loads(core.meta_get(db, "teachers", "[]")):
+            send(token, teacher, "Question from %s:\n\n%s" % (student["name"], text[:1000]),
+                 keyboard=[[{"text": "Answer", "callback_data": f"ans:{qid}"}]])
+        return send(token, tid, t(lang, "ask_sent"))
+
+    if step == "quiz" and payload.get("typed") and text and not text.startswith("/"):
+        return answer_typed(db, token, student, text)
 
     if text.startswith("/start"):
         # "https://t.me/yourbot?start=AB12CD" arrives here as "/start AB12CD"
         parts = text.split(maxsplit=1)
         payload = parts[1].strip().upper() if len(parts) > 1 else ""
         carried = {}
+        if payload.startswith("P") and len(payload) > 8:
+            # a parent link, not a student one
+            row = db.execute("SELECT * FROM parents WHERE token=?", (parts[1].strip()[1:],)).fetchone()
+            if row:
+                db.execute("UPDATE parents SET telegram_id=? WHERE id=?", (tid, row["id"]))
+                db.commit()
+                child = db.execute("SELECT name FROM students WHERE id=?",
+                                   (row["student_id"],)).fetchone()
+                return send(token, tid,
+                            "You will get a weekly summary for %s here."
+                            % (child["name"] if child else "your child"))
+            return send(token, tid, "That parent link is not valid.")
         if payload:
             g = db.execute(
                 "SELECT * FROM groups WHERE join_code=? AND archived=0", (payload,)
@@ -484,6 +714,17 @@ def handle_text(db, token, msg):
         if not student:
             return send(token, tid, t(lang, "no_group"))
         return send(token, tid, checklist_text(db, student, lang))
+
+    if text.startswith("/ask"):
+        if not student:
+            return send(token, tid, t(lang, "no_group"))
+        set_state(db, tid, "ask")
+        return send(token, tid, t(lang, "ask_prompt"))
+
+    if text.startswith("/rating"):
+        if not student:
+            return send(token, tid, t(lang, "no_group"))
+        return send(token, tid, rating_text(db, student))
 
     if text.startswith("/vocab"):
         if not student:
@@ -565,10 +806,20 @@ def handle_photo(db, token, msg):
     if first_page:
         opens = open_assignments(db, student["group_id"])
         aid = opens[0]["id"] if opens else None
+        due = opens[0]["due_at"] if opens else None
+        for a in opens:
+            if a["id"] == aid:
+                due = a["due_at"]
+        late = 1 if (due and due < core.iso(core.now())) else 0
+        improves = None
+        step, stt = get_state(db, tid)
+        if step == "improve":
+            improves = stt.get("submission")
+            set_state(db, tid, None)
         cur = db.execute(
-            "INSERT INTO submissions (student_id, assignment_id, created_at, media_group_id)"
-            " VALUES (?,?,?,?)",
-            (student["id"], aid, core.iso(core.now()), mgid),
+            "INSERT INTO submissions (student_id, assignment_id, created_at,"
+            " media_group_id, late, improves) VALUES (?,?,?,?,?,?)",
+            (student["id"], aid, core.iso(core.now()), mgid, late, improves),
         )
         db.commit()
         sub_id = cur.lastrowid
@@ -591,6 +842,7 @@ def handle_photo(db, token, msg):
 
     if not first_page:
         return  # stay quiet for the rest of an album
+    notify_teachers_new(db, token, sub_id)
     if not opens:
         return send(token, tid, t(lang, "no_assignment"))
     kb = None
@@ -606,6 +858,40 @@ def handle_photo(db, token, msg):
     return send(token, tid, remaining_text(db, student, opens[0]["due_at"]))
 
 
+def handle_voice(db, token, msg):
+    """A voice note is a speaking submission - same queue, no size gate."""
+    tid = msg["from"]["id"]
+    student = student_of(db, tid)
+    if not student:
+        return send(token, tid, t("en", "no_group"))
+    lang = student["lang"]
+    voice = msg.get("voice") or msg.get("audio") or {}
+    opens = open_assignments(db, student["group_id"])
+    aid = opens[0]["id"] if opens else None
+    due = opens[0]["due_at"] if opens else None
+    sub_id = db.execute(
+        "INSERT INTO submissions (student_id, assignment_id, created_at, kind, late)"
+        " VALUES (?,?,?,'voice',?)",
+        (student["id"], aid, core.iso(core.now()),
+         1 if (due and due < core.iso(core.now())) else 0),
+    ).lastrowid
+    db.commit()
+    fname = f"{sub_id}_0_{int(time.time())}.oga"
+    if not download_photo(token, voice.get("file_id"), fname):
+        return send(token, tid, "Could not download that recording, please resend.")
+    db.execute("INSERT INTO files (submission_id, filename, telegram_file_id, ord)"
+               " VALUES (?,?,?,0)", (sub_id, fname, voice.get("file_id")))
+    db.commit()
+    notify_teachers_new(db, token, sub_id)
+    if not opens:
+        return send(token, tid, t(lang, "no_assignment"))
+    if len(opens) > 1:
+        kb = [[{"text": a["title"][:60], "callback_data": f"pick:{sub_id}:{a['id']}"}]
+              for a in opens[:12]]
+        return send(token, tid, t(lang, "which"), keyboard=kb)
+    return send(token, tid, t(lang, "received", title=opens[0]["title"]))
+
+
 def handle_callback(db, token, cq):
     tid = cq["from"]["id"]
     data = cq.get("data", "")
@@ -615,7 +901,24 @@ def handle_callback(db, token, cq):
         lang = data.split(":", 1)[1]
         db.execute("UPDATE students SET lang=? WHERE telegram_id=?", (lang, tid))
         db.commit()
-        return send(token, tid, t(lang, "lang_set"))
+        return send(token, tid, t(lang, "lang_set"), markup=main_keyboard(lang))
+
+    if data.startswith("g:") and is_teacher(db, tid):
+        _, sub_id, score = data.split(":")
+        row = grade_submission(db, token, int(sub_id), int(score))
+        return send(token, tid, "Saved %s/10 for %s." % (
+            score, row["title"] or "unassigned" if row else "?"))
+
+    if data.startswith("ans:") and is_teacher(db, tid):
+        set_state(db, tid, "answer", {"question": int(data.split(":")[1])})
+        return send(token, tid, "Type your answer; I will pass it on.")
+
+    if data.startswith("imp:"):
+        student = student_of(db, tid)
+        if student:
+            set_state(db, tid, "improve", {"submission": int(data.split(":")[1])})
+            send(token, tid, t(student["lang"], "improve") + " \u2b07")
+        return
 
     if data.startswith("vl:"):
         student = student_of(db, tid)
@@ -691,6 +994,7 @@ def main():
     db = core.connect()
     core.meta_set(db, "bot_username", username)
     db.close()
+    set_commands(token)
     print(f"Bot @{username} polling. Ctrl-C to stop.")
 
     offset = None
@@ -711,6 +1015,8 @@ def main():
                         msg = upd["message"]
                         if "photo" in msg:
                             handle_photo(db, token, msg)
+                        elif "voice" in msg or "audio" in msg:
+                            handle_voice(db, token, msg)
                         elif "text" in msg:
                             handle_text(db, token, msg)
                 except Exception as exc:  # one bad update must not kill the bot

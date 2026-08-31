@@ -216,6 +216,30 @@ def migrate(db):
     cols = {r["name"] for r in db.execute("PRAGMA table_info(students)")}
     if "token" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN token TEXT")
+    scols = {r["name"] for r in db.execute("PRAGMA table_info(submissions)")}
+    if "late" not in scols:
+        db.execute("ALTER TABLE submissions ADD COLUMN late INTEGER NOT NULL DEFAULT 0")
+    if "kind" not in scols:
+        db.execute("ALTER TABLE submissions ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
+    if "improves" not in scols:
+        db.execute("ALTER TABLE submissions ADD COLUMN improves INTEGER")
+    db.executescript("""
+    CREATE TABLE IF NOT EXISTS questions (
+        id INTEGER PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        answer TEXT,
+        answered_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS parents (
+        id INTEGER PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        telegram_id INTEGER UNIQUE,
+        token TEXT UNIQUE,
+        created_at TEXT NOT NULL
+    );
+    """)
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "published" not in acols:
         # assignments that already existed were live, so they stay live
@@ -544,3 +568,100 @@ def group_set_progress(db, group_id, items):
         out.append({"student": st, **p})
     out.sort(key=lambda r: (r["percent"] if r["percent"] is not None else 0, r["student"]["name"]))
     return out
+
+
+# ------------------------------------------------------------ ratings
+
+def streak(db, student_id):
+    """Consecutive past assignments submitted, counting back from the newest."""
+    n = 0
+    for row in reversed(student_timeline(db, student_id)):
+        if not _is_past(row["due_at"]):
+            continue
+        if row["submission_id"]:
+            n += 1
+        else:
+            break
+    return n
+
+
+def live_completion(db, student_id):
+    """Share of ALL set homework handed in, including work not yet due.
+
+    student_stats["completion"] only counts past deadlines - right for judging
+    who is falling behind, wrong for a live table, where a student should be
+    able to climb by doing today's homework today.
+    """
+    row = db.execute("SELECT group_id FROM students WHERE id=?", (student_id,)).fetchone()
+    if not row or row["group_id"] is None:
+        return None
+    total = db.execute(
+        "SELECT COUNT(*) c FROM assignments WHERE group_id=? AND published=1",
+        (row["group_id"],),
+    ).fetchone()["c"]
+    if not total:
+        return None
+    done = db.execute(
+        "SELECT COUNT(DISTINCT assignment_id) c FROM submissions WHERE student_id=?"
+        " AND assignment_id IS NOT NULL",
+        (student_id,),
+    ).fetchone()["c"]
+    return round(100 * min(done, total) / total)
+
+
+def rating_rows(db, group_id=None):
+    """Live standings: completion, average score and streak, best first.
+
+    Completion is ranked before score on purpose - it is the part a student
+    fully controls, so the table rewards effort rather than raw ability.
+    """
+    where = "WHERE active=1" + (" AND group_id=?" if group_id else "")
+    args = (group_id,) if group_id else ()
+    rows = []
+    for st in db.execute(f"SELECT * FROM students {where}", args).fetchall():
+        stats = student_stats(db, st["id"])
+        v = vocab_stats(db, st["id"])
+        rows.append({
+            "student": st,
+            "completion": live_completion(db, st["id"]),
+            "due_completion": stats["completion"],
+            "average": stats["average"],
+            "graded": stats["graded_count"],
+            "missed": stats["missed"],
+            "streak": streak(db, st["id"]),
+            "vocab": v["known"],
+            "at_risk": stats["at_risk"],
+        })
+    rows.sort(key=lambda r: (-(r["completion"] or 0), -(r["average"] or 0),
+                             r["student"]["name"]))
+    for i, r in enumerate(rows, 1):
+        r["rank"] = i
+    return rows
+
+
+def parent_token(db, student_id):
+    row = db.execute("SELECT token FROM parents WHERE student_id=? AND telegram_id IS NULL",
+                     (student_id,)).fetchone()
+    if row:
+        return row["token"]
+    token = secrets.token_urlsafe(9)
+    db.execute("INSERT INTO parents (student_id, token, created_at) VALUES (?,?,?)",
+               (student_id, token, iso(now())))
+    db.commit()
+    return token
+
+
+def due_in_words(due_at):
+    """'in 6 hours' / 'tomorrow' / 'overdue' - for student-facing countdowns."""
+    d = parse(due_at)
+    if not d:
+        return ""
+    delta = d - now()
+    hours = delta.total_seconds() / 3600
+    if hours < 0:
+        return "overdue"
+    if hours < 1:
+        return "under an hour left"
+    if hours < 24:
+        return "%d hours left" % int(hours)
+    return "%d days left" % round(hours / 24)
