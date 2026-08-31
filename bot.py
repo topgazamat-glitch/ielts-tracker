@@ -345,16 +345,24 @@ def main_keyboard(lang):
 
 
 def set_commands(token):
-    """The menu button next to the message box."""
-    for lang, labels in (("en", None), ("ru", None), ("uz", None)):
-        call(token, "setMyCommands", language_code=lang, commands=[
-            {"command": "homework", "description": "what is left to do"},
-            {"command": "progress", "description": "my scores and chart"},
-            {"command": "vocab", "description": "practise vocabulary"},
-            {"command": "rating", "description": "class standings"},
-            {"command": "ask", "description": "ask the teacher a question"},
-            {"command": "language", "description": "change language"},
-        ])
+    """The menu button next to the message box, in each language."""
+    menus = {
+        None: [("homework", "what is left to do"), ("progress", "my scores and chart"),
+               ("vocab", "practise vocabulary"), ("rating", "class standings"),
+               ("ask", "ask the teacher a question"), ("language", "change language")],
+        "ru": [("homework", "что осталось сделать"), ("progress", "мои оценки и график"),
+               ("vocab", "учить слова"), ("rating", "рейтинг группы"),
+               ("ask", "задать вопрос преподавателю"), ("language", "сменить язык")],
+        "uz": [("homework", "nima qolgan"), ("progress", "natijalarim va grafik"),
+               ("vocab", "so'z mashqi"), ("rating", "guruh reytingi"),
+               ("ask", "o'qituvchiga savol"), ("language", "tilni o'zgartirish")],
+    }
+    ok = True
+    for lang, items in menus.items():
+        cmds = [{"command": c, "description": d} for c, d in items]
+        res = call(token, "setMyCommands", commands=cmds, language_code=lang)
+        ok = ok and res.get("ok", False)
+    return ok
 
 
 def lang_keyboard():
