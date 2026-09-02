@@ -48,8 +48,8 @@ assignments = []
 for i, ti in enumerate(titles):
     due = now - timedelta(days=42 - i * 7)
     assignments.append(db.execute(
-        "INSERT INTO assignments (group_id, title, task_type, due_at, created_at, closed)"
-        " VALUES (?,?,?,?,?,?)",
+        "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
+        " closed, published) VALUES (?,?,?,?,?,?,1)",
         (gid, ti, "task1" if "Task 1" in ti else "task2", core.iso(due),
          core.iso(due - timedelta(days=6)), 1 if i < len(titles) - 1 else 0),
     ).lastrowid)

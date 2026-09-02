@@ -29,11 +29,14 @@ def page(title, body, active=""):
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{E(title)} · Teaching Assistant</title>
+<meta name="color-scheme" content="light dark">
+<title>{E(title)} · AzamatEnglish</title>
 <link rel="stylesheet" href="/static/style.css"></head><body>
-<header class="top"><span class="brand">Teaching Assistant</span><nav>
-{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/groups', 'Groups')}
-{nav('/assignments', 'Assignments')}{nav('/homework', 'Homework')}{nav('/ratings', 'Ratings')}{nav('/questions', 'Questions')}{nav('/vocab', 'Vocabulary')}{nav('/roster', 'Students')}</nav>
+<header class="top">
+<span class="brand"><span class="mark">A</span>AzamatEnglish</span>
+<nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
+{nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
+{nav('/roster', 'Students')}{nav('/vocab', 'Vocabulary')}{nav('/questions', 'Questions')}</nav>
 <span class="right"><a href="/logout">Sign out</a></span></header>
 <main>{body}</main></body></html>"""
 
@@ -682,8 +685,11 @@ def student_page(title, body):
     """Standalone layout - no teacher navigation, no sign-in."""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{E(title)}</title><link rel="stylesheet" href="/static/style.css"></head>
-<body><main style="max-width:640px">{body}</main></body></html>"""
+<meta name="color-scheme" content="light dark">
+<title>{E(title)} · AzamatEnglish</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body><header class="top"><span class="brand"><span class="mark">A</span>AzamatEnglish</span></header>
+<main style="max-width:600px">{body}</main></body></html>"""
 
 
 def view_student_portal(req, db, token, flash=""):
@@ -725,10 +731,15 @@ def view_student_portal(req, db, token, flash=""):
 <div class="card">
   <form method="post" action="/s/{E(token)}/upload" enctype="multipart/form-data">
     {picker}
-    <input type="file" name="photo" accept="image/*" multiple required
-           style="width:100%;padding:14px;border:1px dashed var(--line)">
-    <p class="sub" style="margin:8px 0 0">Photograph the whole page from directly above,
-    in good light. You can attach several pages at once.</p>
+    <label class="dropzone">
+      <input type="file" name="photo" accept="image/*" multiple required
+             onchange="this.closest('.dropzone').classList.add('has');
+                       this.nextElementSibling.textContent =
+                         this.files.length + ' page(s) chosen';">
+      <span class="dz-label">Choose photos of your work</span>
+      <span class="dz-hint">Whole page, from directly above, in good light.
+      You can attach several pages at once.</span>
+    </label>
     <div style="margin-top:12px"><button>Send to teacher</button></div>
   </form>
 </div>
@@ -834,8 +845,11 @@ def view_ratings(req, db):
     gid = req["query"].get("group", [None])[0]
     gid = int(gid) if gid and gid.isdigit() else None
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
-    tabs = '<a href="/ratings">All groups</a> · ' + " · ".join(
-        f'<a href="/ratings?group={g["id"]}">{E(g["name"])}</a>' for g in groups)
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    tabs = ('<div class="tabs">' + tab("/ratings", "All groups", gid is None)
+            + "".join(tab(f'/ratings?group={g["id"]}', g["name"], gid == g["id"])
+                      for g in groups) + "</div>")
     rows = core.rating_rows(db, gid)
     medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
     body_rows = ""
@@ -857,7 +871,8 @@ def view_ratings(req, db):
     dl = f'/export.csv?group={gid}' if gid else '/export.csv'
     body = f"""<h1>Ratings</h1>
 <p class="sub">Ranked by homework completed first, then average score — effort is the
-part a student controls. {tabs}</p>
+part a student controls.</p>
+{tabs}
 <div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Group</th>
 <th>Completion</th><th></th><th>Average</th><th>Graded</th><th>Missed</th>
 <th>Streak</th><th>Words</th></tr>
