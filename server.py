@@ -908,6 +908,17 @@ def act_answer_question(req, db, qid):
     return redirect("/questions")
 
 
+def view_backup(req, db):
+    """Download everything - students, homework, submissions, photos - as one file."""
+    import transfer
+    data = transfer.export_db(db)
+    payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    stamp = core.now().strftime("%Y-%m-%d")
+    return 200, [("Content-Type", "application/json; charset=utf-8"),
+                 ("Content-Disposition", f'attachment; filename="backup-{stamp}.json"'),
+                 ("Content-Length", str(len(payload)))], payload
+
+
 def view_import(req, db, flash=""):
     counts = {t: db.execute(f"SELECT COUNT(*) c FROM {t}").fetchone()["c"]
               for t in ("groups", "students", "assignments", "submissions", "files")}
@@ -923,6 +934,11 @@ the <code>transfer.json</code> it produces.</p>
 <p class="sub" style="margin:10px 0 0">This merges rather than replaces. Anything
 already here is matched and left alone, so importing the same file twice changes
 nothing.</p></div>
+<h2>Download a backup</h2>
+<div class="card"><p class="sub" style="margin:0 0 8px">Everything in one file:
+students, homework, submissions, scores and the photographs themselves. Keep a copy
+somewhere of your own — it is the file this page accepts back.</p>
+<a href="/backup.json"><button type="button">Download backup</button></a></div>
 <h2>Currently stored</h2>
 <div class="grid">{"".join(stat(k, v) for k, v in counts.items())}</div>"""
     return html_response(page("Import", body, ""))
@@ -1194,6 +1210,7 @@ ROUTES = [
     ("GET", r"^/questions$", view_questions),
     ("GET", r"^/export\.csv$", view_export),
     ("GET", r"^/import$", view_import),
+    ("GET", r"^/backup\.json$", view_backup),
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),

@@ -20,7 +20,13 @@ TABLES_WITH_PHOTOS = True
 
 
 def export():
-    db = core.connect()
+    data = export_db(core.connect())
+    with open(PATH, "w") as fh:
+        json.dump(data, fh, ensure_ascii=False)
+    return data
+
+
+def export_db(db):
     data = {"groups": [], "students": [], "assignments": [], "submissions": [],
             "word_lists": [], "questions": []}
 
@@ -83,8 +89,6 @@ def export():
                                           (wl["id"],))],
         })
 
-    with open(PATH, "w") as fh:
-        json.dump(data, fh, ensure_ascii=False)
     return data
 
 
