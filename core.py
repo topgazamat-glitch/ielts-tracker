@@ -43,13 +43,28 @@ def load_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH) as fh:
             cfg.update(json.load(fh))
-    # environment always wins, so deploys never need the file
-    if os.environ.get("TELEGRAM_TOKEN"):
-        cfg["telegram_token"] = os.environ["TELEGRAM_TOKEN"]
-    if os.environ.get("TEACHER_PASSWORD"):
-        cfg["teacher_password"] = os.environ["TEACHER_PASSWORD"]
-    if os.environ.get("PORT"):
-        cfg["port"] = int(os.environ["PORT"])
+    # environment always wins, so a hosted deploy never needs the file
+    def env(name, key, cast=str):
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            return
+        if cast is bool:
+            cfg[key] = raw.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            try:
+                cfg[key] = cast(raw)
+            except ValueError:
+                pass
+
+    env("TELEGRAM_TOKEN", "telegram_token")
+    env("TEACHER_PASSWORD", "teacher_password")
+    env("PORT", "port", int)
+    env("AUTOMATION", "automation", bool)
+    env("TIMEZONE_OFFSET_HOURS", "timezone_offset_hours", int)
+    env("MIN_PHOTO_WIDTH", "min_photo_width", int)
+    env("CHASE_HOURS", "chase_hours", int)
+    env("CHASE_THRESHOLD", "chase_threshold", int)
+    env("CHASE_MAX", "chase_max", int)
     return cfg
 
 

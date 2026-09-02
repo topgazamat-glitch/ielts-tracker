@@ -1,0 +1,130 @@
+{
+  "groups": [
+    {
+      "name": "114",
+      "join_code": "LX59FK"
+    },
+    {
+      "name": "116",
+      "join_code": "RFQWEP"
+    },
+    {
+      "name": "214",
+      "join_code": "WQ4RTY"
+    },
+    {
+      "name": "216",
+      "join_code": "WQZCN4"
+    }
+  ],
+  "word_lists": [
+    {
+      "title": "Elementary test 20",
+      "source": "sample (not from the book)",
+      "unit": "trial",
+      "group": "114",
+      "words": [
+        {
+          "term": "arrive",
+          "translation": "yetib kelmoq / прибывать",
+          "example": "We arrive at school at eight o'clock."
+        },
+        {
+          "term": "borrow",
+          "translation": "qarzga olmoq / брать взаймы",
+          "example": "Can I borrow your pen, please?"
+        },
+        {
+          "term": "careful",
+          "translation": "ehtiyotkor / осторожный",
+          "example": "Be careful with that hot cup."
+        },
+        {
+          "term": "choose",
+          "translation": "tanlamoq / выбирать",
+          "example": "You can choose any book you like."
+        },
+        {
+          "term": "decide",
+          "translation": "qaror qilmoq / решать",
+          "example": "I cannot decide what to eat."
+        },
+        {
+          "term": "enough",
+          "translation": "yetarli / достаточно",
+          "example": "We have enough time before the lesson."
+        },
+        {
+          "term": "expensive",
+          "translation": "qimmat / дорогой",
+          "example": "This phone is very expensive."
+        },
+        {
+          "term": "forget",
+          "translation": "unutmoq / забывать",
+          "example": "Do not forget your homework tonight."
+        },
+        {
+          "term": "health",
+          "translation": "salomatlik / здоровье",
+          "example": "Sport is good for your health."
+        },
+        {
+          "term": "invite",
+          "translation": "taklif qilmoq / приглашать",
+          "example": "I want to invite you to my party."
+        },
+        {
+          "term": "journey",
+          "translation": "sayohat / поездка",
+          "example": "The journey to Tashkent takes two hours."
+        },
+        {
+          "term": "laugh",
+          "translation": "kulmoq / смеяться",
+          "example": "The children laugh at his funny story."
+        },
+        {
+          "term": "mistake",
+          "translation": "xato / ошибка",
+          "example": "Everyone makes a mistake sometimes."
+        },
+        {
+          "term": "neighbour",
+          "translation": "qo'shni / сосед",
+          "example": "My neighbour has a very big dog."
+        },
+        {
+          "term": "prepare",
+          "translation": "tayyorlamoq / готовить",
+          "example": "I prepare dinner every evening."
+        },
+        {
+          "term": "quiet",
+          "translation": "jim / тихий",
+          "example": "The classroom is very quiet today."
+        },
+        {
+          "term": "receive",
+          "translation": "olmoq / получать",
+          "example": "Did you receive my message yesterday?"
+        },
+        {
+          "term": "repeat",
+          "translation": "takrorlamoq / повторять",
+          "example": "Please repeat the question slowly."
+        },
+        {
+          "term": "weather",
+          "translation": "ob-havo / погода",
+          "example": "The weather is cold this morning."
+        },
+        {
+          "term": "worry",
+          "translation": "xavotirlanmoq / беспокоиться",
+          "example": "Do not worry about the test."
+        }
+      ]
+    }
+  ]
+}

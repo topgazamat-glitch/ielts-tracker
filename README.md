@@ -116,14 +116,33 @@ rent a small computer that never sleeps. The app is packaged for that:
 
 ### Railway (recommended, about $5/month)
 
-1. Push this folder to a private GitHub repository.
-2. On railway.app: New Project -> Deploy from GitHub repo -> pick it.
-3. Add a **Volume**, mount path `/data`.
-4. Add **Variables**: `DATA_DIR=/data`, `TELEGRAM_TOKEN=...`, `TEACHER_PASSWORD=...`
-5. Settings -> Networking -> Generate Domain. That HTTPS address is your dashboard.
+1. railway.app -> sign in with GitHub -> New Project -> Deploy from GitHub repo
+   -> pick `ielts-tracker`. It builds from the Dockerfile on its own.
+2. Add a **Volume**, mount path `/data`. Without this, every redeploy wipes
+   student work.
+3. Add these **Variables**:
 
-Render, Fly.io and any $5 VPS work the same way: one container, one mounted disk
-at `/data`, the same three variables.
+   | Variable | Value |
+   |---|---|
+   | `DATA_DIR` | `/data` |
+   | `TELEGRAM_TOKEN` | the token from BotFather |
+   | `TEACHER_PASSWORD` | your dashboard password |
+   | `AUTOMATION` | `true` |
+   | `TIMEZONE_OFFSET_HOURS` | `5` |
+
+   Every setting in `config.json` has an environment variable, so the hosted
+   copy needs no config file at all. `PORT` is supplied by the platform.
+4. Settings -> Networking -> Generate Domain. That HTTPS address is the dashboard.
+5. Stop the copy on your Mac. Two copies polling the same bot will fight over
+   updates and answer students twice.
+
+On first start against an empty volume the app imports `bootstrap.json`, so your
+classes come back **with their original join codes** and the invite links already
+in your students' hands keep working. Students, submissions and scores are not in
+that file; they start fresh.
+
+To refresh it after adding classes or vocabulary: `python3 bootstrap.py export`,
+then commit.
 
 ### Two rules once it is online
 

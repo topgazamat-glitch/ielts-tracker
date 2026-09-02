@@ -9,6 +9,7 @@ still run server.py and bot.py separately if you prefer.
 import threading
 import time
 
+import bootstrap
 import bot
 import core
 import jobs
@@ -29,7 +30,10 @@ def bot_forever():
 
 
 def main():
-    core.init_db()
+    db = core.init_db()
+    if bootstrap.load_if_empty(db):
+        print("First run: classes and vocabulary restored from bootstrap.json")
+    db.close()
     cfg = core.load_config()
     if cfg["telegram_token"]:
         threading.Thread(target=bot_forever, daemon=True).start()
