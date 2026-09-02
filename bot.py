@@ -87,6 +87,12 @@ T = {
         'mat_cats': 'Materials for {level} — choose a section:',
         'mat_empty': 'Nothing in {category} yet.',
         "other_groups": 'Other groups',
+        'menu_level': 'Choose a level:',
+        'menu_what': '{level} — what do you need?',
+        'menu_hw': '📝 Homework',
+        'menu_mat': '📁 Materials',
+        'menu_coll': '{level} — which materials?',
+        'menu_sect': '{collection} — choose a section:',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -159,6 +165,12 @@ T = {
         'mat_cats': 'Материалы {level} — выберите раздел:',
         'mat_empty': 'В разделе «{category}» пока пусто.',
         "other_groups": 'Другие группы',
+        'menu_level': 'Выберите уровень:',
+        'menu_what': '{level} — что вам нужно?',
+        'menu_hw': '📝 Домашнее задание',
+        'menu_mat': '📁 Материалы',
+        'menu_coll': '{level} — какие материалы?',
+        'menu_sect': '{collection} — выберите раздел:',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -231,6 +243,12 @@ T = {
         'mat_cats': "{level} materiallari — bo'limni tanlang:",
         'mat_empty': "“{category}” bo'limi hozircha bo'sh.",
         "other_groups": 'Boshqa guruhlar',
+        'menu_level': 'Darajani tanlang:',
+        'menu_what': '{level} — nima kerak?',
+        'menu_hw': '📝 Uy vazifasi',
+        'menu_mat': '📁 Materiallar',
+        'menu_coll': '{level} — qaysi materiallar?',
+        'menu_sect': "{collection} — bo'limni tanlang:",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -752,17 +770,72 @@ def due_label(due_at):
     return " (%s)" % due_at[:10] if due_at else ""
 
 
-def offer_categories(db, token, student):
-    """The five shelves, with a count so an empty one is obvious."""
+def offer_material_levels(db, token, student):
+    """Step one: which level's materials. Their own level comes first."""
     lang = student["lang"]
-    counts = core.material_counts(db, student["group_id"])
-    if not any(counts.values()):
+    own = core.level_of(db, student["group_id"])
+    levels = db.execute("SELECT * FROM levels ORDER BY sort").fetchall()
+    if not levels:
         return send(token, student["telegram_id"], t(lang, "mat_none"))
-    lvl = core.level_name(db, core.level_of(db, student["group_id"])) or ""
-    kb = [[{"text": "%s (%d)" % (c, counts.get(c, 0)),
-            "callback_data": f"mc:{i}"}]
-          for i, c in enumerate(core.CATEGORIES) if counts.get(c, 0)]
-    return send(token, student["telegram_id"], t(lang, "mat_cats", level=lvl), keyboard=kb)
+    if own:
+        levels = ([l for l in levels if l["id"] == own]
+                  + [l for l in levels if l["id"] != own])
+    kb = [[{"text": ("\u2b50 " if l["id"] == own else "") + l["name"],
+            "callback_data": f"ml:{l['id']}"}] for l in levels]
+    return send(token, student["telegram_id"], t(lang, "menu_level"), keyboard=kb)
+
+
+def offer_level_menu(db, token, student, level_id):
+    """Step two: homework or materials, for the level they picked."""
+    lang = student["lang"]
+    lvl = core.level_name(db, level_id) or ""
+    kb = [[{"text": t(lang, "menu_hw"), "callback_data": "mhw"}],
+          [{"text": t(lang, "menu_mat"), "callback_data": f"mv:{level_id}"}],
+          [{"text": t(lang, "back"), "callback_data": "mlevels"}]]
+    return send(token, student["telegram_id"], t(lang, "menu_what", level=lvl), keyboard=kb)
+
+
+def offer_collections(db, token, student, level_id):
+    """Step three: Empower or Self-Study."""
+    lang = student["lang"]
+    lvl = core.level_name(db, level_id) or ""
+    counts = core.collection_counts(db, level_id)
+    kb = [[{"text": "%s (%d)" % (core.collection_label(key), counts.get(key, 0)),
+            "callback_data": f"mk:{level_id}:{key}"}] for key in core.COLLECTION_ORDER]
+    kb.append([{"text": t(lang, "back"), "callback_data": f"ml:{level_id}"}])
+    return send(token, student["telegram_id"], t(lang, "menu_coll", level=lvl), keyboard=kb)
+
+
+def offer_sections(db, token, student, level_id, collection):
+    """Step four: the five shelves inside that collection."""
+    lang = student["lang"]
+    counts = core.level_counts(db, level_id, collection)
+    kb = []
+    for i, name in enumerate(core.sections(collection)):
+        kb.append([{"text": "%s (%d)" % (name, counts.get(name, 0)),
+                    "callback_data": f"ms:{level_id}:{collection}:{i}"}])
+    kb.append([{"text": t(lang, "back"), "callback_data": f"mv:{level_id}"}])
+    return send(token, student["telegram_id"],
+                t(lang, "menu_sect", collection=core.collection_label(collection)),
+                keyboard=kb)
+
+
+def offer_files(db, token, student, level_id, collection, index):
+    lang = student["lang"]
+    names = core.sections(collection)
+    if not (0 <= index < len(names)):
+        return
+    category = names[index]
+    mats = core.materials_at_level(db, level_id, collection, category)
+    if not mats:
+        return send(token, student["telegram_id"],
+                    t(lang, "mat_empty", category=category),
+                    keyboard=[[{"text": t(lang, "back"),
+                                "callback_data": f"mk:{level_id}:{collection}"}]])
+    kb = [[{"text": (m["title"] + "  \u00b7  " + core.human_size(m["size"]))[:60],
+            "callback_data": f"mat:{m['id']}"}] for m in mats[:25]]
+    kb.append([{"text": t(lang, "back"), "callback_data": f"mk:{level_id}:{collection}"}])
+    return send(token, student["telegram_id"], t(lang, "mat_pick"), keyboard=kb)
 
 
 def rating_text(db, student):
@@ -1008,7 +1081,7 @@ def handle_text(db, token, msg):
     if text.startswith("/materials"):
         if not student:
             return send(token, tid, t(lang, "no_group"))
-        return offer_categories(db, token, student)
+        return offer_material_levels(db, token, student)
 
     if text.startswith("/ask"):
         if not student:
@@ -1204,6 +1277,14 @@ def handle_voice(db, token, msg):
     return send(token, tid, t(lang, "received", title=opens[0]["title"]))
 
 
+def as_int(value, default=None):
+    """Callback data can arrive from a stale button; never crash on it."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def handle_callback(db, token, cq):
     tid = cq["from"]["id"]
     data = cq.get("data", "")
@@ -1249,25 +1330,48 @@ def handle_callback(db, token, cq):
         set_state(db, tid, "name", {"group_id": gid})
         return send(token, tid, t(lang, "ask_name"))
 
-    if data.startswith("mc:"):
-        student = student_of(db, tid)
-        if not student:
-            return
-        lang = student["lang"]
-        idx = int(data.split(":")[1])
-        category = core.CATEGORIES[idx] if 0 <= idx < len(core.CATEGORIES) else None
-        mats = core.materials_for(db, student["group_id"], category)
-        if not mats:
-            return send(token, tid, t(lang, "mat_empty", category=category or ""))
-        kb = [[{"text": (m["title"] + "  \u00b7  " + core.human_size(m["size"]))[:60],
-                "callback_data": f"mat:{m['id']}"}] for m in mats[:25]]
-        kb.append([{"text": t(lang, "back"), "callback_data": "mback"}])
-        return send(token, tid, t(lang, "mat_pick"), keyboard=kb)
-
-    if data == "mback":
+    if data.startswith("ml:"):
         student = student_of(db, tid)
         if student:
-            offer_categories(db, token, student)
+            lid = as_int(data.split(":")[1])
+            if lid:
+                offer_level_menu(db, token, student, lid)
+        return
+
+    if data == "mlevels":
+        student = student_of(db, tid)
+        if student:
+            offer_material_levels(db, token, student)
+        return
+
+    if data == "mhw":
+        student = student_of(db, tid)
+        if student:
+            send(token, tid, checklist_text(db, student, student["lang"]))
+        return
+
+    if data.startswith("mv:"):
+        student = student_of(db, tid)
+        if student:
+            lid = as_int(data.split(":")[1])
+            if lid:
+                offer_collections(db, token, student, lid)
+        return
+
+    if data.startswith("mk:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, coll = data.split(":")
+            if as_int(lid):
+                offer_sections(db, token, student, as_int(lid), coll)
+        return
+
+    if data.startswith("ms:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, coll, idx = data.split(":")
+            if as_int(lid) and as_int(idx) is not None:
+                offer_files(db, token, student, as_int(lid), coll, as_int(idx))
         return
 
     if data.startswith("mat:"):

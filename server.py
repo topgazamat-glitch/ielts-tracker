@@ -736,17 +736,18 @@ def view_student_portal(req, db, token, flash=""):
         hist += f'<tr><td>{E(t["title"])}</td><td>{state}</td></tr>'
 
     materials_html = ""
-    for cat in core.CATEGORIES:
-        mats = core.materials_for(db, s["group_id"], cat)
-        if not mats:
-            continue
-        items = "".join(
-            f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a></td>'
-            f'<td class="sub">{E(core.human_size(m["size"]))}</td></tr>' for m in mats[:25])
-        materials_html += (f'<h2>{E(cat)}</h2><div class="tablewrap">'
-                           f'<table>{items}</table></div>')
-    if materials_html:
-        materials_html = "<h2>Materials</h2>" + materials_html
+    own_level = core.level_of(db, s["group_id"])
+    for key in core.COLLECTION_ORDER:
+        for cat in core.sections(key):
+            mats = core.materials_at_level(db, own_level, key, cat)
+            if not mats:
+                continue
+            items = "".join(
+                f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a></td>'
+                f'<td class="sub">{E(core.human_size(m["size"]))}</td></tr>'
+                for m in mats[:25])
+            materials_html += (f'<h2>{E(core.collection_label(key))} · {E(cat)}</h2>'
+                               f'<div class="tablewrap"><table>{items}</table></div>')
     avg = fmt(st["average"])
     comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
     body = f"""<h1>{E(s["name"])}</h1>
@@ -1032,48 +1033,55 @@ def view_materials(req, db):
                       for l in levels) + "</div>")
 
     blocks = ""
-    for cat in core.CATEGORIES:
-        sql = "SELECT * FROM materials WHERE active=1 AND category=?"
-        args = [cat]
-        if only:
-            sql += " AND level_id=?"
-            args.append(only)
-        mats = db.execute(sql + " ORDER BY created_at DESC", args).fetchall()
-        if not mats:
-            continue
-        rows = ""
-        for m in mats:
-            scope = core.level_name(db, m["level_id"]) or "All levels"
-            if m["group_id"]:
-                scope += " · " + group_name(db, m["group_id"])
-            note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
-                    if m["note"] else "")
-            rows += (
-                f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
-                f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
-                f'<td>{E(core.human_size(m["size"]))}</td>'
-                f'<td><form method="post" action="/materials/{m["id"]}/delete">'
-                f'<button class="ghost">Remove</button></form></td></tr>')
-        blocks += (f"<h2>{E(cat)}</h2><div class=\"tablewrap\"><table>"
-                   f"<tr><th>Title</th><th>Level</th><th>File</th><th>Size</th><th></th></tr>"
-                   f"{rows}</table></div>")
+    for key in core.COLLECTION_ORDER:
+        section_html = ""
+        for cat in core.sections(key):
+            sql = "SELECT * FROM materials WHERE active=1 AND collection=? AND category=?"
+            args = [key, cat]
+            if only:
+                sql += " AND level_id=?"
+                args.append(only)
+            mats = db.execute(sql + " ORDER BY created_at DESC", args).fetchall()
+            if not mats:
+                continue
+            rows = ""
+            for m in mats:
+                scope = core.level_name(db, m["level_id"]) or "All levels"
+                if m["group_id"]:
+                    scope += " · " + group_name(db, m["group_id"])
+                note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
+                        if m["note"] else "")
+                rows += (
+                    f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
+                    f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
+                    f'<td>{E(core.human_size(m["size"]))}</td>'
+                    f'<td><form method="post" action="/materials/{m["id"]}/delete">'
+                    f'<button class="ghost">Remove</button></form></td></tr>')
+            section_html += (f'<h2>{E(cat)}</h2><div class="tablewrap"><table>'
+                             f'<tr><th>Title</th><th>Level</th><th>File</th><th>Size</th>'
+                             f'<th></th></tr>{rows}</table></div>')
+        if section_html:
+            blocks += (f'<h2 style="font-size:19px;margin-top:32px">'
+                       f'{E(core.collection_label(key))}</h2>{section_html}')
     if not blocks:
-        blocks = ('<div class="card"><p style="margin:0">Nothing uploaded yet for '
-                  'this level.</p></div>')
+        blocks = ('<div class="card"><p style="margin:0">Nothing uploaded here yet.</p></div>')
 
     lopts = ('<option value="">All levels</option>'
              + "".join(f'<option value="{l["id"]}">{E(l["name"])}</option>' for l in levels))
-    copts = "".join(f'<option value="{E(c)}">{E(c)}</option>' for c in core.CATEGORIES)
+    kopts = "".join(f'<option value="{k}">{E(core.collection_label(k))}</option>'
+                    for k in core.COLLECTION_ORDER)
     gopts = ('<option value="">Every class at that level</option>'
              + "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups))
+    sections_json = json.dumps({k: core.sections(k) for k in core.COLLECTION_ORDER})
     body = f"""<h1>Materials</h1>
-<p class="sub">Books, handouts and audio, filed by level and section. Students see the
-shelves for their own level under <strong>Materials</strong> in the bot.</p>
+<p class="sub">Filed by level, then collection, then section — the same tree students
+walk through in the bot.</p>
 <div class="card"><form method="post" action="/materials/new" enctype="multipart/form-data">
 <div class="inline" style="margin-bottom:12px">
-<label class="f">Title<input name="title" placeholder="Unit 15 - reading passage" required></label>
+<label class="f">Title<input name="title" placeholder="Unit 5 handout" required></label>
 <label class="f">Level<select name="level_id">{lopts}</select></label>
-<label class="f">Section<select name="category">{copts}</select></label>
+<label class="f">Collection<select name="collection" id="coll">{kopts}</select></label>
+<label class="f">Section<select name="category" id="sect"></select></label>
 <label class="f">Class<select name="group_id">{gopts}</select></label>
 </div>
 <label class="f" style="margin-bottom:12px">Note (optional)
@@ -1087,6 +1095,20 @@ shelves for their own level under <strong>Materials</strong> in the bot.</p>
   Telegram's limit for what a bot can send.</span>
 </label>
 <div style="margin-top:12px"><button>Upload</button></div></form></div>
+<script>
+const SECTIONS = {sections_json};
+function fillSections() {{
+  const coll = document.getElementById('coll').value;
+  const sect = document.getElementById('sect');
+  sect.innerHTML = '';
+  (SECTIONS[coll] || []).forEach(function (name) {{
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name; sect.appendChild(o);
+  }});
+}}
+document.getElementById('coll').addEventListener('change', fillSections);
+fillSections();
+</script>
 {tabs}
 {blocks}"""
     return html_response(page("Materials", body, "Materials"))
@@ -1106,16 +1128,21 @@ def act_new_material(req, db):
     with open(os.path.join(core.MATERIAL_DIR, name), "wb") as fh:
         fh.write(blob)
     lid = (fields.get("level_id", [""])[0] or "").strip()
+    collection = (fields.get("collection", [""])[0] or "").strip()
+    if collection not in core.COLLECTIONS:
+        collection = core.COLLECTION_ORDER[0]
     category = (fields.get("category", [""])[0] or "").strip()
-    if category not in core.CATEGORIES:
-        category = core.CATEGORIES[0]
+    if category not in core.sections(collection):
+        category = core.sections(collection)[0]
     db.execute(
         "INSERT INTO materials (group_id, title, note, filename, original_name, mime,"
-        " size, created_at, level_id, category) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        " size, created_at, level_id, category, collection)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (int(gid) if gid.isdigit() else None, title[:120],
          (fields.get("note", [""])[0] or "").strip()[:300] or None,
          name, original[:150], uploads.content_type(original), len(blob),
-         core.iso(core.now()), int(lid) if lid.isdigit() else None, category),
+         core.iso(core.now()), int(lid) if lid.isdigit() else None, category,
+         collection),
     )
     db.commit()
     return redirect("/materials")

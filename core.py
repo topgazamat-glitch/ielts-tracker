@@ -17,8 +17,26 @@ CONFIG_PATH = os.path.join(ROOT, "config.json")
 LEVELS = ["Beginner", "Elementary", "Pre-Intermediate", "Intermediate",
           "IELTS Novice", "IELTS Standard"]
 
-# the five shelves inside Materials, in the order students see them
-CATEGORIES = ["Reading", "Listening", "Writing", "Speaking", "Vocabulary"]
+# Materials are filed twice over: which collection, then which shelf inside it.
+COLLECTIONS = {
+    "empower": ("Empower materials",
+                ["Unit handouts", "Listening audios", "Reading plus",
+                 "Academic skills", "Unit vocabularies"]),
+    "selfstudy": ("Self-Study",
+                  ["Reading", "Listening", "Vocabulary", "Grammar", "Writing"]),
+}
+COLLECTION_ORDER = ["empower", "selfstudy"]
+
+# every section name, used when validating an upload
+CATEGORIES = [c for key in COLLECTION_ORDER for c in COLLECTIONS[key][1]]
+
+
+def sections(collection):
+    return COLLECTIONS.get(collection, COLLECTIONS["selfstudy"])[1]
+
+
+def collection_label(collection):
+    return COLLECTIONS.get(collection, COLLECTIONS["selfstudy"])[0]
 
 DEFAULT_TAGS = [
     "Under word count",
@@ -298,6 +316,10 @@ def migrate(db):
         db.execute("ALTER TABLE materials ADD COLUMN level_id INTEGER REFERENCES levels(id)")
     if mcols and "category" not in mcols:
         db.execute("ALTER TABLE materials ADD COLUMN category TEXT")
+    if mcols and "collection" not in mcols:
+        # anything filed before collections existed used the Self-Study names
+        db.execute("ALTER TABLE materials ADD COLUMN collection TEXT")
+        db.execute("UPDATE materials SET collection='selfstudy' WHERE collection IS NULL")
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "published" not in acols:
         # assignments that already existed were live, so they stay live
@@ -800,6 +822,31 @@ def level_name(db, level_id):
         return None
     row = db.execute("SELECT name FROM levels WHERE id=?", (level_id,)).fetchone()
     return row["name"] if row else None
+
+
+def materials_at_level(db, level_id, collection=None, category=None):
+    """Everything on one level's shelf, regardless of which class is asking."""
+    sql = "SELECT * FROM materials WHERE active=1 AND (level_id IS NULL OR level_id IS ?)"
+    args = [level_id]
+    if collection:
+        sql += " AND collection=?"
+        args.append(collection)
+    if category:
+        sql += " AND category=?"
+        args.append(category)
+    return db.execute(sql + " ORDER BY created_at DESC", args).fetchall()
+
+
+def level_counts(db, level_id, collection):
+    counts = {}
+    for m in materials_at_level(db, level_id, collection):
+        key = m["category"] or sections(collection)[0]
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def collection_counts(db, level_id):
+    return {key: len(materials_at_level(db, level_id, key)) for key in COLLECTION_ORDER}
 
 
 def materials_for(db, group_id, category=None):

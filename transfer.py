@@ -103,6 +103,7 @@ def export_db(db):
             "original_name": m["original_name"], "mime": m["mime"], "size": m["size"],
             "filename": m["filename"], "data": blob,
             "level": lvl["name"] if lvl else None, "category": m["category"],
+            "collection": m["collection"],
         })
 
     return data
@@ -225,11 +226,12 @@ def import_all(db, data):
         lrow = db.execute("SELECT id FROM levels WHERE name=?", (m.get("level"),)).fetchone()
         db.execute(
             "INSERT INTO materials (group_id, title, note, filename, original_name,"
-            " mime, size, created_at, level_id, category)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " mime, size, created_at, level_id, category, collection)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (gid.get(m.get("group")), m["title"], m.get("note"), m["filename"],
              m.get("original_name"), m.get("mime"), m.get("size"), core.iso(core.now()),
-             lrow["id"] if lrow else None, m.get("category")))
+             lrow["id"] if lrow else None, m.get("category"),
+             m.get("collection") or "selfstudy"))
         if m.get("data"):
             path = os.path.join(core.MATERIAL_DIR, m["filename"])
             if not os.path.exists(path):
