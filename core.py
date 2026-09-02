@@ -27,6 +27,11 @@ COLLECTIONS = {
 }
 COLLECTION_ORDER = ["empower", "selfstudy"]
 
+# a material may also carry a unit number and which book it belongs to
+BOOKS = {"class": "Class book", "work": "Work book"}
+BOOK_ORDER = ["class", "work"]
+UNITS = list(range(1, 13))
+
 # every section name, used when validating an upload
 CATEGORIES = [c for key in COLLECTION_ORDER for c in COLLECTIONS[key][1]]
 
@@ -316,6 +321,10 @@ def migrate(db):
         db.execute("ALTER TABLE materials ADD COLUMN level_id INTEGER REFERENCES levels(id)")
     if mcols and "category" not in mcols:
         db.execute("ALTER TABLE materials ADD COLUMN category TEXT")
+    if mcols and "unit" not in mcols:
+        db.execute("ALTER TABLE materials ADD COLUMN unit INTEGER")
+    if mcols and "book" not in mcols:
+        db.execute("ALTER TABLE materials ADD COLUMN book TEXT")
     if mcols and "collection" not in mcols:
         # anything filed before collections existed used the Self-Study names
         db.execute("ALTER TABLE materials ADD COLUMN collection TEXT")
@@ -882,9 +891,44 @@ def groups_at_level(db, level_id):
 
 
 def human_size(n):
-    if not n:
+    if n is None:
         return ""
+    if n == 0:
+        return "0 B"
     for unit in ("B", "KB", "MB"):
         if n < 1024 or unit == "MB":
             return ("%.0f %s" if unit == "B" else "%.1f %s") % (n, unit)
         n /= 1024.0
+
+
+def units_in(db, level_id, collection, category):
+    """Which unit numbers have anything in this section, and how many files."""
+    rows = db.execute(
+        "SELECT unit, COUNT(*) c FROM materials WHERE active=1 AND collection=?"
+        " AND category=? AND unit IS NOT NULL AND (level_id IS NULL OR level_id IS ?)"
+        " GROUP BY unit ORDER BY unit", (collection, category, level_id)
+    ).fetchall()
+    return {r["unit"]: r["c"] for r in rows}
+
+
+def books_in(db, level_id, collection, category, unit):
+    rows = db.execute(
+        "SELECT book, COUNT(*) c FROM materials WHERE active=1 AND collection=?"
+        " AND category=? AND unit=? AND (level_id IS NULL OR level_id IS ?)"
+        " GROUP BY book", (collection, category, unit, level_id)
+    ).fetchall()
+    return {(r["book"] or "class"): r["c"] for r in rows}
+
+
+def materials_in_unit(db, level_id, collection, category, unit, book=None):
+    sql = ("SELECT * FROM materials WHERE active=1 AND collection=? AND category=?"
+           " AND unit=? AND (level_id IS NULL OR level_id IS ?)")
+    args = [collection, category, unit, level_id]
+    if book:
+        sql += " AND (book=? OR (book IS NULL AND ?='class'))"
+        args += [book, book]
+    return db.execute(sql + " ORDER BY title", args).fetchall()
+
+
+def book_label(book):
+    return BOOKS.get(book or "class", BOOKS["class"])

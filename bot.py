@@ -96,6 +96,9 @@ T = {
         'hk_rating': '🏆 Rating',
         'hk_vocab': '📚 Practise words',
         'hk_ask': '❓ Ask teacher',
+        'pick_unit': '{section} — which unit?',
+        'unit_n': 'Unit {n}',
+        'pick_book': 'Unit {n} — which book?',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -177,6 +180,9 @@ T = {
         'hk_rating': '🏆 Рейтинг',
         'hk_vocab': '📚 Учить слова',
         'hk_ask': '❓ Вопрос учителю',
+        'pick_unit': '{section} — какой юнит?',
+        'unit_n': 'Юнит {n}',
+        'pick_book': 'Юнит {n} — какая книга?',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -258,6 +264,9 @@ T = {
         'hk_rating': '🏆 Reyting',
         'hk_vocab': "📚 So'z mashqi",
         'hk_ask': '❓ Savol berish',
+        'pick_unit': "{section} — qaysi bo'lim?",
+        'unit_n': "{n}-bo'lim",
+        'pick_book': "{n}-bo'lim — qaysi kitob?",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -818,12 +827,62 @@ def offer_sections(db, token, student, level_id, collection):
                 keyboard=kb)
 
 
+def offer_units(db, token, student, level_id, collection, index, units):
+    lang = student["lang"]
+    category = core.sections(collection)[index]
+    kb, row = [], []
+    for n in core.UNITS:
+        if n not in units:
+            continue
+        row.append({"text": t(lang, "unit_n", n=n),
+                    "callback_data": f"mu:{level_id}:{collection}:{index}:{n}"})
+        if len(row) == 3:
+            kb.append(row); row = []
+    if row:
+        kb.append(row)
+    kb.append([{"text": t(lang, "back"), "callback_data": f"mk:{level_id}:{collection}"}])
+    return send(token, student["telegram_id"],
+                t(lang, "pick_unit", section=category), keyboard=kb)
+
+
+def offer_books(db, token, student, level_id, collection, index, unit):
+    lang = student["lang"]
+    category = core.sections(collection)[index]
+    books = core.books_in(db, level_id, collection, category, unit)
+    if len(books) <= 1:
+        only = next(iter(books), None)
+        return offer_unit_files(db, token, student, level_id, collection, index,
+                                unit, only)
+    kb = [[{"text": "%s (%d)" % (core.book_label(b), books[b]),
+            "callback_data": f"mb:{level_id}:{collection}:{index}:{unit}:{b}"}]
+          for b in core.BOOK_ORDER if b in books]
+    kb.append([{"text": t(lang, "back"),
+                "callback_data": f"ms:{level_id}:{collection}:{index}"}])
+    return send(token, student["telegram_id"], t(lang, "pick_book", n=unit), keyboard=kb)
+
+
+def offer_unit_files(db, token, student, level_id, collection, index, unit, book):
+    lang = student["lang"]
+    category = core.sections(collection)[index]
+    mats = core.materials_in_unit(db, level_id, collection, category, unit, book)
+    if not mats:
+        return send(token, student["telegram_id"], t(lang, "mat_empty", category=category))
+    kb = [[{"text": (m["title"] + "  \u00b7  " + core.human_size(m["size"]))[:60],
+            "callback_data": f"mat:{m['id']}"}] for m in mats[:30]]
+    kb.append([{"text": t(lang, "back"),
+                "callback_data": f"ms:{level_id}:{collection}:{index}"}])
+    return send(token, student["telegram_id"], t(lang, "mat_pick"), keyboard=kb)
+
+
 def offer_files(db, token, student, level_id, collection, index):
     lang = student["lang"]
     names = core.sections(collection)
     if not (0 <= index < len(names)):
         return
     category = names[index]
+    units = core.units_in(db, level_id, collection, category)
+    if units:
+        return offer_units(db, token, student, level_id, collection, index, units)
     mats = core.materials_at_level(db, level_id, collection, category)
     if not mats:
         return send(token, student["telegram_id"],
@@ -1416,6 +1475,21 @@ def handle_callback(db, token, cq):
             _, lid, coll, idx = data.split(":")
             if as_int(lid) and as_int(idx) is not None:
                 offer_files(db, token, student, as_int(lid), coll, as_int(idx))
+        return
+
+    if data.startswith("mu:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, coll, idx, unit = data.split(":")
+            offer_books(db, token, student, as_int(lid), coll, as_int(idx), as_int(unit))
+        return
+
+    if data.startswith("mb:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, coll, idx, unit, book = data.split(":")
+            offer_unit_files(db, token, student, as_int(lid), coll, as_int(idx),
+                             as_int(unit), book)
         return
 
     if data.startswith("mat:"):

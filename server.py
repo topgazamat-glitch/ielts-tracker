@@ -1047,6 +1047,10 @@ def view_materials(req, db):
             rows = ""
             for m in mats:
                 scope = core.level_name(db, m["level_id"]) or "All levels"
+                if m["unit"]:
+                    scope += " · Unit %d" % m["unit"]
+                if m["book"]:
+                    scope += " · " + core.book_label(m["book"])
                 if m["group_id"]:
                     scope += " · " + group_name(db, m["group_id"])
                 note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
@@ -1072,6 +1076,11 @@ def view_materials(req, db):
                     for k in core.COLLECTION_ORDER)
     gopts = ('<option value="">Every class at that level</option>'
              + "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups))
+    uopts = ('<option value="">— none —</option>'
+             + "".join(f'<option value="{n}">Unit {n}</option>' for n in core.UNITS))
+    bopts = ('<option value="">— none —</option>'
+             + "".join(f'<option value="{k}">{E(v)}</option>'
+                       for k, v in core.BOOKS.items()))
     sections_json = json.dumps({k: core.sections(k) for k in core.COLLECTION_ORDER})
     body = f"""<h1>Materials</h1>
 <p class="sub">Filed by level, then collection, then section — the same tree students
@@ -1083,6 +1092,8 @@ walk through in the bot.</p>
 <label class="f">Collection<select name="collection" id="coll">{kopts}</select></label>
 <label class="f">Section<select name="category" id="sect"></select></label>
 <label class="f">Class<select name="group_id">{gopts}</select></label>
+<label class="f">Unit<select name="unit">{uopts}</select></label>
+<label class="f">Book<select name="book">{bopts}</select></label>
 </div>
 <label class="f" style="margin-bottom:12px">Note (optional)
 <input name="note" placeholder="Read before Monday" style="width:100%"></label>
@@ -1134,15 +1145,19 @@ def act_new_material(req, db):
     category = (fields.get("category", [""])[0] or "").strip()
     if category not in core.sections(collection):
         category = core.sections(collection)[0]
+    raw_unit = (fields.get("unit", [""])[0] or "").strip()
+    unit = int(raw_unit) if raw_unit.isdigit() and int(raw_unit) in core.UNITS else None
+    book = (fields.get("book", [""])[0] or "").strip()
+    book = book if book in core.BOOKS else None
     db.execute(
         "INSERT INTO materials (group_id, title, note, filename, original_name, mime,"
-        " size, created_at, level_id, category, collection)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " size, created_at, level_id, category, collection, unit, book)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (int(gid) if gid.isdigit() else None, title[:120],
          (fields.get("note", [""])[0] or "").strip()[:300] or None,
          name, original[:150], uploads.content_type(original), len(blob),
          core.iso(core.now()), int(lid) if lid.isdigit() else None, category,
-         collection),
+         collection, unit, book),
     )
     db.commit()
     return redirect("/materials")
