@@ -10,6 +10,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 # redeploys - everything that must persist (database + photos) lives here.
 DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(ROOT, "data")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+MATERIAL_DIR = os.path.join(DATA_DIR, "materials")
 DB_PATH = os.path.join(DATA_DIR, "app.db")
 CONFIG_PATH = os.path.join(ROOT, "config.json")
 
@@ -89,6 +90,7 @@ def local_day(dt, cfg):
 
 def connect():
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs(MATERIAL_DIR, exist_ok=True)
     db = sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
@@ -239,6 +241,19 @@ def migrate(db):
     if "improves" not in scols:
         db.execute("ALTER TABLE submissions ADD COLUMN improves INTEGER")
     db.executescript("""
+    CREATE TABLE IF NOT EXISTS materials (
+        id INTEGER PRIMARY KEY,
+        group_id INTEGER REFERENCES groups(id),   -- NULL means every class
+        title TEXT NOT NULL,
+        note TEXT,
+        filename TEXT NOT NULL,
+        original_name TEXT,
+        mime TEXT,
+        size INTEGER,
+        telegram_file_id TEXT,                    -- cached after the first send
+        created_at TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1
+    );
     CREATE TABLE IF NOT EXISTS questions (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -749,3 +764,22 @@ def scope_words(db, student_id, list_id, scope, count):
         pool = list(rows)
     random.shuffle(pool)
     return pool[:count]
+
+
+# ------------------------------------------------------------- materials
+
+def materials_for(db, group_id):
+    """Everything shared with this class, plus anything shared with all classes."""
+    return db.execute(
+        "SELECT * FROM materials WHERE active=1 AND (group_id IS NULL OR group_id=?)"
+        " ORDER BY created_at DESC", (group_id,)
+    ).fetchall()
+
+
+def human_size(n):
+    if not n:
+        return ""
+    for unit in ("B", "KB", "MB"):
+        if n < 1024 or unit == "MB":
+            return ("%.0f %s" if unit == "B" else "%.1f %s") % (n, unit)
+        n /= 1024.0

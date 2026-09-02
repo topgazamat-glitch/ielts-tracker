@@ -77,6 +77,9 @@ T = {
         'not_listed': 'Not in the list',
         'unassigned_ok': 'Saved without a task. Your teacher will sort it out.',
         'lost': 'I did not understand that. Use the buttons below.',
+        'mat_none': 'No materials have been shared yet.',
+        'mat_pick': 'Materials — tap one to receive it:',
+        'mat_sending': 'Sending...',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -139,6 +142,9 @@ T = {
         'not_listed': 'Нет в списке',
         'unassigned_ok': 'Сохранено без задания. Преподаватель разберётся.',
         'lost': 'Не понял. Используйте кнопки ниже.',
+        'mat_none': 'Материалов пока нет.',
+        'mat_pick': 'Материалы — нажмите, чтобы получить:',
+        'mat_sending': 'Отправляю...',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -201,6 +207,9 @@ T = {
         'not_listed': "Ro'yxatda yo'q",
         'unassigned_ok': "Topshiriqsiz saqlandi. O'qituvchi hal qiladi.",
         'lost': 'Tushunmadim. Quyidagi tugmalardan foydalaning.',
+        'mat_none': "Hozircha materiallar yo'q.",
+        'mat_pick': 'Materiallar — olish uchun bosing:',
+        'mat_sending': 'Yuborilmoqda...',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -329,6 +338,41 @@ def grade_submission(db, token, sub_id, score):
     return row
 
 
+def send_document(token, chat_id, path, filename, caption="", file_id=None):
+    """Send a stored file. Returns Telegram's file_id so the next send is instant."""
+    if file_id:
+        res = call(token, "sendDocument", chat_id=chat_id, document=file_id, caption=caption)
+        if res.get("ok"):
+            return file_id
+    boundary = "----ta" + os.urandom(8).hex()
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    parts = []
+    for name, value in (("chat_id", str(chat_id)), ("caption", caption[:1000])):
+        if value:
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"'
+                f"\r\n\r\n{value}\r\n".encode())
+    safe = (filename or "file").replace('"', "")
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="document";'
+        f' filename="{safe}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
+        + blob + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        API.format(token=token, method="sendDocument"), data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            res = json.load(r)
+    except Exception as exc:
+        return None
+    if res.get("ok"):
+        doc = res["result"].get("document") or {}
+        return doc.get("file_id")
+    return None
+
+
 def download_photo(token, file_id, dest_name):
     info = call(token, "getFile", file_id=file_id)
     if not info.get("ok"):
@@ -380,24 +424,25 @@ def open_assignments(db, group_id):
 BUTTONS = {
     "en": ["\U0001F4CB What's left", "\U0001F4CA My progress",
            "\U0001F4DA Practise words", "\U0001F3C6 Rating",
-           "\u2753 Ask teacher"],
+           "\U0001F4C1 Materials", "\u2753 Ask teacher"],
     "ru": ["\U0001F4CB Что осталось", "\U0001F4CA Мой прогресс",
            "\U0001F4DA Учить слова", "\U0001F3C6 Рейтинг",
-           "\u2753 Вопрос учителю"],
+           "\U0001F4C1 Материалы", "\u2753 Вопрос учителю"],
     "uz": ["\U0001F4CB Nima qoldi", "\U0001F4CA Natijam",
            "\U0001F4DA So'z mashqi", "\U0001F3C6 Reyting",
-           "\u2753 Savol berish"],
+           "\U0001F4C1 Materiallar", "\u2753 Savol berish"],
 }
 # every label, in every language, mapped to the command it stands for
 BUTTON_COMMANDS = {}
 for _lang, _labels in BUTTONS.items():
-    for _cmd, _label in zip(("/homework", "/progress", "/vocab", "/rating", "/ask"), _labels):
+    for _cmd, _label in zip(("/homework", "/progress", "/vocab", "/rating",
+                             "/materials", "/ask"), _labels):
         BUTTON_COMMANDS[_label] = _cmd
 
 
 def main_keyboard(lang):
     b = BUTTONS.get(lang, BUTTONS["en"])
-    return {"keyboard": [[b[0], b[1]], [b[2], b[3]], [b[4]]],
+    return {"keyboard": [[b[0], b[1]], [b[2], b[3]], [b[4], b[5]]],
             "resize_keyboard": True, "is_persistent": True}
 
 
@@ -407,14 +452,17 @@ def set_commands(token):
         None: [("homework", "what is left to do"), ("progress", "my scores and chart"),
                ("vocab", "practise vocabulary"), ("rating", "class standings"),
                ("ask", "ask the teacher a question"), ("language", "change language"),
+               ("materials", "books and handouts"),
                ("cancel", "stop what you are doing")],
         "ru": [("homework", "что осталось сделать"), ("progress", "мои оценки и график"),
                ("vocab", "учить слова"), ("rating", "рейтинг группы"),
                ("ask", "задать вопрос преподавателю"), ("language", "сменить язык"),
+               ("materials", "книги и материалы"),
                ("cancel", "отменить текущее действие")],
         "uz": [("homework", "nima qolgan"), ("progress", "natijalarim va grafik"),
                ("vocab", "so'z mashqi"), ("rating", "guruh reytingi"),
                ("ask", "o'qituvchiga savol"), ("language", "tilni o'zgartirish"),
+               ("materials", "kitob va materiallar"),
                ("cancel", "joriy amalni bekor qilish")],
     }
     ok = True
@@ -853,6 +901,16 @@ def handle_text(db, token, msg):
             return send(token, tid, t(lang, "no_group"))
         return send(token, tid, checklist_text(db, student, lang))
 
+    if text.startswith("/materials"):
+        if not student:
+            return send(token, tid, t(lang, "no_group"))
+        mats = core.materials_for(db, student["group_id"])
+        if not mats:
+            return send(token, tid, t(lang, "mat_none"))
+        kb = [[{"text": (m["title"] + "  \u00b7  " + core.human_size(m["size"]))[:60],
+                "callback_data": f"mat:{m['id']}"}] for m in mats[:20]]
+        return send(token, tid, t(lang, "mat_pick"), keyboard=kb)
+
     if text.startswith("/ask"):
         if not student:
             return send(token, tid, t(lang, "no_group"))
@@ -1068,6 +1126,26 @@ def handle_callback(db, token, cq):
         if student:
             set_state(db, tid, "improve", {"submission": int(data.split(":")[1])})
             send(token, tid, t(student["lang"], "improve") + " \u2b07")
+        return
+
+    if data.startswith("mat:"):
+        student = student_of(db, tid)
+        if not student:
+            return
+        m = db.execute("SELECT * FROM materials WHERE id=? AND active=1",
+                       (int(data.split(":")[1]),)).fetchone()
+        if not m:
+            return
+        send(token, tid, t(student["lang"], "mat_sending"))
+        path = os.path.join(core.MATERIAL_DIR, m["filename"])
+        if not os.path.exists(path):
+            return send(token, tid, t(student["lang"], "mat_none"))
+        caption = m["title"] + (("\n" + m["note"]) if m["note"] else "")
+        fid = send_document(token, tid, path, m["original_name"] or m["filename"],
+                            caption, m["telegram_file_id"])
+        if fid and fid != m["telegram_file_id"]:
+            db.execute("UPDATE materials SET telegram_file_id=? WHERE id=?", (fid, m["id"]))
+            db.commit()
         return
 
     if data.startswith("vl:"):

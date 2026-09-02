@@ -28,7 +28,7 @@ def export():
 
 def export_db(db):
     data = {"groups": [], "students": [], "assignments": [], "submissions": [],
-            "word_lists": [], "questions": []}
+            "word_lists": [], "questions": [], "materials": []}
 
     for g in db.execute("SELECT * FROM groups"):
         data["groups"].append({"name": g["name"], "join_code": g["join_code"]})
@@ -89,13 +89,25 @@ def export_db(db):
                                           (wl["id"],))],
         })
 
+    for m in db.execute("SELECT * FROM materials WHERE active=1"):
+        path = os.path.join(core.MATERIAL_DIR, m["filename"])
+        blob = None
+        if TABLES_WITH_PHOTOS and os.path.exists(path):
+            with open(path, "rb") as fh:
+                blob = base64.b64encode(fh.read()).decode()
+        data["materials"].append({
+            "title": m["title"], "note": m["note"], "group": gname.get(m["group_id"]),
+            "original_name": m["original_name"], "mime": m["mime"], "size": m["size"],
+            "filename": m["filename"], "data": blob,
+        })
+
     return data
 
 
 def import_all(db, data):
     """Merge into whatever is already there. Safe to run more than once."""
     added = {"groups": 0, "students": 0, "assignments": 0, "submissions": 0,
-             "photos": 0, "word_lists": 0}
+             "photos": 0, "word_lists": 0, "materials": 0}
 
     gid = {}
     for g in data.get("groups", []):
@@ -187,6 +199,22 @@ def import_all(db, data):
                        " VALUES (?,?,?,?,?)",
                        (lid, w["term"], w["translation"], w.get("example"), i))
         added["word_lists"] += 1
+
+    for m in data.get("materials", []):
+        if db.execute("SELECT id FROM materials WHERE filename=?",
+                      (m["filename"],)).fetchone():
+            continue
+        db.execute(
+            "INSERT INTO materials (group_id, title, note, filename, original_name,"
+            " mime, size, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (gid.get(m.get("group")), m["title"], m.get("note"), m["filename"],
+             m.get("original_name"), m.get("mime"), m.get("size"), core.iso(core.now())))
+        if m.get("data"):
+            path = os.path.join(core.MATERIAL_DIR, m["filename"])
+            if not os.path.exists(path):
+                with open(path, "wb") as fh:
+                    fh.write(base64.b64decode(m["data"]))
+        added["materials"] = added.get("materials", 0) + 1
 
     db.commit()
     return added

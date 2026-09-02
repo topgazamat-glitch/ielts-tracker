@@ -3,10 +3,11 @@
 `cgi.FieldStorage` is deprecated and gone in newer Pythons, so the small amount
 of parsing this app needs is done here instead.
 """
+import os
 import re
 import struct
 
-MAX_BYTES = 25 * 1024 * 1024   # whole request
+MAX_BYTES = 50 * 1024 * 1024   # whole request; Telegram will not send more
 MAX_FILES = 6
 
 
@@ -61,3 +62,29 @@ def image_size(data):
                 return w, h, "jpeg"
             i += 2 + length
     return None, None, None
+
+
+EXT_TYPES = {
+    ".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg",
+    ".oga": "audio/ogg", ".wav": "audio/wav", ".mp4": "video/mp4",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".txt": "text/plain", ".zip": "application/zip",
+}
+
+
+def content_type(name):
+    ext = os.path.splitext(name or "")[1].lower()
+    return EXT_TYPES.get(ext, "application/octet-stream")
+
+
+def safe_ext(name):
+    """Keep the extension so the file opens correctly; discard everything else."""
+    ext = os.path.splitext(name or "")[1].lower()
+    return ext if ext in EXT_TYPES else ""

@@ -36,7 +36,7 @@ def page(title, body, active=""):
 <span class="brand"><span class="mark">A</span>AzamatEnglish</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
-{nav('/roster', 'Students')}{nav('/vocab', 'Vocabulary')}{nav('/questions', 'Questions')}</nav>
+{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/questions', 'Questions')}</nav>
 <span class="right"><a href="/logout">Sign out</a></span></header>
 <main>{body}</main></body></html>"""
 
@@ -723,6 +723,15 @@ def view_student_portal(req, db, token, flash=""):
             state = '<span class="pill risk">not submitted</span>'
         hist += f'<tr><td>{E(t["title"])}</td><td>{state}</td></tr>'
 
+    mats = core.materials_for(db, s["group_id"])
+    if mats:
+        items = "".join(
+            f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a></td>'
+            f'<td class="sub">{E(core.human_size(m["size"]))}</td></tr>' for m in mats[:20])
+        materials_html = ('<h2>Materials</h2><div class="tablewrap" style="margin-bottom:16px">'
+                          f'<table>{items}</table></div>')
+    else:
+        materials_html = ""
     avg = fmt(st["average"])
     comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
     body = f"""<h1>{E(s["name"])}</h1>
@@ -747,6 +756,7 @@ def view_student_portal(req, db, token, flash=""):
 {stat("Completion", comp)}</div>
 <h2>Your progress</h2>
 <div class="card">{charts.score_line(st["timeline"])}</div>
+{materials_html}
 <h2>Recent work</h2>
 <div class="card" style="padding:0"><table>{hist or
   '<tr><td class="sub" style="padding:14px">Nothing yet.</td></tr>'}</table></div>
@@ -994,6 +1004,105 @@ def view_export(req, db):
                  ("Content-Length", str(len(payload)))], payload
 
 
+def view_materials(req, db):
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    rows = ""
+    for m in db.execute(
+        "SELECT * FROM materials WHERE active=1 ORDER BY created_at DESC"
+    ).fetchall():
+        who = group_name(db, m["group_id"]) if m["group_id"] else "All classes"
+        note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
+                if m["note"] else "")
+        rows += (
+            f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
+            f'<td>{E(who)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
+            f'<td>{E(core.human_size(m["size"]))}</td>'
+            f'<td>{E(m["created_at"][:10])}</td>'
+            f'<td><form method="post" action="/materials/{m["id"]}/delete">'
+            f'<button class="ghost">Remove</button></form></td></tr>'
+        )
+    opts = ('<option value="">All classes</option>'
+            + "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups))
+    body = f"""<h1>Materials</h1>
+<p class="sub">Books, handouts, audio — anything you want students to have. They get
+them in the bot under <strong>Materials</strong>, and on their own page.</p>
+<div class="card"><form method="post" action="/materials/new" enctype="multipart/form-data">
+<div class="inline" style="margin-bottom:12px">
+<label class="f">Title<input name="title" placeholder="4000 Essential Words 1 — Unit 15" required></label>
+<label class="f">Class<select name="group_id">{opts}</select></label>
+<label class="f" style="flex:1;min-width:220px">Note (optional)
+<input name="note" placeholder="Read pages 88–92 before Monday" style="width:100%"></label>
+</div>
+<label class="dropzone">
+  <input type="file" name="file" required
+         onchange="this.closest('.dropzone').classList.add('has');
+                   this.nextElementSibling.textContent = this.files[0].name;">
+  <span class="dz-label">Choose a file</span>
+  <span class="dz-hint">PDF, Word, PowerPoint, images, audio or video. Up to 45 MB —
+  that is Telegram's limit for what a bot can send.</span>
+</label>
+<div style="margin-top:12px"><button>Upload</button></div></form></div>
+<div class="tablewrap"><table><tr><th>Title</th><th>Shared with</th><th>File</th>
+<th>Size</th><th>Added</th><th></th></tr>
+{rows or '<tr><td colspan=6 class="sub">Nothing uploaded yet.</td></tr>'}</table></div>"""
+    return html_response(page("Materials", body, "Materials"))
+
+
+def act_new_material(req, db):
+    fields, files = req["files"]
+    title = (fields.get("title", [""])[0] or "").strip()
+    if not title or not files:
+        return redirect("/materials")
+    original, blob = files[0]
+    if len(blob) > 45 * 1024 * 1024:
+        return redirect("/materials")
+    gid = (fields.get("group_id", [""])[0] or "").strip()
+    ext = uploads.safe_ext(original)
+    name = f"m{int(core.now().timestamp())}_{secrets.token_hex(4)}{ext}"
+    with open(os.path.join(core.MATERIAL_DIR, name), "wb") as fh:
+        fh.write(blob)
+    db.execute(
+        "INSERT INTO materials (group_id, title, note, filename, original_name, mime,"
+        " size, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (int(gid) if gid.isdigit() else None, title[:120],
+         (fields.get("note", [""])[0] or "").strip()[:300] or None,
+         name, original[:150], uploads.content_type(original), len(blob),
+         core.iso(core.now())),
+    )
+    db.commit()
+    return redirect("/materials")
+
+
+def act_delete_material(req, db, mid):
+    row = db.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
+    if row:
+        path = os.path.join(core.MATERIAL_DIR, row["filename"])
+        if os.path.exists(path):
+            os.remove(path)
+        db.execute("DELETE FROM materials WHERE id=?", (mid,))
+        db.commit()
+    return redirect("/materials")
+
+
+def serve_material(db, mid):
+    row = db.execute("SELECT * FROM materials WHERE id=? AND active=1", (mid,)).fetchone()
+    if not row:
+        return not_found()
+    path = os.path.join(core.MATERIAL_DIR, row["filename"])
+    if not os.path.isfile(path):
+        return not_found()
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    fname = (row["original_name"] or row["filename"]).replace('"', "")
+    return 200, [("Content-Type", row["mime"] or "application/octet-stream"),
+                 ("Content-Disposition", f'inline; filename="{fname}"'),
+                 ("Content-Length", str(len(blob)))], blob
+
+
+def view_material_file(req, db, mid):
+    return serve_material(db, mid)
+
+
 # ----------------------------------------------------------------- actions
 
 def act_grade(req, db):
@@ -1227,6 +1336,9 @@ ROUTES = [
     ("GET", r"^/import$", view_import),
     ("GET", r"^/backup\.json$", view_backup),
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
+    ("GET", r"^/materials$", view_materials),
+    ("GET", r"^/materials/(\d+)/file$", view_material_file),
+    ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
     ("GET", r"^/skip$", act_skip),
@@ -1318,6 +1430,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static(path)
         if path.startswith("/s/"):
             return self._student_get(path, query)
+        if re.match(r"^/materials/\d+/file$", path):
+            db = core.connect()
+            try:
+                return self._send(*serve_material(db, int(path.split("/")[2])))
+            finally:
+                db.close()
         if path == "/login":
             return self._send(*view_login(None))
         if path == "/logout":
@@ -1337,6 +1455,18 @@ class Handler(BaseHTTPRequestHandler):
                 student_page("Too large", "<h1>Those photos are too large</h1>"
                              "<p class='sub'>Send fewer pages at a time.</p>"), 413))
         body = self.rfile.read(length) if length else b""
+
+        if path == "/materials/new":
+            if not self._session():
+                return self._send(*redirect("/login"))
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_new_material(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
 
         if path == "/import":
             if not self._session():
