@@ -63,6 +63,20 @@ T = {
         'vq_scope': 'Which words?',
         'vq_gap': 'Fill the gap:',
         'vq_w2m': 'What does this word mean?',
+        'welcome2': "Here is how it works:\n\n📸 Send a photo of your homework — that is all you need to do.\n📋 What's left — see your tasks\n📊 My progress — your scores\n📚 Practise words — vocabulary\n\nTry the buttons below.",
+        'cancelled': 'Cancelled.',
+        'nothing_cancel': 'Nothing to cancel.',
+        'quiz_start': 'Start practice (10 words)',
+        'quiz_options': 'Choose how',
+        'quiz_stop': 'Stop',
+        'quiz_score': '{correct} of {asked} so far',
+        'undo': 'Delete this',
+        'undone': 'Deleted. You can send it again.',
+        'undo_late': 'That one has already been graded, so it cannot be deleted.',
+        'more_pages': 'Sending more photos now will add them to the same homework.',
+        'not_listed': 'Not in the list',
+        'unassigned_ok': 'Saved without a task. Your teacher will sort it out.',
+        'lost': 'I did not understand that. Use the buttons below.',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -111,6 +125,20 @@ T = {
         'vq_scope': 'Какие слова?',
         'vq_gap': 'Заполните пропуск:',
         'vq_w2m': 'Что означает это слово?',
+        'welcome2': 'Как это работает:\n\n📸 Отправьте фото домашней работы — это всё.\n📋 Что осталось — ваши задания\n📊 Мой прогресс — оценки\n📚 Учить слова — словарь\n\nПопробуйте кнопки ниже.',
+        'cancelled': 'Отменено.',
+        'nothing_cancel': 'Нечего отменять.',
+        'quiz_start': 'Начать (10 слов)',
+        'quiz_options': 'Выбрать режим',
+        'quiz_stop': 'Остановить',
+        'quiz_score': '{correct} из {asked} верно',
+        'undo': 'Удалить',
+        'undone': 'Удалено. Можете отправить снова.',
+        'undo_late': 'Эта работа уже проверена, удалить нельзя.',
+        'more_pages': 'Следующие фото добавятся к этой же работе.',
+        'not_listed': 'Нет в списке',
+        'unassigned_ok': 'Сохранено без задания. Преподаватель разберётся.',
+        'lost': 'Не понял. Используйте кнопки ниже.',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -159,6 +187,20 @@ T = {
         'vq_scope': "Qaysi so'zlar?",
         'vq_gap': "Bo'sh joyni to'ldiring:",
         'vq_w2m': "Bu so'z nimani anglatadi?",
+        'welcome2': "Bu qanday ishlaydi:\n\n📸 Uy vazifangiz rasmini yuboring — hammasi shu.\n📋 Nima qoldi — topshiriqlaringiz\n📊 Natijam — baholaringiz\n📚 So'z mashqi — lug'at\n\nQuyidagi tugmalarni bosing.",
+        'cancelled': 'Bekor qilindi.',
+        'nothing_cancel': "Bekor qiladigan narsa yo'q.",
+        'quiz_start': "Boshlash (10 ta so'z)",
+        'quiz_options': 'Rejimni tanlash',
+        'quiz_stop': "To'xtatish",
+        'quiz_score': "{asked} tadan {correct} to'g'ri",
+        'undo': "O'chirish",
+        'undone': "O'chirildi. Qaytadan yuborishingiz mumkin.",
+        'undo_late': "Bu ish allaqachon tekshirilgan, o'chirib bo'lmaydi.",
+        'more_pages': "Keyingi rasmlar shu ishga qo'shiladi.",
+        'not_listed': "Ro'yxatda yo'q",
+        'unassigned_ok': "Topshiriqsiz saqlandi. O'qituvchi hal qiladi.",
+        'lost': 'Tushunmadim. Quyidagi tugmalardan foydalaning.',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -364,13 +406,16 @@ def set_commands(token):
     menus = {
         None: [("homework", "what is left to do"), ("progress", "my scores and chart"),
                ("vocab", "practise vocabulary"), ("rating", "class standings"),
-               ("ask", "ask the teacher a question"), ("language", "change language")],
+               ("ask", "ask the teacher a question"), ("language", "change language"),
+               ("cancel", "stop what you are doing")],
         "ru": [("homework", "что осталось сделать"), ("progress", "мои оценки и график"),
                ("vocab", "учить слова"), ("rating", "рейтинг группы"),
-               ("ask", "задать вопрос преподавателю"), ("language", "сменить язык")],
+               ("ask", "задать вопрос преподавателю"), ("language", "сменить язык"),
+               ("cancel", "отменить текущее действие")],
         "uz": [("homework", "nima qolgan"), ("progress", "natijalarim va grafik"),
                ("vocab", "so'z mashqi"), ("rating", "guruh reytingi"),
-               ("ask", "o'qituvchiga savol"), ("language", "tilni o'zgartirish")],
+               ("ask", "o'qituvchiga savol"), ("language", "tilni o'zgartirish"),
+               ("cancel", "joriy amalni bekor qilish")],
     }
     ok = True
     for lang, items in menus.items():
@@ -402,6 +447,14 @@ SCOPE_LABELS = {
 
 
 def offer_modes(db, token, student, list_id):
+    """One obvious button to begin; everything else behind 'Choose how'."""
+    lang = student["lang"]
+    kb = [[{"text": t(lang, "quiz_start"), "callback_data": f"vg:{list_id}:mix:all:10"}],
+          [{"text": t(lang, "quiz_options"), "callback_data": f"vo:{list_id}"}]]
+    return send(token, student["telegram_id"], t(lang, "vq_mode"), keyboard=kb)
+
+
+def offer_modes_full(db, token, student, list_id):
     lang = student["lang"]
     labels = MODE_LABELS.get(lang, MODE_LABELS["en"])
     kb = [[{"text": labels["mix"], "callback_data": f"vm:{list_id}:mix"}],
@@ -482,7 +535,10 @@ def ask_question(db, token, student):
     opts = core.quiz_options(db, st["list"], word)
     kb = [[{"text": o[options][:60], "callback_data": f"q:{st['session']}:{o['id']}"}]
           for o in opts]
+    kb.append([{"text": t(lang, "quiz_stop"), "callback_data": "qstop"}])
     head = counter + "\n\n" + (label + "\n\n" if label else "") + prompt
+    if idx:
+        head = t(lang, "quiz_score", correct=st.get("correct", 0), asked=idx) + "\n\n" + head
     send(token, tid, head, keyboard=kb)
 
 
@@ -695,7 +751,14 @@ def join_group(db, token, tid, name, code, lang):
     db.commit()
     set_state(db, tid, None)
     send(token, tid, t(lang, "joined", group=g["name"]), markup=main_keyboard(lang))
-    return send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
+    send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
+    student = student_of(db, tid)
+    send(token, tid, t(lang, "welcome2"))
+    if student:
+        sets = core.open_sets(db, student["group_id"])
+        if sets:
+            send(token, tid, checklist_text(db, student, lang))
+    return
 
 
 def handle_text(db, token, msg):
@@ -837,6 +900,12 @@ def handle_text(db, token, msg):
         n = db.execute("SELECT COUNT(*) c FROM submissions WHERE status='pending'").fetchone()["c"]
         return send(token, tid, f"{n} submission(s) waiting to be graded.")
 
+    if text.startswith("/cancel") or text.startswith("/stop"):
+        step, _ = get_state(db, tid)
+        set_state(db, tid, None)
+        return send(token, tid, t(lang, "cancelled" if step else "nothing_cancel"),
+                    markup=main_keyboard(lang) if student else None)
+
     if text.startswith("/help"):
         return send(token, tid, t(lang, "help"))
 
@@ -853,7 +922,7 @@ def handle_text(db, token, msg):
 
     if not student:
         return send(token, tid, t(lang, "no_group"))
-    return send(token, tid, t(lang, "help"))
+    return send(token, tid, t(lang, "lost"), markup=main_keyboard(lang))
 
 
 def handle_photo(db, token, msg):
@@ -922,14 +991,20 @@ def handle_photo(db, token, msg):
         return send(token, tid, t(lang, "no_assignment"))
     kb = None
     if len(opens) > 1:
-        done_ids = set()
-        for _due, items in core.open_sets(db, student["group_id"]):
-            done_ids |= core.set_progress(db, student["id"], items)["done_ids"]
+        done_ids = {r["assignment_id"] for r in db.execute(
+            "SELECT DISTINCT assignment_id FROM submissions WHERE student_id=?"
+            " AND assignment_id IS NOT NULL AND id!=?", (student["id"], sub_id))}
+        # what they still owe comes first - that is almost always the answer
+        ordered = ([a for a in opens if a["id"] not in done_ids]
+                   + [a for a in opens if a["id"] in done_ids])
         kb = [[{"text": (("\u2705 " if a["id"] in done_ids else "\u2b1c ") + a["title"])[:60],
                 "callback_data": f"pick:{sub_id}:{a['id']}"}]
-              for a in opens[:12]]
+              for a in ordered[:12]]
+        kb.append([{"text": t(lang, "not_listed"), "callback_data": f"pick:{sub_id}:0"}])
         return send(token, tid, t(lang, "which"), keyboard=kb)
-    send(token, tid, t(lang, "received", title=opens[0]["title"]))
+    send(token, tid,
+         t(lang, "received", title=opens[0]["title"]) + "\n" + t(lang, "more_pages"),
+         keyboard=[[{"text": t(lang, "undo"), "callback_data": f"del:{sub_id}"}]])
     return send(token, tid, remaining_text(db, student, opens[0]["due_at"]))
 
 
@@ -1001,6 +1076,40 @@ def handle_callback(db, token, cq):
             offer_modes(db, token, student, int(data.split(":")[1]))
         return
 
+    if data == "qstop":
+        student = student_of(db, tid)
+        set_state(db, tid, None)
+        if student:
+            send(token, tid, t(student["lang"], "cancelled"),
+                 markup=main_keyboard(student["lang"]))
+        return
+
+    if data.startswith("vo:"):
+        student = student_of(db, tid)
+        if student:
+            offer_modes_full(db, token, student, int(data.split(":")[1]))
+        return
+
+    if data.startswith("del:"):
+        student = student_of(db, tid)
+        if not student:
+            return
+        sub_id = int(data.split(":")[1])
+        row = db.execute("SELECT * FROM submissions WHERE id=? AND student_id=?",
+                         (sub_id, student["id"])).fetchone()
+        if not row:
+            return
+        if row["status"] == "graded":
+            return send(token, tid, t(student["lang"], "undo_late"))
+        for f in db.execute("SELECT filename FROM files WHERE submission_id=?", (sub_id,)):
+            path = os.path.join(core.UPLOAD_DIR, f["filename"])
+            if os.path.exists(path):
+                os.remove(path)
+        db.execute("DELETE FROM files WHERE submission_id=?", (sub_id,))
+        db.execute("DELETE FROM submissions WHERE id=?", (sub_id,))
+        db.commit()
+        return send(token, tid, t(student["lang"], "undone"))
+
     if data.startswith("vm:"):
         student = student_of(db, tid)
         if student:
@@ -1060,13 +1169,20 @@ def handle_callback(db, token, cq):
         student = student_of(db, tid)
         if not student:
             return
+        if aid == "0":
+            db.execute("UPDATE submissions SET assignment_id=NULL WHERE id=? AND student_id=?",
+                       (int(sub_id), student["id"]))
+            db.commit()
+            return send(token, tid, t(student["lang"], "unassigned_ok"))
         db.execute(
             "UPDATE submissions SET assignment_id=? WHERE id=? AND student_id=?",
             (int(aid), int(sub_id), student["id"]),
         )
         db.commit()
         a = db.execute("SELECT * FROM assignments WHERE id=?", (int(aid),)).fetchone()
-        send(token, tid, t(student["lang"], "reassigned", title=a["title"]))
+        send(token, tid, t(student["lang"], "reassigned", title=a["title"]),
+             keyboard=[[{"text": t(student["lang"], "undo"),
+                         "callback_data": f"del:{sub_id}"}]])
         return send(token, tid, remaining_text(db, student, a["due_at"]))
 
 
