@@ -20,8 +20,7 @@ T = {
         "ask_name": "Welcome! What is your full name?",
         "ask_code": "Thanks, {name}. Now send your group's join code (6 characters).",
         "bad_code": "I don't recognise that code. Ask your teacher and try again.",
-        "joined": "You're in {group} ✅\n\nSend a photo of your handwritten homework any time.\n"
-                  "/progress — your scores\n/language — change language",
+        'joined': "You're in {group} ✅",
         "no_group": "You're not in a group yet. Send /start to join.",
         "too_small": "That photo is too small to read. Please retake it: flat page, "
                      "top-down, whole page in frame, good light.",
@@ -63,7 +62,7 @@ T = {
         'vq_scope': 'Which words?',
         'vq_gap': 'Fill the gap:',
         'vq_w2m': 'What does this word mean?',
-        'welcome2': "Here is how it works:\n\n📸 Send a photo of your homework — that is all you need to do.\n📋 What's left — see your tasks\n📊 My progress — your scores\n📚 Practise words — vocabulary\n\nTry the buttons below.",
+        'welcome2': 'Here is how it works:\n\n📸 Send a photo of your homework — that is all you need to do.\n\n📝 Homework — what is left, your scores, word practice\n📁 Materials — books, handouts and audio for your level',
         'cancelled': 'Cancelled.',
         'nothing_cancel': 'Nothing to cancel.',
         'quiz_start': 'Start practice (10 words)',
@@ -93,14 +92,17 @@ T = {
         'menu_mat': '📁 Materials',
         'menu_coll': '{level} — which materials?',
         'menu_sect': '{collection} — choose a section:',
+        'hk_progress': '📊 My progress',
+        'hk_rating': '🏆 Rating',
+        'hk_vocab': '📚 Practise words',
+        'hk_ask': '❓ Ask teacher',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
         "ask_name": "Добро пожаловать! Как вас зовут (имя и фамилия)?",
         "ask_code": "Спасибо, {name}. Теперь отправьте код группы (6 символов).",
         "bad_code": "Такой код не найден. Уточните у преподавателя и попробуйте снова.",
-        "joined": "Вы в группе {group} ✅\n\nОтправляйте фото домашней работы в любое время.\n"
-                  "/progress — ваши оценки\n/language — сменить язык",
+        'joined': 'Вы в группе {group} ✅',
         "no_group": "Вы ещё не в группе. Отправьте /start.",
         "too_small": "Фото слишком мелкое. Переснимите: страница ровно, сверху, "
                      "полностью в кадре, при хорошем свете.",
@@ -141,7 +143,7 @@ T = {
         'vq_scope': 'Какие слова?',
         'vq_gap': 'Заполните пропуск:',
         'vq_w2m': 'Что означает это слово?',
-        'welcome2': 'Как это работает:\n\n📸 Отправьте фото домашней работы — это всё.\n📋 Что осталось — ваши задания\n📊 Мой прогресс — оценки\n📚 Учить слова — словарь\n\nПопробуйте кнопки ниже.',
+        'welcome2': 'Как это работает:\n\n📸 Отправьте фото домашней работы — это всё.\n\n📝 Домашнее задание — что осталось, оценки, слова\n📁 Материалы — книги, раздатки и аудио для вашего уровня',
         'cancelled': 'Отменено.',
         'nothing_cancel': 'Нечего отменять.',
         'quiz_start': 'Начать (10 слов)',
@@ -171,14 +173,17 @@ T = {
         'menu_mat': '📁 Материалы',
         'menu_coll': '{level} — какие материалы?',
         'menu_sect': '{collection} — выберите раздел:',
+        'hk_progress': '📊 Мой прогресс',
+        'hk_rating': '🏆 Рейтинг',
+        'hk_vocab': '📚 Учить слова',
+        'hk_ask': '❓ Вопрос учителю',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
         "ask_name": "Xush kelibsiz! Ism va familiyangizni yozing.",
         "ask_code": "Rahmat, {name}. Endi guruh kodini yuboring (6 ta belgi).",
         "bad_code": "Bunday kod topilmadi. O'qituvchingizdan so'rab, qayta urinib ko'ring.",
-        "joined": "Siz {group} guruhidasiz ✅\n\nUy vazifangiz rasmini istalgan vaqtda yuboring.\n"
-                  "/progress — ballaringiz\n/language — tilni o'zgartirish",
+        'joined': 'Siz {group} guruhidasiz ✅',
         "no_group": "Siz hali guruhda emassiz. /start yuboring.",
         "too_small": "Rasm juda kichik. Qaytadan oling: varaq tekis, tepadan, "
                      "to'liq kadrda, yorug'likda.",
@@ -219,7 +224,7 @@ T = {
         'vq_scope': "Qaysi so'zlar?",
         'vq_gap': "Bo'sh joyni to'ldiring:",
         'vq_w2m': "Bu so'z nimani anglatadi?",
-        'welcome2': "Bu qanday ishlaydi:\n\n📸 Uy vazifangiz rasmini yuboring — hammasi shu.\n📋 Nima qoldi — topshiriqlaringiz\n📊 Natijam — baholaringiz\n📚 So'z mashqi — lug'at\n\nQuyidagi tugmalarni bosing.",
+        'welcome2': "Bu qanday ishlaydi:\n\n📸 Uy vazifangiz rasmini yuboring — hammasi shu.\n\n📝 Uy vazifasi — nima qolgan, natijalar, so'zlar\n📁 Materiallar — darajangiz uchun kitob, material va audio",
         'cancelled': 'Bekor qilindi.',
         'nothing_cancel': "Bekor qiladigan narsa yo'q.",
         'quiz_start': "Boshlash (10 ta so'z)",
@@ -249,6 +254,10 @@ T = {
         'menu_mat': '📁 Materiallar',
         'menu_coll': '{level} — qaysi materiallar?',
         'menu_sect': "{collection} — bo'limni tanlang:",
+        'hk_progress': '📊 Natijam',
+        'hk_rating': '🏆 Reyting',
+        'hk_vocab': "📚 So'z mashqi",
+        'hk_ask': '❓ Savol berish',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -460,48 +469,38 @@ def open_assignments(db, group_id):
 
 # ------------------------------------------------------------ vocabulary
 
+# Two buttons and nothing else. Everything that used to sit on the keyboard now
+# lives one tap inside Homework.
 BUTTONS = {
-    "en": ["\U0001F4CB What's left", "\U0001F4CA My progress",
-           "\U0001F4DA Practise words", "\U0001F3C6 Rating",
-           "\U0001F4C1 Materials", "\u2753 Ask teacher"],
-    "ru": ["\U0001F4CB Что осталось", "\U0001F4CA Мой прогресс",
-           "\U0001F4DA Учить слова", "\U0001F3C6 Рейтинг",
-           "\U0001F4C1 Материалы", "\u2753 Вопрос учителю"],
-    "uz": ["\U0001F4CB Nima qoldi", "\U0001F4CA Natijam",
-           "\U0001F4DA So'z mashqi", "\U0001F3C6 Reyting",
-           "\U0001F4C1 Materiallar", "\u2753 Savol berish"],
+    "en": ["\U0001F4DD Homework", "\U0001F4C1 Materials"],
+    "ru": ["\U0001F4DD Домашнее задание", "\U0001F4C1 Материалы"],
+    "uz": ["\U0001F4DD Uy vazifasi", "\U0001F4C1 Materiallar"],
 }
-# every label, in every language, mapped to the command it stands for
 BUTTON_COMMANDS = {}
 for _lang, _labels in BUTTONS.items():
-    for _cmd, _label in zip(("/homework", "/progress", "/vocab", "/rating",
-                             "/materials", "/ask"), _labels):
+    for _cmd, _label in zip(("/homework", "/materials"), _labels):
         BUTTON_COMMANDS[_label] = _cmd
 
 
 def main_keyboard(lang):
     b = BUTTONS.get(lang, BUTTONS["en"])
-    return {"keyboard": [[b[0], b[1]], [b[2], b[3]], [b[4], b[5]]],
-            "resize_keyboard": True, "is_persistent": True}
+    return {"keyboard": [[b[0], b[1]]], "resize_keyboard": True, "is_persistent": True}
 
 
 def set_commands(token):
     """The menu button next to the message box, in each language."""
     menus = {
-        None: [("homework", "what is left to do"), ("progress", "my scores and chart"),
-               ("vocab", "practise vocabulary"), ("rating", "class standings"),
-               ("ask", "ask the teacher a question"), ("language", "change language"),
-               ("materials", "books and handouts"),
+        None: [("homework", "homework and your scores"),
+               ("materials", "books, handouts and audio"),
+               ("language", "change language"),
                ("cancel", "stop what you are doing")],
-        "ru": [("homework", "что осталось сделать"), ("progress", "мои оценки и график"),
-               ("vocab", "учить слова"), ("rating", "рейтинг группы"),
-               ("ask", "задать вопрос преподавателю"), ("language", "сменить язык"),
-               ("materials", "книги и материалы"),
+        "ru": [("homework", "задания и оценки"),
+               ("materials", "книги, материалы, аудио"),
+               ("language", "сменить язык"),
                ("cancel", "отменить текущее действие")],
-        "uz": [("homework", "nima qolgan"), ("progress", "natijalarim va grafik"),
-               ("vocab", "so'z mashqi"), ("rating", "guruh reytingi"),
-               ("ask", "o'qituvchiga savol"), ("language", "tilni o'zgartirish"),
-               ("materials", "kitob va materiallar"),
+        "uz": [("homework", "vazifa va natijalar"),
+               ("materials", "kitob, material, audio"),
+               ("language", "tilni o'zgartirish"),
                ("cancel", "joriy amalni bekor qilish")],
     }
     ok = True
@@ -802,7 +801,6 @@ def offer_collections(db, token, student, level_id):
     counts = core.collection_counts(db, level_id)
     kb = [[{"text": "%s (%d)" % (core.collection_label(key), counts.get(key, 0)),
             "callback_data": f"mk:{level_id}:{key}"}] for key in core.COLLECTION_ORDER]
-    kb.append([{"text": t(lang, "back"), "callback_data": f"ml:{level_id}"}])
     return send(token, student["telegram_id"], t(lang, "menu_coll", level=lvl), keyboard=kb)
 
 
@@ -836,6 +834,31 @@ def offer_files(db, token, student, level_id, collection, index):
             "callback_data": f"mat:{m['id']}"}] for m in mats[:25]]
     kb.append([{"text": t(lang, "back"), "callback_data": f"mk:{level_id}:{collection}"}])
     return send(token, student["telegram_id"], t(lang, "mat_pick"), keyboard=kb)
+
+
+def send_progress(db, token, student):
+    """Their chart, then their vocabulary standing if they have practised."""
+    lang = student["lang"]
+    tid = student["telegram_id"]
+    st = core.student_stats(db, student["id"])
+    if not st["graded_count"]:
+        return send(token, tid, t(lang, "no_scores"))
+    image, _ = student_chart_png(db, student)
+    send_photo(token, tid, image, t(lang, "chart_caption", avg=st["average"],
+               last3=st["last3"],
+               completion=st["completion"] if st["completion"] is not None else "-"))
+    v = core.vocab_stats(db, student["id"])
+    if v["practised"]:
+        send(token, tid, t(lang, "vocab_stats", known=v["known"], total=v["total"],
+                           mastery=v["mastery"], accuracy=v["accuracy"], due=v["due"]))
+
+
+def homework_keyboard(lang):
+    """What used to live on the keyboard, now inside Homework."""
+    return [[{"text": t(lang, "hk_progress"), "callback_data": "hk:progress"},
+             {"text": t(lang, "hk_rating"), "callback_data": "hk:rating"}],
+            [{"text": t(lang, "hk_vocab"), "callback_data": "hk:vocab"},
+             {"text": t(lang, "hk_ask"), "callback_data": "hk:ask"}]]
 
 
 def rating_text(db, student):
@@ -922,6 +945,10 @@ def offer_all_groups(db, token, tid, lang, only_unlevelled=False):
 def offer_groups(db, token, tid, lang, level_id):
     groups = core.groups_at_level(db, level_id)
     lvl = core.level_name(db, level_id) or ""
+    if len(groups) == 1:
+        # nothing to choose between - go straight to the name
+        set_state(db, tid, "name", {"group_id": groups[0]["id"]})
+        return send(token, tid, t(lang, "ask_name"))
     if not groups:
         # say so and offer a way back, rather than silently re-listing levels
         return send(token, tid, t(lang, "no_groups"),
@@ -1060,28 +1087,21 @@ def handle_text(db, token, msg):
     if text.startswith("/progress"):
         if not student:
             return send(token, tid, t(lang, "no_group"))
-        st = core.student_stats(db, student["id"])
-        if not st["graded_count"]:
-            return send(token, tid, t(lang, "no_scores"))
-        image, _ = student_chart_png(db, student)
-        caption = t(lang, "chart_caption", avg=st["average"], last3=st["last3"],
-                    completion=st["completion"] if st["completion"] is not None else "-")
-        send_photo(token, tid, image, caption)
-        v = core.vocab_stats(db, student["id"])
-        if v["practised"]:
-            send(token, tid, t(lang, "vocab_stats", known=v["known"], total=v["total"],
-                               mastery=v["mastery"], accuracy=v["accuracy"], due=v["due"]))
-        return
+        return send_progress(db, token, student)
 
     if text.startswith("/homework") or text.startswith("/hw"):
         if not student:
             return send(token, tid, t(lang, "no_group"))
-        return send(token, tid, checklist_text(db, student, lang))
+        return send(token, tid, checklist_text(db, student, lang),
+                    keyboard=homework_keyboard(lang))
 
     if text.startswith("/materials"):
         if not student:
             return send(token, tid, t(lang, "no_group"))
-        return offer_material_levels(db, token, student)
+        lvl = core.level_of(db, student["group_id"])
+        if not lvl:
+            return send(token, tid, t(lang, "mat_none"))
+        return offer_collections(db, token, student, lvl)
 
     if text.startswith("/ask"):
         if not student:
@@ -1329,6 +1349,30 @@ def handle_callback(db, token, cq):
         gid = int(data.split(":")[1])
         set_state(db, tid, "name", {"group_id": gid})
         return send(token, tid, t(lang, "ask_name"))
+
+    if data.startswith("hk:"):
+        student = student_of(db, tid)
+        if not student:
+            return
+        what = data.split(":")[1]
+        lang = student["lang"]
+        if what == "progress":
+            return send_progress(db, token, student)
+        if what == "rating":
+            return send(token, tid, rating_text(db, student))
+        if what == "vocab":
+            lists = core.lists_for_student(db, student["id"])
+            if not lists:
+                return send(token, tid, t(lang, "vocab_none"))
+            if len(lists) == 1:
+                return offer_modes(db, token, student, lists[0]["id"])
+            return send(token, tid, t(lang, "vocab_pick"), keyboard=[
+                [{"text": wl["title"][:40], "callback_data": f"vl:{wl['id']}"}]
+                for wl in lists])
+        if what == "ask":
+            set_state(db, tid, "ask")
+            return send(token, tid, t(lang, "ask_prompt"))
+        return
 
     if data.startswith("ml:"):
         student = student_of(db, tid)
