@@ -8,3 +8,6 @@ data/
 __pycache__/
 *.pyc
 .DS_Store
+
+# real data export - student names and photos, never commit
+transfer.json

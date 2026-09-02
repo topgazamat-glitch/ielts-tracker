@@ -908,6 +908,42 @@ def act_answer_question(req, db, qid):
     return redirect("/questions")
 
 
+def view_import(req, db, flash=""):
+    counts = {t: db.execute(f"SELECT COUNT(*) c FROM {t}").fetchone()["c"]
+              for t in ("groups", "students", "assignments", "submissions", "files")}
+    body = f"""<h1>Import data</h1>
+<p class="sub">Move students, homework, submissions and photographs from another
+copy of this system. Run <code>python3 transfer.py export</code> there, then upload
+the <code>transfer.json</code> it produces.</p>
+{flash}
+<div class="card"><form method="post" action="/import" enctype="multipart/form-data">
+<input type="file" name="file" accept=".json,application/json" required
+       style="width:100%;padding:14px;border:1px dashed var(--line)">
+<div style="margin-top:12px"><button>Import</button></div></form>
+<p class="sub" style="margin:10px 0 0">This merges rather than replaces. Anything
+already here is matched and left alone, so importing the same file twice changes
+nothing.</p></div>
+<h2>Currently stored</h2>
+<div class="grid">{"".join(stat(k, v) for k, v in counts.items())}</div>"""
+    return html_response(page("Import", body, ""))
+
+
+def act_import(req, db):
+    _fields, files = req["files"]
+    if not files:
+        return view_import(req, db, '<div class="flash err">No file was attached.</div>')
+    try:
+        data = json.loads(files[0][1].decode("utf-8"))
+    except Exception as exc:
+        return view_import(req, db,
+                           f'<div class="flash err">That file could not be read: {E(str(exc))}</div>')
+    import transfer
+    added = transfer.import_all(db, data)
+    summary = ", ".join(f"{v} {k}" for k, v in added.items() if v)
+    return view_import(req, db,
+                       f'<div class="flash">Imported: {E(summary or "nothing new")}.</div>')
+
+
 def view_export(req, db):
     gid = req["query"].get("group", [None])[0]
     gid = int(gid) if gid and gid.isdigit() else None
@@ -1157,6 +1193,7 @@ ROUTES = [
     ("GET", r"^/ratings$", view_ratings),
     ("GET", r"^/questions$", view_questions),
     ("GET", r"^/export\.csv$", view_export),
+    ("GET", r"^/import$", view_import),
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
@@ -1263,11 +1300,23 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(self.path)
         path = parsed.path
         length = int(self.headers.get("Content-Length") or 0)
-        if length > uploads.MAX_BYTES:
+        if length > uploads.MAX_BYTES:  # covers photo batches and data imports
             return self._send(*html_response(
                 student_page("Too large", "<h1>Those photos are too large</h1>"
                              "<p class='sub'>Send fewer pages at a time.</p>"), 413))
         body = self.rfile.read(length) if length else b""
+
+        if path == "/import":
+            if not self._session():
+                return self._send(*redirect("/login"))
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_import(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
 
         if path.startswith("/s/") and path.endswith("/upload"):
             token = path.split("/")[2]
