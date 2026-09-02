@@ -238,6 +238,10 @@ document.addEventListener('keydown', e => {{
 def view_groups(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
     bot_user = core.meta_get(db, "bot_username", "")
+    levels = db.execute("SELECT * FROM levels ORDER BY sort").fetchall()
+    level_opts = ('<option value="">— no level —</option>'
+                  + "".join(f'<option value="{l["id"]}">{E(l["name"])}</option>'
+                            for l in levels))
     rows = ""
     for g in groups:
         members = db.execute(
@@ -258,8 +262,15 @@ def view_groups(req, db):
                      f'font-family:ui-monospace,Menlo,monospace">')
         else:
             share = '<span class="sub">—</span>'
+        picker = "".join(
+            f'<option value="{l["id"]}"{" selected" if l["id"]==g["level_id"] else ""}>'
+            f'{E(l["name"])}</option>' for l in levels)
+        lvl = (f'<form method="post" action="/groups/{g["id"]}/level">'
+               f'<select name="level_id" onchange="this.form.submit()">'
+               f'<option value="">— none —</option>{picker}</select></form>')
         rows += (
             f'<tr><td><a href="/groups/{g["id"]}">{E(g["name"])}</a></td>'
+            f'<td>{lvl}</td>'
             f'<td><span class="kbd">{E(g["join_code"])}</span></td>'
             f"<td>{members}</td><td>{score_pill(gavg)}</td><td>{share}</td></tr>"
         )
@@ -272,11 +283,12 @@ def view_groups(req, db):
     body = f"""<h1>Groups</h1>
 {invite}
 <div class="card"><form method="post" action="/groups/new" class="inline">
-<label class="f">New group name<input name="name" placeholder="Mon/Wed 18:00" required></label>
+<label class="f">New group name<input name="name" placeholder="114" required></label>
+<label class="f">Level<select name="level_id">{level_opts}</select></label>
 <button>Create</button></form></div>
-<div class="tablewrap"><table><tr><th>Group</th><th>Join code</th><th>Students</th>
-<th>Average</th><th>Invite link</th></tr>
-{rows or '<tr><td colspan=5 class="sub">No groups yet.</td></tr>'}</table></div>"""
+<div class="tablewrap"><table><tr><th>Group</th><th>Level</th><th>Join code</th>
+<th>Students</th><th>Average</th><th>Invite link</th></tr>
+{rows or '<tr><td colspan=6 class="sub">No groups yet.</td></tr>'}</table></div>"""
     return html_response(page("Groups", body, "Groups"))
 
 
@@ -723,15 +735,18 @@ def view_student_portal(req, db, token, flash=""):
             state = '<span class="pill risk">not submitted</span>'
         hist += f'<tr><td>{E(t["title"])}</td><td>{state}</td></tr>'
 
-    mats = core.materials_for(db, s["group_id"])
-    if mats:
+    materials_html = ""
+    for cat in core.CATEGORIES:
+        mats = core.materials_for(db, s["group_id"], cat)
+        if not mats:
+            continue
         items = "".join(
             f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a></td>'
-            f'<td class="sub">{E(core.human_size(m["size"]))}</td></tr>' for m in mats[:20])
-        materials_html = ('<h2>Materials</h2><div class="tablewrap" style="margin-bottom:16px">'
-                          f'<table>{items}</table></div>')
-    else:
-        materials_html = ""
+            f'<td class="sub">{E(core.human_size(m["size"]))}</td></tr>' for m in mats[:25])
+        materials_html += (f'<h2>{E(cat)}</h2><div class="tablewrap">'
+                           f'<table>{items}</table></div>')
+    if materials_html:
+        materials_html = "<h2>Materials</h2>" + materials_html
     avg = fmt(st["average"])
     comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
     body = f"""<h1>{E(s["name"])}</h1>
@@ -1006,45 +1021,74 @@ def view_export(req, db):
 
 def view_materials(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
-    rows = ""
-    for m in db.execute(
-        "SELECT * FROM materials WHERE active=1 ORDER BY created_at DESC"
-    ).fetchall():
-        who = group_name(db, m["group_id"]) if m["group_id"] else "All classes"
-        note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
-                if m["note"] else "")
-        rows += (
-            f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
-            f'<td>{E(who)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
-            f'<td>{E(core.human_size(m["size"]))}</td>'
-            f'<td>{E(m["created_at"][:10])}</td>'
-            f'<td><form method="post" action="/materials/{m["id"]}/delete">'
-            f'<button class="ghost">Remove</button></form></td></tr>'
-        )
-    opts = ('<option value="">All classes</option>'
-            + "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups))
+    levels = db.execute("SELECT * FROM levels ORDER BY sort").fetchall()
+    only = req["query"].get("level", [None])[0]
+    only = int(only) if only and only.isdigit() else None
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    tabs = ('<div class="tabs">' + tab("/materials", "All levels", only is None)
+            + "".join(tab(f'/materials?level={l["id"]}', l["name"], only == l["id"])
+                      for l in levels) + "</div>")
+
+    blocks = ""
+    for cat in core.CATEGORIES:
+        sql = "SELECT * FROM materials WHERE active=1 AND category=?"
+        args = [cat]
+        if only:
+            sql += " AND level_id=?"
+            args.append(only)
+        mats = db.execute(sql + " ORDER BY created_at DESC", args).fetchall()
+        if not mats:
+            continue
+        rows = ""
+        for m in mats:
+            scope = core.level_name(db, m["level_id"]) or "All levels"
+            if m["group_id"]:
+                scope += " · " + group_name(db, m["group_id"])
+            note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
+                    if m["note"] else "")
+            rows += (
+                f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
+                f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
+                f'<td>{E(core.human_size(m["size"]))}</td>'
+                f'<td><form method="post" action="/materials/{m["id"]}/delete">'
+                f'<button class="ghost">Remove</button></form></td></tr>')
+        blocks += (f"<h2>{E(cat)}</h2><div class=\"tablewrap\"><table>"
+                   f"<tr><th>Title</th><th>Level</th><th>File</th><th>Size</th><th></th></tr>"
+                   f"{rows}</table></div>")
+    if not blocks:
+        blocks = ('<div class="card"><p style="margin:0">Nothing uploaded yet for '
+                  'this level.</p></div>')
+
+    lopts = ('<option value="">All levels</option>'
+             + "".join(f'<option value="{l["id"]}">{E(l["name"])}</option>' for l in levels))
+    copts = "".join(f'<option value="{E(c)}">{E(c)}</option>' for c in core.CATEGORIES)
+    gopts = ('<option value="">Every class at that level</option>'
+             + "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups))
     body = f"""<h1>Materials</h1>
-<p class="sub">Books, handouts, audio — anything you want students to have. They get
-them in the bot under <strong>Materials</strong>, and on their own page.</p>
+<p class="sub">Books, handouts and audio, filed by level and section. Students see the
+shelves for their own level under <strong>Materials</strong> in the bot.</p>
 <div class="card"><form method="post" action="/materials/new" enctype="multipart/form-data">
 <div class="inline" style="margin-bottom:12px">
-<label class="f">Title<input name="title" placeholder="4000 Essential Words 1 — Unit 15" required></label>
-<label class="f">Class<select name="group_id">{opts}</select></label>
-<label class="f" style="flex:1;min-width:220px">Note (optional)
-<input name="note" placeholder="Read pages 88–92 before Monday" style="width:100%"></label>
+<label class="f">Title<input name="title" placeholder="Unit 15 - reading passage" required></label>
+<label class="f">Level<select name="level_id">{lopts}</select></label>
+<label class="f">Section<select name="category">{copts}</select></label>
+<label class="f">Class<select name="group_id">{gopts}</select></label>
 </div>
+<label class="f" style="margin-bottom:12px">Note (optional)
+<input name="note" placeholder="Read before Monday" style="width:100%"></label>
 <label class="dropzone">
   <input type="file" name="file" required
          onchange="this.closest('.dropzone').classList.add('has');
                    this.nextElementSibling.textContent = this.files[0].name;">
   <span class="dz-label">Choose a file</span>
   <span class="dz-hint">PDF, Word, PowerPoint, images, audio or video. Up to 45 MB —
-  that is Telegram's limit for what a bot can send.</span>
+  Telegram's limit for what a bot can send.</span>
 </label>
 <div style="margin-top:12px"><button>Upload</button></div></form></div>
-<div class="tablewrap"><table><tr><th>Title</th><th>Shared with</th><th>File</th>
-<th>Size</th><th>Added</th><th></th></tr>
-{rows or '<tr><td colspan=6 class="sub">Nothing uploaded yet.</td></tr>'}</table></div>"""
+{tabs}
+{blocks}"""
     return html_response(page("Materials", body, "Materials"))
 
 
@@ -1061,13 +1105,17 @@ def act_new_material(req, db):
     name = f"m{int(core.now().timestamp())}_{secrets.token_hex(4)}{ext}"
     with open(os.path.join(core.MATERIAL_DIR, name), "wb") as fh:
         fh.write(blob)
+    lid = (fields.get("level_id", [""])[0] or "").strip()
+    category = (fields.get("category", [""])[0] or "").strip()
+    if category not in core.CATEGORIES:
+        category = core.CATEGORIES[0]
     db.execute(
         "INSERT INTO materials (group_id, title, note, filename, original_name, mime,"
-        " size, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        " size, created_at, level_id, category) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (int(gid) if gid.isdigit() else None, title[:120],
          (fields.get("note", [""])[0] or "").strip()[:300] or None,
          name, original[:150], uploads.content_type(original), len(blob),
-         core.iso(core.now())),
+         core.iso(core.now()), int(lid) if lid.isdigit() else None, category),
     )
     db.commit()
     return redirect("/materials")
@@ -1165,12 +1213,22 @@ def act_skip(req, db):
 
 def act_new_group(req, db):
     name = (req["form"].get("name", [""])[0] or "").strip()
+    lid = (req["form"].get("level_id", [""])[0] or "").strip()
     if name:
         db.execute(
-            "INSERT INTO groups (name, join_code, created_at) VALUES (?,?,?)",
-            (name, core.new_join_code(db), core.iso(core.now())),
+            "INSERT INTO groups (name, join_code, created_at, level_id) VALUES (?,?,?,?)",
+            (name, core.new_join_code(db), core.iso(core.now()),
+             int(lid) if lid.isdigit() else None),
         )
         db.commit()
+    return redirect("/groups")
+
+
+def act_set_group_level(req, db, gid):
+    lid = (req["form"].get("level_id", [""])[0] or "").strip()
+    db.execute("UPDATE groups SET level_id=? WHERE id=?",
+               (int(lid) if lid.isdigit() else None, gid))
+    db.commit()
     return redirect("/groups")
 
 
@@ -1345,6 +1403,7 @@ ROUTES = [
     ("POST", r"^/grade$", act_grade),
     ("POST", r"^/skip$", act_skip),
     ("POST", r"^/groups/new$", act_new_group),
+    ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
     ("POST", r"^/assignments/new$", act_new_assignment),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),

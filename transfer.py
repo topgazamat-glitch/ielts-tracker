@@ -31,7 +31,9 @@ def export_db(db):
             "word_lists": [], "questions": [], "materials": []}
 
     for g in db.execute("SELECT * FROM groups"):
-        data["groups"].append({"name": g["name"], "join_code": g["join_code"]})
+        lvl = db.execute("SELECT name FROM levels WHERE id=?", (g["level_id"],)).fetchone()
+        data["groups"].append({"name": g["name"], "join_code": g["join_code"],
+                               "level": lvl["name"] if lvl else None})
 
     gname = {g["id"]: g["name"] for g in db.execute("SELECT * FROM groups")}
 
@@ -95,10 +97,12 @@ def export_db(db):
         if TABLES_WITH_PHOTOS and os.path.exists(path):
             with open(path, "rb") as fh:
                 blob = base64.b64encode(fh.read()).decode()
+        lvl = db.execute("SELECT name FROM levels WHERE id=?", (m["level_id"],)).fetchone()
         data["materials"].append({
             "title": m["title"], "note": m["note"], "group": gname.get(m["group_id"]),
             "original_name": m["original_name"], "mime": m["mime"], "size": m["size"],
             "filename": m["filename"], "data": blob,
+            "level": lvl["name"] if lvl else None, "category": m["category"],
         })
 
     return data
@@ -115,10 +119,24 @@ def import_all(db, data):
                          (g["join_code"], g["name"])).fetchone()
         if row:
             gid[g["name"]] = row["id"]
+            # fill in a level the existing copy is missing, never overwrite one
+            if g.get("level"):
+                cur = db.execute("SELECT level_id FROM groups WHERE id=?",
+                                 (row["id"],)).fetchone()
+                if cur and not cur["level_id"]:
+                    lrow = db.execute("SELECT id FROM levels WHERE name=?",
+                                      (g["level"],)).fetchone()
+                    if lrow:
+                        db.execute("UPDATE groups SET level_id=? WHERE id=?",
+                                   (lrow["id"], row["id"]))
         else:
+            lrow = db.execute("SELECT id FROM levels WHERE name=?",
+                              (g.get("level"),)).fetchone()
             gid[g["name"]] = db.execute(
-                "INSERT INTO groups (name, join_code, created_at) VALUES (?,?,?)",
-                (g["name"], g["join_code"], core.iso(core.now()))).lastrowid
+                "INSERT INTO groups (name, join_code, created_at, level_id)"
+                " VALUES (?,?,?,?)",
+                (g["name"], g["join_code"], core.iso(core.now()),
+                 lrow["id"] if lrow else None)).lastrowid
             added["groups"] += 1
 
     sid = {}
@@ -204,11 +222,14 @@ def import_all(db, data):
         if db.execute("SELECT id FROM materials WHERE filename=?",
                       (m["filename"],)).fetchone():
             continue
+        lrow = db.execute("SELECT id FROM levels WHERE name=?", (m.get("level"),)).fetchone()
         db.execute(
             "INSERT INTO materials (group_id, title, note, filename, original_name,"
-            " mime, size, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            " mime, size, created_at, level_id, category)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (gid.get(m.get("group")), m["title"], m.get("note"), m["filename"],
-             m.get("original_name"), m.get("mime"), m.get("size"), core.iso(core.now())))
+             m.get("original_name"), m.get("mime"), m.get("size"), core.iso(core.now()),
+             lrow["id"] if lrow else None, m.get("category")))
         if m.get("data"):
             path = os.path.join(core.MATERIAL_DIR, m["filename"])
             if not os.path.exists(path):

@@ -14,6 +14,12 @@ MATERIAL_DIR = os.path.join(DATA_DIR, "materials")
 DB_PATH = os.path.join(DATA_DIR, "app.db")
 CONFIG_PATH = os.path.join(ROOT, "config.json")
 
+LEVELS = ["Beginner", "Elementary", "Pre-Intermediate", "Intermediate",
+          "IELTS Novice", "IELTS Standard"]
+
+# the five shelves inside Materials, in the order students see them
+CATEGORIES = ["Reading", "Listening", "Writing", "Speaking", "Vocabulary"]
+
 DEFAULT_TAGS = [
     "Under word count",
     "Watch articles",
@@ -99,6 +105,12 @@ def connect():
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS levels (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    sort INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -278,6 +290,14 @@ def migrate(db):
         db.execute("ALTER TABLE word_lists ADD COLUMN source TEXT")
     if "unit" not in lcols:
         db.execute("ALTER TABLE word_lists ADD COLUMN unit TEXT")
+    gcols = {r["name"] for r in db.execute("PRAGMA table_info(groups)")}
+    if "level_id" not in gcols:
+        db.execute("ALTER TABLE groups ADD COLUMN level_id INTEGER REFERENCES levels(id)")
+    mcols = {r["name"] for r in db.execute("PRAGMA table_info(materials)")}
+    if mcols and "level_id" not in mcols:
+        db.execute("ALTER TABLE materials ADD COLUMN level_id INTEGER REFERENCES levels(id)")
+    if mcols and "category" not in mcols:
+        db.execute("ALTER TABLE materials ADD COLUMN category TEXT")
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "published" not in acols:
         # assignments that already existed were live, so they stay live
@@ -309,6 +329,8 @@ def init_db():
     db = connect()
     db.executescript(SCHEMA)
     migrate(db)
+    for i, name in enumerate(LEVELS):
+        db.execute("INSERT OR IGNORE INTO levels (name, sort) VALUES (?,?)", (name, i))
     for i, label in enumerate(DEFAULT_TAGS):
         db.execute(
             "INSERT OR IGNORE INTO tags (label, sort) VALUES (?, ?)", (label, i)
@@ -768,11 +790,47 @@ def scope_words(db, student_id, list_id, scope, count):
 
 # ------------------------------------------------------------- materials
 
-def materials_for(db, group_id):
-    """Everything shared with this class, plus anything shared with all classes."""
+def level_of(db, group_id):
+    row = db.execute("SELECT level_id FROM groups WHERE id=?", (group_id,)).fetchone()
+    return row["level_id"] if row else None
+
+
+def level_name(db, level_id):
+    if not level_id:
+        return None
+    row = db.execute("SELECT name FROM levels WHERE id=?", (level_id,)).fetchone()
+    return row["name"] if row else None
+
+
+def materials_for(db, group_id, category=None):
+    """What one class can see: their level's shelf, plus anything shared with all.
+
+    A material aimed at a level reaches every class at that level; one aimed at a
+    single class reaches only that class; one with neither reaches everybody.
+    """
+    level_id = level_of(db, group_id)
+    sql = ("SELECT * FROM materials WHERE active=1"
+           " AND (group_id IS NULL OR group_id=?)"
+           " AND (level_id IS NULL OR level_id IS ?)")
+    args = [group_id, level_id]
+    if category:
+        sql += " AND category=?"
+        args.append(category)
+    sql += " ORDER BY category, created_at DESC"
+    return db.execute(sql, args).fetchall()
+
+
+def material_counts(db, group_id):
+    """How many files sit on each shelf, so empty ones can be hidden."""
+    counts = {c: 0 for c in CATEGORIES}
+    for m in materials_for(db, group_id):
+        counts[m["category"] or "Reading"] = counts.get(m["category"] or "Reading", 0) + 1
+    return counts
+
+
+def groups_at_level(db, level_id):
     return db.execute(
-        "SELECT * FROM materials WHERE active=1 AND (group_id IS NULL OR group_id=?)"
-        " ORDER BY created_at DESC", (group_id,)
+        "SELECT * FROM groups WHERE archived=0 AND level_id=? ORDER BY name", (level_id,)
     ).fetchall()
 
 

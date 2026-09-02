@@ -80,6 +80,12 @@ T = {
         'mat_none': 'No materials have been shared yet.',
         'mat_pick': 'Materials — tap one to receive it:',
         'mat_sending': 'Sending...',
+        'pick_level': 'Welcome! Which level are you studying at?',
+        'pick_group': '{level} — which group are you in?',
+        'no_groups': 'There are no groups at that level yet. Ask your teacher.',
+        'back': '\u2b05 Back',
+        'mat_cats': 'Materials for {level} — choose a section:',
+        'mat_empty': 'Nothing in {category} yet.',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -145,6 +151,12 @@ T = {
         'mat_none': 'Материалов пока нет.',
         'mat_pick': 'Материалы — нажмите, чтобы получить:',
         'mat_sending': 'Отправляю...',
+        'pick_level': 'Добро пожаловать! На каком уровне вы занимаетесь?',
+        'pick_group': '{level} — в какой вы группе?',
+        'no_groups': 'На этом уровне пока нет групп. Спросите преподавателя.',
+        'back': '\u2b05 Назад',
+        'mat_cats': 'Материалы {level} — выберите раздел:',
+        'mat_empty': 'В разделе «{category}» пока пусто.',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -210,6 +222,12 @@ T = {
         'mat_none': "Hozircha materiallar yo'q.",
         'mat_pick': 'Materiallar — olish uchun bosing:',
         'mat_sending': 'Yuborilmoqda...',
+        'pick_level': "Xush kelibsiz! Qaysi darajada o'qiysiz?",
+        'pick_group': '{level} — qaysi guruhdasiz?',
+        'no_groups': "Bu darajada hozircha guruh yo'q. O'qituvchidan so'rang.",
+        'back': '\u2b05 Orqaga',
+        'mat_cats': "{level} materiallari — bo'limni tanlang:",
+        'mat_empty': "“{category}” bo'limi hozircha bo'sh.",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -731,6 +749,19 @@ def due_label(due_at):
     return " (%s)" % due_at[:10] if due_at else ""
 
 
+def offer_categories(db, token, student):
+    """The five shelves, with a count so an empty one is obvious."""
+    lang = student["lang"]
+    counts = core.material_counts(db, student["group_id"])
+    if not any(counts.values()):
+        return send(token, student["telegram_id"], t(lang, "mat_none"))
+    lvl = core.level_name(db, core.level_of(db, student["group_id"])) or ""
+    kb = [[{"text": "%s (%d)" % (c, counts.get(c, 0)),
+            "callback_data": f"mc:{i}"}]
+          for i, c in enumerate(core.CATEGORIES) if counts.get(c, 0)]
+    return send(token, student["telegram_id"], t(lang, "mat_cats", level=lvl), keyboard=kb)
+
+
 def rating_text(db, student):
     """Top of the class, plus the student's own line, always visible."""
     lang = student["lang"]
@@ -778,6 +809,45 @@ def checklist_text(db, student, lang):
             lines.append(("\u2705 " if a["id"] in p["done_ids"] else "\u2b1c ") + a["title"])
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def offer_levels(db, token, tid, lang):
+    kb = [[{"text": r["name"], "callback_data": f"lv:{r['id']}"}]
+          for r in db.execute("SELECT * FROM levels ORDER BY sort")]
+    return send(token, tid, t(lang, "pick_level"), keyboard=kb)
+
+
+def offer_groups(db, token, tid, lang, level_id):
+    groups = core.groups_at_level(db, level_id)
+    lvl = core.level_name(db, level_id) or ""
+    if not groups:
+        send(token, tid, t(lang, "no_groups"))
+        return offer_levels(db, token, tid, lang)
+    kb = [[{"text": g["name"], "callback_data": f"gr:{g['id']}"}] for g in groups]
+    kb.append([{"text": t(lang, "back"), "callback_data": "lv:back"}])
+    return send(token, tid, t(lang, "pick_group", level=lvl), keyboard=kb)
+
+
+def join_group_row(db, token, tid, name, g, lang):
+    """Attach a student to a class we have already resolved."""
+    existing = student_of(db, tid)
+    if existing:
+        db.execute("UPDATE students SET name=?, group_id=?, active=1 WHERE id=?",
+                   (name, g["id"], existing["id"]))
+    else:
+        db.execute(
+            "INSERT INTO students (telegram_id, name, group_id, created_at) VALUES (?,?,?,?)",
+            (tid, name, g["id"], core.iso(core.now())))
+    db.commit()
+    set_state(db, tid, None)
+    send(token, tid, t(lang, "joined", group=g["name"]), markup=main_keyboard(lang))
+    send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
+    student = student_of(db, tid)
+    send(token, tid, t(lang, "welcome2"))
+    if student:
+        sets = core.open_sets(db, student["group_id"])
+        if sets:
+            send(token, tid, checklist_text(db, student, lang))
 
 
 def join_group(db, token, tid, name, code, lang):
@@ -874,8 +944,11 @@ def handle_text(db, token, msg):
             ).fetchone()
             if g:
                 carried["code"] = g["join_code"]
-        set_state(db, tid, "name", carried)
-        return send(token, tid, t(lang, "ask_name"))
+        if carried.get("code"):
+            set_state(db, tid, "name", carried)
+            return send(token, tid, t(lang, "ask_name"))
+        set_state(db, tid, None)
+        return offer_levels(db, token, tid, lang)
 
     if text.startswith("/language"):
         return send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
@@ -904,12 +977,7 @@ def handle_text(db, token, msg):
     if text.startswith("/materials"):
         if not student:
             return send(token, tid, t(lang, "no_group"))
-        mats = core.materials_for(db, student["group_id"])
-        if not mats:
-            return send(token, tid, t(lang, "mat_none"))
-        kb = [[{"text": (m["title"] + "  \u00b7  " + core.human_size(m["size"]))[:60],
-                "callback_data": f"mat:{m['id']}"}] for m in mats[:20]]
-        return send(token, tid, t(lang, "mat_pick"), keyboard=kb)
+        return offer_categories(db, token, student)
 
     if text.startswith("/ask"):
         if not student:
@@ -969,6 +1037,11 @@ def handle_text(db, token, msg):
 
     if step == "name" and text:
         name = text[:80]
+        if payload.get("group_id"):
+            g = db.execute("SELECT * FROM groups WHERE id=?",
+                           (payload["group_id"],)).fetchone()
+            if g:
+                return join_group_row(db, token, tid, name, g, lang)
         if payload.get("code"):
             return join_group(db, token, tid, name, payload["code"], lang)
         set_state(db, tid, "code", {"name": name})
@@ -1126,6 +1199,42 @@ def handle_callback(db, token, cq):
         if student:
             set_state(db, tid, "improve", {"submission": int(data.split(":")[1])})
             send(token, tid, t(student["lang"], "improve") + " \u2b07")
+        return
+
+    if data.startswith("lv:"):
+        student = student_of(db, tid)
+        lang = student["lang"] if student else "en"
+        arg = data.split(":")[1]
+        if arg == "back":
+            return offer_levels(db, token, tid, lang)
+        return offer_groups(db, token, tid, lang, int(arg))
+
+    if data.startswith("gr:"):
+        student = student_of(db, tid)
+        lang = student["lang"] if student else "en"
+        gid = int(data.split(":")[1])
+        set_state(db, tid, "name", {"group_id": gid})
+        return send(token, tid, t(lang, "ask_name"))
+
+    if data.startswith("mc:"):
+        student = student_of(db, tid)
+        if not student:
+            return
+        lang = student["lang"]
+        idx = int(data.split(":")[1])
+        category = core.CATEGORIES[idx] if 0 <= idx < len(core.CATEGORIES) else None
+        mats = core.materials_for(db, student["group_id"], category)
+        if not mats:
+            return send(token, tid, t(lang, "mat_empty", category=category or ""))
+        kb = [[{"text": (m["title"] + "  \u00b7  " + core.human_size(m["size"]))[:60],
+                "callback_data": f"mat:{m['id']}"}] for m in mats[:25]]
+        kb.append([{"text": t(lang, "back"), "callback_data": "mback"}])
+        return send(token, tid, t(lang, "mat_pick"), keyboard=kb)
+
+    if data == "mback":
+        student = student_of(db, tid)
+        if student:
+            offer_categories(db, token, student)
         return
 
     if data.startswith("mat:"):
