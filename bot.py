@@ -81,11 +81,12 @@ T = {
         'mat_pick': 'Materials — tap one to receive it:',
         'mat_sending': 'Sending...',
         'pick_level': 'Welcome! Which level are you studying at?',
-        'pick_group': '{level} — which group are you in?',
+        'pick_group': 'Which group are you in?',
         'no_groups': 'There are no groups at that level yet. Ask your teacher.',
         'back': '\u2b05 Back',
         'mat_cats': 'Materials for {level} — choose a section:',
         'mat_empty': 'Nothing in {category} yet.',
+        "other_groups": 'Other groups',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -152,11 +153,12 @@ T = {
         'mat_pick': 'Материалы — нажмите, чтобы получить:',
         'mat_sending': 'Отправляю...',
         'pick_level': 'Добро пожаловать! На каком уровне вы занимаетесь?',
-        'pick_group': '{level} — в какой вы группе?',
+        'pick_group': 'В какой вы группе?',
         'no_groups': 'На этом уровне пока нет групп. Спросите преподавателя.',
         'back': '\u2b05 Назад',
         'mat_cats': 'Материалы {level} — выберите раздел:',
         'mat_empty': 'В разделе «{category}» пока пусто.',
+        "other_groups": 'Другие группы',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -223,11 +225,12 @@ T = {
         'mat_pick': 'Materiallar — olish uchun bosing:',
         'mat_sending': 'Yuborilmoqda...',
         'pick_level': "Xush kelibsiz! Qaysi darajada o'qiysiz?",
-        'pick_group': '{level} — qaysi guruhdasiz?',
+        'pick_group': 'Qaysi guruhdasiz?',
         'no_groups': "Bu darajada hozircha guruh yo'q. O'qituvchidan so'rang.",
         'back': '\u2b05 Orqaga',
         'mat_cats': "{level} materiallari — bo'limni tanlang:",
         'mat_empty': "“{category}” bo'limi hozircha bo'sh.",
+        "other_groups": 'Boshqa guruhlar',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -812,20 +815,48 @@ def checklist_text(db, student, lang):
 
 
 def offer_levels(db, token, tid, lang):
-    kb = [[{"text": r["name"], "callback_data": f"lv:{r['id']}"}]
-          for r in db.execute("SELECT * FROM levels ORDER BY sort")]
+    """Only levels that actually have a class - an empty one is a dead end.
+
+    If no class has been given a level yet, skip the level menu entirely and
+    list the classes, so joining never breaks while the teacher catches up.
+    """
+    levels = db.execute(
+        "SELECT l.* FROM levels l WHERE EXISTS ("
+        "  SELECT 1 FROM groups g WHERE g.level_id=l.id AND g.archived=0)"
+        " ORDER BY l.sort").fetchall()
+    if not levels:
+        return offer_all_groups(db, token, tid, lang)
+    kb = [[{"text": r["name"], "callback_data": f"lv:{r['id']}"}] for r in levels]
+    unlevelled = db.execute(
+        "SELECT COUNT(*) c FROM groups WHERE archived=0 AND level_id IS NULL"
+    ).fetchone()["c"]
+    if unlevelled:
+        kb.append([{"text": t(lang, "other_groups"), "callback_data": "lv:other"}])
     return send(token, tid, t(lang, "pick_level"), keyboard=kb)
+
+
+def offer_all_groups(db, token, tid, lang, only_unlevelled=False):
+    sql = "SELECT * FROM groups WHERE archived=0"
+    if only_unlevelled:
+        sql += " AND level_id IS NULL"
+    groups = db.execute(sql + " ORDER BY name").fetchall()
+    if not groups:
+        return send(token, tid, t(lang, "no_groups"))
+    kb = [[{"text": g["name"], "callback_data": f"gr:{g['id']}"}] for g in groups]
+    return send(token, tid, t(lang, "pick_group"), keyboard=kb)
 
 
 def offer_groups(db, token, tid, lang, level_id):
     groups = core.groups_at_level(db, level_id)
     lvl = core.level_name(db, level_id) or ""
     if not groups:
-        send(token, tid, t(lang, "no_groups"))
-        return offer_levels(db, token, tid, lang)
+        # say so and offer a way back, rather than silently re-listing levels
+        return send(token, tid, t(lang, "no_groups"),
+                    keyboard=[[{"text": t(lang, "back"), "callback_data": "lv:back"}]])
     kb = [[{"text": g["name"], "callback_data": f"gr:{g['id']}"}] for g in groups]
     kb.append([{"text": t(lang, "back"), "callback_data": "lv:back"}])
-    return send(token, tid, t(lang, "pick_group", level=lvl), keyboard=kb)
+    head = (lvl + " \u2014 " if lvl else "") + t(lang, "pick_group")
+    return send(token, tid, head, keyboard=kb)
 
 
 def join_group_row(db, token, tid, name, g, lang):
@@ -1207,6 +1238,8 @@ def handle_callback(db, token, cq):
         arg = data.split(":")[1]
         if arg == "back":
             return offer_levels(db, token, tid, lang)
+        if arg == "other":
+            return offer_all_groups(db, token, tid, lang, only_unlevelled=True)
         return offer_groups(db, token, tid, lang, int(arg))
 
     if data.startswith("gr:"):
