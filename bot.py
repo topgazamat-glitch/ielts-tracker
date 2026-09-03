@@ -105,6 +105,9 @@ T = {
         'pack_done': 'Unit {n} sent: {audio} audio and the transcript.',
         'pack_done_plain': 'Unit {n} sent: {n_files} file(s).',
         'pack_empty': 'There is nothing in Unit {n} yet.',
+        'mypage': '📱 My page',
+        'mypage_text': 'Your own page — homework, materials, progress and class standings, all in one place:\n\n{url}\n\nIt is only yours. Tip: open it and add it to your home screen.',
+        'mypage_none': 'Your page is not ready yet. Ask your teacher.',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -193,6 +196,9 @@ T = {
         'pack_done': 'Юнит {n} отправлен: {audio} аудио и расшифровка.',
         'pack_done_plain': 'Юнит {n} отправлен: {n_files} файл(ов).',
         'pack_empty': 'В юните {n} пока ничего нет.',
+        'mypage': '📱 Моя страница',
+        'mypage_text': 'Ваша страница — задания, материалы, прогресс и рейтинг в одном месте:\n\n{url}\n\nОна только ваша. Совет: откройте и добавьте на главный экран.',
+        'mypage_none': 'Страница пока не готова. Спросите преподавателя.',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -281,6 +287,9 @@ T = {
         'pack_done': "{n}-bo'lim yuborildi: {audio} ta audio va matn.",
         'pack_done_plain': "{n}-bo'lim yuborildi: {n_files} ta fayl.",
         'pack_empty': "{n}-bo'limda hozircha hech narsa yo'q.",
+        'mypage': '📱 Mening sahifam',
+        'mypage_text': "Sizning sahifangiz — vazifalar, materiallar, natijalar va reyting bir joyda:\n\n{url}\n\nU faqat sizniki. Maslahat: ochib, asosiy ekranga qo'shing.",
+        'mypage_none': "Sahifa hali tayyor emas. O'qituvchidan so'rang.",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -539,15 +548,18 @@ def main_keyboard(lang):
 def set_commands(token):
     """The menu button next to the message box, in each language."""
     menus = {
-        None: [("homework", "homework and your scores"),
+        None: [("mypage", "your own web page"),
+               ("homework", "homework and your scores"),
                ("materials", "books, handouts and audio"),
                ("language", "change language"),
                ("cancel", "stop what you are doing")],
-        "ru": [("homework", "задания и оценки"),
+        "ru": [("mypage", "ваша веб-страница"),
+               ("homework", "задания и оценки"),
                ("materials", "книги, материалы, аудио"),
                ("language", "сменить язык"),
                ("cancel", "отменить текущее действие")],
-        "uz": [("homework", "vazifa va natijalar"),
+        "uz": [("mypage", "shaxsiy veb-sahifangiz"),
+               ("homework", "vazifa va natijalar"),
                ("materials", "kitob, material, audio"),
                ("language", "tilni o'zgartirish"),
                ("cancel", "joriy amalni bekor qilish")],
@@ -1012,7 +1024,19 @@ def homework_keyboard(lang):
     return [[{"text": t(lang, "hk_progress"), "callback_data": "hk:progress"},
              {"text": t(lang, "hk_rating"), "callback_data": "hk:rating"}],
             [{"text": t(lang, "hk_vocab"), "callback_data": "hk:vocab"},
-             {"text": t(lang, "hk_ask"), "callback_data": "hk:ask"}]]
+             {"text": t(lang, "hk_ask"), "callback_data": "hk:ask"}],
+            [{"text": t(lang, "mypage"), "callback_data": "hk:page"}]]
+
+
+def send_my_page(db, token, student):
+    """Their private link to the web page - the bot is the only place it lives."""
+    lang = student["lang"]
+    tid = student["telegram_id"]
+    site = core.meta_get(db, "site_url")
+    if not site:
+        return send(token, tid, t(lang, "mypage_none"))
+    url = "%s/s/%s" % (site.rstrip("/"), core.student_token(db, student["id"]))
+    return send(token, tid, t(lang, "mypage_text", url=url))
 
 
 def rating_text(db, student):
@@ -1130,6 +1154,7 @@ def join_group_row(db, token, tid, name, g, lang):
     student = student_of(db, tid)
     send(token, tid, t(lang, "welcome2"))
     if student:
+        send_my_page(db, token, student)
         sets = core.open_sets(db, student["group_id"])
         if sets:
             send(token, tid, checklist_text(db, student, lang))
@@ -1158,6 +1183,7 @@ def join_group(db, token, tid, name, code, lang):
     student = student_of(db, tid)
     send(token, tid, t(lang, "welcome2"))
     if student:
+        send_my_page(db, token, student)
         sets = core.open_sets(db, student["group_id"])
         if sets:
             send(token, tid, checklist_text(db, student, lang))
@@ -1248,6 +1274,11 @@ def handle_text(db, token, msg):
             return send(token, tid, t(lang, "no_group"))
         return send(token, tid, checklist_text(db, student, lang),
                     keyboard=homework_keyboard(lang))
+
+    if text.startswith("/mypage") or text.startswith("/page"):
+        if not student:
+            return send(token, tid, t(lang, "no_group"))
+        return send_my_page(db, token, student)
 
     if text.startswith("/materials"):
         if not student:
@@ -1523,6 +1554,8 @@ def handle_callback(db, token, cq):
             return send(token, tid, t(lang, "vocab_pick"), keyboard=[
                 [{"text": wl["title"][:40], "callback_data": f"vl:{wl['id']}"}]
                 for wl in lists])
+        if what == "page":
+            return send_my_page(db, token, student)
         if what == "ask":
             set_state(db, tid, "ask")
             return send(token, tid, t(lang, "ask_prompt"))

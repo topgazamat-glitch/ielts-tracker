@@ -1661,6 +1661,20 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             db.close()
 
+    def _remember_site_url(self):
+        """Learn the public address from the teacher's own visit, once."""
+        host = self.headers.get("Host")
+        if not host or host.startswith(("localhost", "127.0.0.1")):
+            return
+        proto = self.headers.get("X-Forwarded-Proto", "https")
+        url = "%s://%s" % (proto, host)
+        db = core.connect()
+        try:
+            if core.meta_get(db, "site_url") != url:
+                core.meta_set(db, "site_url", url)
+        finally:
+            db.close()
+
     def _send(self, status, headers, body):
         self.send_response(status)
         for k, v in headers:
@@ -1689,6 +1703,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*redirect("/login", [("Set-Cookie", "ta_session=; Max-Age=0; Path=/")]))
         if not self._session():
             return self._send(*redirect("/login"))
+        self._remember_site_url()
         if path.startswith("/media/"):
             return self._serve_media(path)
         return self._dispatch("GET", path, {"query": query, "form": {}})
