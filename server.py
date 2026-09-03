@@ -704,55 +704,65 @@ def student_page(title, body):
 <main style="max-width:600px">{body}</main></body></html>"""
 
 
-def view_student_portal(req, db, token, flash=""):
-    s = core.student_by_token(db, token)
-    if not s:
-        return html_response(student_page("Not found",
-            "<h1>Link not recognised</h1><p class='sub'>Ask your teacher for your link.</p>"), 404)
+def student_shell(s, db, token, tab, body):
+    """One page, four tabs, everything the bot can do."""
+    level = core.level_name(db, core.level_of(db, s["group_id"]))
+    tabs = [("home", "Homework"), ("materials", "Materials"),
+            ("progress", "Progress"), ("class", "Class")]
+    nav = "".join(
+        f'<a class="tab{" on" if tab == key else ""}" '
+        f'href="/s/{E(token)}?tab={key}">{label}</a>' for key, label in tabs)
+    head = f"""<div class="whoami">
+  <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
+  <div>
+    <div class="name">{E(s["name"])}</div>
+    <div class="sub" style="margin:0">{E(group_name(db, s["group_id"]))}
+      {"· " + E(level) if level else ""}</div>
+  </div>
+</div>
+<div class="tabs stretch">{nav}</div>"""
+    return html_response(student_page(s["name"], head + body))
+
+
+def portal_home(db, s, token, flash):
     st = core.student_stats(db, s["id"])
     opens = db.execute(
-        "SELECT * FROM assignments WHERE group_id=? AND closed=0"
+        "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
         " ORDER BY COALESCE(due_at, created_at) DESC, id DESC",
         (s["group_id"],),
     ).fetchall()
-
     if opens:
         opts = "".join(f'<option value="{a["id"]}">{E(a["title"])}</option>' for a in opens)
-        picker = (f'<label class="f">Assignment<select name="assignment_id">{opts}</select></label>'
+        picker = (f'<label class="f">Which task?<select name="assignment_id">{opts}</select></label>'
                   if len(opens) > 1 else
                   f'<input type="hidden" name="assignment_id" value="{opens[0]["id"]}">'
-                  f'<p class="sub" style="margin:0 0 10px">For: <strong>{E(opens[0]["title"])}</strong></p>')
+                  f'<p class="sub" style="margin:0 0 10px">For: <strong>'
+                  f'{E(opens[0]["title"])}</strong></p>')
     else:
-        picker = '<p class="sub" style="margin:0 0 10px">No open assignment right now.</p>'
+        picker = '<p class="sub" style="margin:0 0 10px">No open task right now.</p>'
 
-    hist = ""
-    for t in reversed(st["timeline"][-8:]):
-        if t["score"] is not None:
-            state = score_pill(t["score"])
-        elif t["submission_id"]:
-            state = '<span class="pill mute">waiting</span>'
-        else:
-            state = '<span class="pill risk">not submitted</span>'
-        hist += f'<tr><td>{E(t["title"])}</td><td>{state}</td></tr>'
+    lists = ""
+    for due_at, items in core.open_sets(db, s["group_id"]):
+        prog = core.set_progress(db, s["id"], items)
+        left = core.due_in_words(due_at)
+        when = (f'{due_at[:10]} · {left}' if due_at else "no deadline")
+        rows = ""
+        for a in items:
+            done = a["id"] in prog["done_ids"]
+            rows += (f'<li class="{"done" if done else ""}">'
+                     f'<span class="box">{"&#10003;" if done else ""}</span>'
+                     f'{E(a["title"])}</li>')
+        pct = prog["percent"] or 0
+        lists += f"""<div class="card">
+  <div class="rowline"><strong>{E(when)}</strong>
+    <span class="pill{" risk" if pct < 50 else ""}">{prog["done"]}/{prog["total"]}</span></div>
+  <div class="bar"><i style="width:{pct}%"></i></div>
+  <ul class="checklist">{rows}</ul></div>"""
+    if not lists:
+        lists = '<div class="card"><p style="margin:0">Nothing set at the moment.</p></div>'
 
-    materials_html = ""
-    own_level = core.level_of(db, s["group_id"])
-    for key in core.COLLECTION_ORDER:
-        for cat in core.sections(key):
-            mats = core.materials_at_level(db, own_level, key, cat)
-            if not mats:
-                continue
-            items = "".join(
-                f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a></td>'
-                f'<td class="sub">{E(core.human_size(m["size"]))}</td></tr>'
-                for m in mats[:25])
-            materials_html += (f'<h2>{E(core.collection_label(key))} · {E(cat)}</h2>'
-                               f'<div class="tablewrap"><table>{items}</table></div>')
-    avg = fmt(st["average"])
-    comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
-    body = f"""<h1>{E(s["name"])}</h1>
-<p class="sub">{E(group_name(db, s["group_id"]))}</p>
-{flash}
+    return f"""{flash}
+<h2>Send your homework</h2>
 <div class="card">
   <form method="post" action="/s/{E(token)}/upload" enctype="multipart/form-data">
     {picker}
@@ -768,16 +778,151 @@ def view_student_portal(req, db, token, flash=""):
     <div style="margin-top:12px"><button>Send to teacher</button></div>
   </form>
 </div>
-<div class="grid">{stat("Average", avg, "/10")}{stat("Last 3", fmt(st["last3"]), "/10")}
-{stat("Completion", comp)}</div>
-<h2>Your progress</h2>
-<div class="card">{charts.score_line(st["timeline"])}</div>
-{materials_html}
-<h2>Recent work</h2>
-<div class="card" style="padding:0"><table>{hist or
-  '<tr><td class="sub" style="padding:14px">Nothing yet.</td></tr>'}</table></div>
-<p class="sub">Keep this link private — it is yours.</p>"""
-    return html_response(student_page(s["name"], body))
+<h2>What is left</h2>
+{lists}"""
+
+
+def portal_materials(db, s, token, query):
+    level_id = core.level_of(db, s["group_id"])
+    if not level_id:
+        return ('<div class="card"><p style="margin:0">Your class has no level yet. '
+                'Ask your teacher.</p></div>')
+    coll = (query.get("c", [None])[0] or "")
+    sect = query.get("s", [None])[0]
+    unit = query.get("u", [None])[0]
+    sect = int(sect) if sect and sect.isdigit() else None
+    unit = int(unit) if unit and unit.isdigit() else None
+    base = f"/s/{E(token)}?tab=materials"
+
+    if coll not in core.COLLECTIONS:
+        counts = core.collection_counts(db, level_id)
+        cards = "".join(
+            f'<a class="tile" href="{base}&amp;c={key}">'
+            f'<div class="tile-title">{E(core.collection_label(key))}</div>'
+            f'<div class="sub" style="margin:0">{counts.get(key, 0)} files</div></a>'
+            for key in core.COLLECTION_ORDER)
+        return f'<h2>Materials</h2><div class="tiles">{cards}</div>'
+
+    crumb = f'<a class="crumb" href="{base}">Materials</a> › {E(core.collection_label(coll))}'
+    if sect is None:
+        counts = core.level_counts(db, level_id, coll)
+        cards = "".join(
+            f'<a class="tile" href="{base}&amp;c={coll}&amp;s={i}">'
+            f'<div class="tile-title">{E(name)}</div>'
+            f'<div class="sub" style="margin:0">{counts.get(name, 0)} files</div></a>'
+            for i, name in enumerate(core.sections(coll)))
+        return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
+
+    names = core.sections(coll)
+    if not 0 <= sect < len(names):
+        return f'<p class="sub">{crumb}</p>'
+    category = names[sect]
+    crumb += f' › <a class="crumb" href="{base}&amp;c={coll}">{E(category)}</a>'
+    units = core.units_in(db, level_id, coll, category)
+
+    if units and unit is None:
+        numbers = core.units_for_level(db, level_id)
+        if 0 in units:
+            numbers = [0] + numbers
+        cards = "".join(
+            f'<a class="tile small{"" if n in units else " empty"}" '
+            f'href="{base}&amp;c={coll}&amp;s={sect}&amp;u={n}">'
+            f'<div class="tile-title">{"Welcome" if n == 0 else "Unit %d" % n}</div>'
+            f'<div class="sub" style="margin:0">{units.get(n, 0)} files</div></a>'
+            for n in numbers)
+        return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
+
+    if unit is not None:
+        mats = core.materials_in_unit(db, level_id, coll, category, unit)
+        crumb += " › " + ("Welcome" if unit == 0 else "Unit %d" % unit)
+    else:
+        mats = core.materials_at_level(db, level_id, coll, category)
+    if not mats:
+        return f'<p class="sub">{crumb}</p><div class="card"><p style="margin:0">Nothing here yet.</p></div>'
+    parts = []
+    for m in mats:
+        icon = "&#9834;" if (m["mime"] or "").startswith("audio") else "&#128196;"
+        note = f'<span class="sub">{E(m["note"])}</span>' if m["note"] else ""
+        parts.append(
+            f'<a class="filerow" href="/materials/{m["id"]}/file">'
+            f'<span class="ficon">{icon}</span>'
+            f'<span class="fname">{E(m["title"])}{note}</span>'
+            f'<span class="fsize">{E(core.human_size(m["size"]))}</span></a>')
+    rows = "".join(parts)
+    return f'<p class="sub">{crumb}</p><div class="filelist">{rows}</div>'
+
+
+def portal_progress(db, s, token):
+    st = core.student_stats(db, s["id"])
+    v = core.vocab_stats(db, s["id"])
+    band = []
+    for row in st["timeline"]:
+        r = db.execute(
+            "SELECT AVG(score) a FROM submissions WHERE assignment_id=? AND status='graded'",
+            (row["assignment_id"],)).fetchone()
+        band.append(round(r["a"], 2) if r["a"] is not None else None)
+    hist = ""
+    for t in reversed(st["timeline"]):
+        if t["score"] is not None:
+            state = score_pill(t["score"])
+        elif t["submission_id"]:
+            state = '<span class="pill mute">waiting</span>'
+        else:
+            state = '<span class="pill risk">not sent</span>'
+        hist += f'<tr><td>{E(t["title"])}</td><td style="text-align:right">{state}</td></tr>'
+    comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
+    vocab = ""
+    if v["practised"]:
+        vocab = (f'<div class="grid">{stat("Words known", v["known"])}'
+                 f'{stat("Accuracy", str(v["accuracy"]) + "%")}'
+                 f'{stat("Due for review", v["due"])}</div>')
+    return f"""<h2>Your scores</h2>
+<div class="grid">{stat("Average", fmt(st["average"]), "/10")}
+{stat("Last 3", fmt(st["last3"]), "/10")}{stat("Completion", comp)}
+{stat("Streak", core.streak(db, s["id"]))}</div>
+<div class="card">{charts.score_line(st["timeline"], band=band)}
+<div class="legend"><span><i style="background:var(--accent)"></i>your trend</span>
+<span><i style="background:var(--ink-3)"></i>class average</span>
+<span style="color:var(--warn)">✕ not sent</span></div></div>
+{vocab}
+<h2>Every task</h2>
+<div class="tablewrap"><table>{hist or '<tr><td class="sub">Nothing yet.</td></tr>'}</table></div>"""
+
+
+def portal_class(db, s, token):
+    rows = core.rating_rows(db, s["group_id"])
+    medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
+    out = ""
+    for r in rows:
+        me = r["student"]["id"] == s["id"]
+        comp = r["completion"] if r["completion"] is not None else 0
+        out += (f'<tr class="{"me" if me else ""}">'
+                f'<td>{medals.get(r["rank"], str(r["rank"]) + ".")}</td>'
+                f'<td>{E(r["student"]["name"])}{" &#9668;" if me else ""}</td>'
+                f'<td>{comp}%</td><td style="text-align:right">{score_pill(r["average"])}</td></tr>')
+    return f"""<h2>Class standings</h2>
+<p class="sub">Ordered by how much homework is done first, then average score.</p>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Done</th>
+<th style="text-align:right">Average</th></tr>{out}</table></div>"""
+
+
+def view_student_portal(req, db, token, flash=""):
+    s = core.student_by_token(db, token)
+    if not s:
+        return html_response(student_page("Not found",
+            "<h1>Link not recognised</h1><p class='sub'>Ask your teacher for your link.</p>"), 404)
+    query = (req or {}).get("query", {}) if isinstance(req, dict) else {}
+    tab = (query.get("tab", ["home"])[0] or "home")
+    if tab == "materials":
+        body = portal_materials(db, s, token, query)
+    elif tab == "progress":
+        body = portal_progress(db, s, token)
+    elif tab == "class":
+        body = portal_class(db, s, token)
+    else:
+        tab = "home"
+        body = portal_home(db, s, token, flash)
+    return student_shell(s, db, token, tab, body)
 
 
 def act_student_upload(req, db, token):
@@ -1511,7 +1656,8 @@ class Handler(BaseHTTPRequestHandler):
             flash = '<div class="flash err">No photo was attached.</div>'
         db = core.connect()
         try:
-            return self._send(*view_student_portal(None, db, parts[2], flash))
+            return self._send(*view_student_portal(
+                {"query": query}, db, parts[2], flash))
         finally:
             db.close()
 

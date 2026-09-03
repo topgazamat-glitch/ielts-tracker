@@ -447,3 +447,76 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ==========================================================================
+   Student portal — one page, four tabs
+   ========================================================================== */
+
+.whoami { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.whoami .avatar {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; font-size: 18px; font-weight: 650;
+  flex: none;
+}
+.whoami .name { font-size: 19px; font-weight: 640; letter-spacing: -.02em; }
+
+.tabs.stretch { width: 100%; display: flex; }
+.tabs.stretch .tab { flex: 1; text-align: center; }
+
+.rowline { display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); margin-bottom: var(--sp-2); }
+
+.bar { background: var(--line); border-radius: 999px; height: 7px; overflow: hidden; }
+.bar i { display: block; height: 7px; background: var(--accent); border-radius: 999px; }
+
+ul.checklist { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
+ul.checklist li {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: 6px 0; font-size: 14.5px; color: var(--ink);
+  border-top: 1px solid var(--line-soft);
+}
+ul.checklist li:first-child { border-top: 0; }
+ul.checklist .box {
+  flex: none; width: 18px; height: 18px; margin-top: 1px;
+  border: 1.5px solid var(--line); border-radius: 5px;
+  display: grid; place-items: center; font-size: 12px; color: var(--accent-ink);
+}
+ul.checklist li.done .box { background: var(--accent); border-color: var(--accent); }
+ul.checklist li.done { color: var(--ink-3); }
+
+/* browsable tiles: collections, sections, units */
+.tiles { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.tile {
+  display: block; padding: var(--sp-4);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--shadow-1);
+  color: var(--ink); transition: border-color .14s var(--ease), transform .08s var(--ease);
+}
+.tile:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-1px); }
+.tile .tile-title { font-weight: 600; margin-bottom: 2px; }
+.tile.small { padding: var(--sp-3); text-align: center; }
+.tile.empty { opacity: .5; }
+.tile.empty:hover { border-color: var(--line); transform: none; }
+
+.crumb { color: var(--ink-3); }
+.crumb:hover { color: var(--accent); }
+
+.filelist {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--shadow-1); overflow: hidden;
+}
+.filerow {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 12px var(--sp-4); color: var(--ink);
+  border-top: 1px solid var(--line-soft);
+}
+.filerow:first-child { border-top: 0; }
+.filerow:hover { background: var(--surface-2); text-decoration: none; }
+.filerow .ficon { color: var(--accent); font-size: 17px; width: 20px; flex: none; }
+.filerow .fname { flex: 1; font-weight: 500; min-width: 0; }
+.filerow .fname .sub { display: block; margin: 2px 0 0; font-size: 12.5px; }
+.filerow .fsize { color: var(--ink-3); font-size: 12.5px; flex: none;
+  font-variant-numeric: tabular-nums; }
+
+tr.me td { background: var(--accent-soft); font-weight: 600; }
