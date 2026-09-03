@@ -4,6 +4,8 @@ Long-polls the Telegram API using urllib only: python3 bot.py
 """
 import json
 import os
+import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -99,6 +101,10 @@ T = {
         'pick_unit': '{section} — which unit?',
         'unit_n': 'Unit {n}',
         'pick_book': 'Unit {n} — which book?',
+        'pack_start': 'Unit {n} — sending {n_files} file(s). This takes a moment.',
+        'pack_done': 'Unit {n} sent: {audio} audio and the transcript.',
+        'pack_done_plain': 'Unit {n} sent: {n_files} file(s).',
+        'pack_empty': 'There is nothing in Unit {n} yet.',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -183,6 +189,10 @@ T = {
         'pick_unit': '{section} — какой юнит?',
         'unit_n': 'Юнит {n}',
         'pick_book': 'Юнит {n} — какая книга?',
+        'pack_start': 'Юнит {n} — отправляю {n_files} файл(ов). Это займёт немного времени.',
+        'pack_done': 'Юнит {n} отправлен: {audio} аудио и расшифровка.',
+        'pack_done_plain': 'Юнит {n} отправлен: {n_files} файл(ов).',
+        'pack_empty': 'В юните {n} пока ничего нет.',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -267,6 +277,10 @@ T = {
         'pick_unit': "{section} — qaysi bo'lim?",
         'unit_n': "{n}-bo'lim",
         'pick_book': "{n}-bo'lim — qaysi kitob?",
+        'pack_start': "{n}-bo'lim — {n_files} ta fayl yuborilmoqda. Biroz kuting.",
+        'pack_done': "{n}-bo'lim yuborildi: {audio} ta audio va matn.",
+        'pack_done_plain': "{n}-bo'lim yuborildi: {n_files} ta fayl.",
+        'pack_empty': "{n}-bo'limda hozircha hech narsa yo'q.",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -278,7 +292,7 @@ def t(lang, key, **kw):
 
 # ------------------------------------------------------------- telegram api
 
-def call(token, method, **params):
+def call(token, method, _retries=2, **params):
     data = urllib.parse.urlencode(
         {k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
          for k, v in params.items() if v is not None}
@@ -288,7 +302,16 @@ def call(token, method, **params):
         with urllib.request.urlopen(req, timeout=65) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
-        return json.load(e)
+        try:
+            body = json.load(e)
+        except Exception:
+            return {"ok": False, "error": "http %s" % e.code}
+        # 429 means "too fast" and comes with how long to wait
+        if body.get("error_code") == 429 and _retries > 0:
+            wait = (body.get("parameters") or {}).get("retry_after", 3)
+            time.sleep(min(wait, 30) + 0.5)
+            return call(token, method, _retries=_retries - 1, **params)
+        return body
     except Exception as e:  # network hiccup - caller retries on the next poll
         return {"ok": False, "error": str(e)}
 
@@ -395,10 +418,16 @@ def grade_submission(db, token, sub_id, score):
     return row
 
 
-def send_document(token, chat_id, path, filename, caption="", file_id=None):
-    """Send a stored file. Returns Telegram's file_id so the next send is instant."""
+def send_document(token, chat_id, path, filename, caption="", file_id=None, mime=None):
+    """Send a stored file. Returns Telegram's file_id so the next send is instant.
+
+    Audio goes as audio so it plays in the chat; everything else as a document.
+    """
+    method, field = ("sendAudio", "audio") if (mime or "").startswith("audio") \
+        else ("sendDocument", "document")
     if file_id:
-        res = call(token, "sendDocument", chat_id=chat_id, document=file_id, caption=caption)
+        res = call(token, method, chat_id=chat_id, caption=caption,
+                   **{field: file_id, "chat_id": chat_id})
         if res.get("ok"):
             return file_id
     boundary = "----ta" + os.urandom(8).hex()
@@ -412,21 +441,32 @@ def send_document(token, chat_id, path, filename, caption="", file_id=None):
                 f"\r\n\r\n{value}\r\n".encode())
     safe = (filename or "file").replace('"', "")
     parts.append(
-        f'--{boundary}\r\nContent-Disposition: form-data; name="document";'
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{field}";'
         f' filename="{safe}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
         + blob + b"\r\n")
     parts.append(f"--{boundary}--\r\n".encode())
     req = urllib.request.Request(
-        API.format(token=token, method="sendDocument"), data=b"".join(parts),
+        API.format(token=token, method=method), data=b"".join(parts),
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
     try:
-        with urllib.request.urlopen(req, timeout=180) as r:
+        with urllib.request.urlopen(req, timeout=300) as r:
             res = json.load(r)
-    except Exception as exc:
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.load(e)
+        except Exception:
+            return None
+        if body.get("error_code") == 429:
+            wait = (body.get("parameters") or {}).get("retry_after", 5)
+            time.sleep(min(wait, 30) + 0.5)
+            return send_document(token, chat_id, path, filename, caption,
+                                 file_id, mime)
+        return None
+    except Exception:
         return None
     if res.get("ok"):
-        doc = res["result"].get("document") or {}
-        return doc.get("file_id")
+        payload = res["result"].get(field) or res["result"].get("document") or {}
+        return payload.get("file_id")
     return None
 
 
@@ -831,10 +871,14 @@ def offer_units(db, token, student, level_id, collection, index, units):
     lang = student["lang"]
     category = core.sections(collection)[index]
     kb, row = [], []
-    for n in core.UNITS:
+    numbers = list(core.UNITS)
+    if 0 in units:                      # a Welcome unit sits before Unit 1
+        numbers = [0] + numbers
+    for n in numbers:
+        label = ("Welcome" if n == 0 else t(lang, "unit_n", n=n))
         if n not in units:
-            continue
-        row.append({"text": t(lang, "unit_n", n=n),
+            label = "· " + label        # nothing in it yet
+        row.append({"text": label,
                     "callback_data": f"mu:{level_id}:{collection}:{index}:{n}"})
         if len(row) == 3:
             kb.append(row); row = []
@@ -843,6 +887,57 @@ def offer_units(db, token, student, level_id, collection, index, units):
     kb.append([{"text": t(lang, "back"), "callback_data": f"mk:{level_id}:{collection}"}])
     return send(token, student["telegram_id"],
                 t(lang, "pick_unit", section=category), keyboard=kb)
+
+
+def send_unit_pack(db, token, student, level_id, collection, index, unit):
+    """Send everything in one unit: the transcript first, then the audio in order.
+
+    Runs on its own thread. Twenty-odd uploads would otherwise block the bot for
+    everyone else, and Telegram wants them paced rather than fired at once.
+    """
+    lang = student["lang"]
+    tid = student["telegram_id"]
+    category = core.sections(collection)[index]
+    mats = core.materials_in_unit(db, level_id, collection, category, unit)
+    if not mats:
+        return send(token, tid, t(lang, "pack_empty", n=unit))
+
+    def sort_key(m):
+        # 1.02 before 1.10; the transcript ahead of the audio
+        audio = (m["mime"] or "").startswith("audio")
+        digits = re.findall(r"(\d+)\.(\d+)", m["title"] or "")
+        track = int(digits[0][1]) if digits else 0
+        return (1 if audio else 0, track, m["title"] or "")
+
+    mats = sorted(mats, key=sort_key)
+    send(token, tid, t(lang, "pack_start", n=unit, n_files=len(mats)))
+
+    def worker():
+        wdb = core.connect()
+        audio = 0
+        try:
+            for m in mats:
+                path = os.path.join(core.MATERIAL_DIR, m["filename"])
+                if not os.path.exists(path):
+                    continue
+                fid = send_document(token, tid, path,
+                                    m["original_name"] or m["filename"],
+                                    m["title"], m["telegram_file_id"], m["mime"])
+                if fid and fid != m["telegram_file_id"]:
+                    wdb.execute("UPDATE materials SET telegram_file_id=? WHERE id=?",
+                                (fid, m["id"]))
+                    wdb.commit()
+                if (m["mime"] or "").startswith("audio"):
+                    audio += 1
+                time.sleep(1.0)          # one file per second per chat is safe
+            if audio and audio < len(mats):
+                send(token, tid, t(lang, "pack_done", n=unit, audio=audio))
+            else:
+                send(token, tid, t(lang, "pack_done_plain", n=unit, n_files=len(mats)))
+        finally:
+            wdb.close()
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def offer_books(db, token, student, level_id, collection, index, unit):
@@ -1481,7 +1576,8 @@ def handle_callback(db, token, cq):
         student = student_of(db, tid)
         if student:
             _, lid, coll, idx, unit = data.split(":")
-            offer_books(db, token, student, as_int(lid), coll, as_int(idx), as_int(unit))
+            send_unit_pack(db, token, student, as_int(lid), coll, as_int(idx),
+                           as_int(unit))
         return
 
     if data.startswith("mb:"):
