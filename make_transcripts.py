@@ -82,6 +82,9 @@ def read_vtt(path):
                     items.append(text[i])
                     i += 1
             shaped.append((sp, items))
+        elif len(text) >= 3 and all(len(l.split()) <= 4 for l in text):
+            # a vocabulary list read aloud: keep one item per line
+            shaped.append((sp, text))
         else:
             shaped.append((sp, [" ".join(text)]))
     return shaped
@@ -104,6 +107,31 @@ def collect(folder):
     for u in units.values():
         u["tracks"].sort()
     return dict(sorted(units.items()))
+
+
+def build_unit(unit, data, course):
+    """One booklet for one unit, to sit beside that unit's audio."""
+    label = "Welcome unit" if unit == 0 else "Unit %d" % unit
+    doc = pdfmake.Doc()
+    doc.text(course, 11, colour=MUTED, gap_after=2)
+    doc.text(label, 26, bold=True, colour=INK, gap_after=2)
+    doc.text("Audio transcripts  ·  %d tracks" % len(data["tracks"]), 10.5, colour=MUTED)
+    doc.rule()
+    for _n, code, path in data["tracks"]:
+        paragraphs = read_vtt(path)
+        doc.space(8)
+        doc.text(code, 13, bold=True, colour=ACCENT, gap_after=2)
+        if not paragraphs:
+            doc.text("(no speech on this track)", 10.5, colour=MUTED)
+        for speaker, lines in paragraphs:
+            if speaker:
+                doc.text(speaker, 9.5, bold=True, colour=MUTED, indent=6)
+            for line in lines:
+                doc.text(line, 11, colour=INK, indent=6, leading=15.5)
+            doc.space(4)
+        doc.space(6)
+    return doc.build("%s - %s transcripts" % (course, label),
+                     footer=lambda i, n: "%s  ·  %d" % (label, i + 1))
 
 
 def build(units, title, subtitle):
@@ -175,6 +203,10 @@ def main():
     ap.add_argument("--title", default="Audioscripts")
     ap.add_argument("--subtitle", default="Class audio transcripts")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--per-unit", action="store_true",
+                    help="also write one PDF inside each unit folder")
+    ap.add_argument("--only-per-unit", action="store_true",
+                    help="write only the per-unit PDFs, not the combined one")
     args = ap.parse_args()
 
     folder = os.path.expanduser(args.folder)
@@ -182,6 +214,19 @@ def main():
     if not units:
         print("No .vtt files found under", folder)
         return 1
+    if args.per_unit or args.only_per_unit:
+        for unit, data in units.items():
+            label = "Welcome unit" if unit == 0 else "Unit %d" % unit
+            blob = build_unit(unit, data, args.title)
+            path = os.path.join(folder, data["folder"], "%s transcripts.pdf" % label)
+            with open(path, "wb") as fh:
+                fh.write(blob)
+            print("  %-16s %3d tracks  %5.0f KB  ->  %s/%s" % (
+                label, len(data["tracks"]), len(blob) / 1024,
+                data["folder"], os.path.basename(path)))
+    if args.only_per_unit:
+        return 0
+
     data = build(units, args.title, args.subtitle)
     out = args.out or os.path.join(folder, "%s Audioscripts.pdf" % args.title)
     with open(out, "wb") as fh:
