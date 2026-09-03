@@ -550,7 +550,12 @@ def view_roster(req, db):
             f'<td>{st["graded_count"]}</td><td>{st["missed"]}</td>'
             f'<td>{"active" if s["active"] else "inactive"}</td></tr>'
         )
-    body = f"""<h1>Students</h1><p class="sub">Everyone who has joined through the bot.</p>
+    site = core.meta_get(db, "site_url")
+    where = (f'Student links use <code>{E(site)}</code>' if site
+             else '<span style="color:var(--warn)">The public address has not been '
+                  'detected yet — reload this page once on the real address.</span>')
+    body = f"""<h1>Students</h1>
+<p class="sub">Everyone who has joined through the bot. {where}</p>
 <div class="tablewrap"><table><tr><th>Name</th><th>Group</th><th>Average</th>
 <th>Graded</th><th>Missed</th><th>Status</th></tr>
 {rows or '<tr><td colspan=6 class="sub">Nobody yet. Share a group join code.</td></tr>'}</table></div>"""
