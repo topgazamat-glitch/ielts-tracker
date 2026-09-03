@@ -21,7 +21,8 @@ TIME = re.compile(r"^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->")
 SPEAKER = re.compile(r"^([A-Z][\w'’.\- ]{0,24}):\s*(.*)$")
 
 
-ANNOUNCE = re.compile(r"^Narrator:\s*Track\s*\d+[.\-]\d+\s*$", re.I)
+# "Narrator: Track 08.01", or just "Track 08.01" - either way it is only a label
+ANNOUNCE = re.compile(r"^(?:[A-Z][\w'’.\- ]{0,24}:\s*)?Track\s*\d+[.\-]\d+\s*$", re.I)
 
 
 def read_vtt(path):
