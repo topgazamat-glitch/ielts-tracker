@@ -21,7 +21,7 @@ LEVELS = ["Beginner", "Elementary", "Pre-Intermediate", "Intermediate",
 COLLECTIONS = {
     "empower": ("Empower materials",
                 ["Unit handouts", "Listening audios", "Reading plus",
-                 "Academic skills", "Unit vocabularies"]),
+                 "Academic skills", "Unit vocabularies", "Unit tests"]),
     "selfstudy": ("Self-Study",
                   ["Reading", "Listening", "Vocabulary", "Grammar", "Writing"]),
 }
@@ -31,6 +31,16 @@ COLLECTION_ORDER = ["empower", "selfstudy"]
 BOOKS = {"class": "Class book", "work": "Work book"}
 BOOK_ORDER = ["class", "work"]
 UNITS = list(range(1, 13))
+
+# how many units each level's coursebook has
+LEVEL_UNIT_COUNT = {"Intermediate": 10}
+DEFAULT_UNIT_COUNT = 12
+
+
+def units_for_level(db, level_id):
+    """The unit numbers to offer for this level - 12 for most, 10 for B1+."""
+    name = level_name(db, level_id)
+    return list(range(1, LEVEL_UNIT_COUNT.get(name, DEFAULT_UNIT_COUNT) + 1))
 
 # every section name, used when validating an upload
 CATEGORIES = [c for key in COLLECTION_ORDER for c in COLLECTIONS[key][1]]

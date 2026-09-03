@@ -56,19 +56,25 @@ def guess_book(path):
     return None
 
 
-def clean_title(path, unit, book):
+def clean_title(path, unit, book, strip=()):
     stem = os.path.splitext(os.path.basename(path))[0]
-    stem = re.sub(r"[_]+", " ", stem).strip()
+    for phrase in strip:
+        stem = re.sub(re.escape(phrase), "", stem, flags=re.I)
+    stem = re.sub(r"[_]+", " ", stem)
+    stem = re.sub(r"\s{2,}", " ", stem).strip(" -·")
     bits = []
     # do not repeat what the file name already says; the section a file sits in
     # already tells the student which book it is, so leave that out of the title
     if unit and not re.match(r"^(unit\s*)?0*%d\b" % unit, stem, re.I):
         bits.append("Unit %d" % unit)
+    # some files are misnamed by the publisher: an mp3 that does not say so
+    if os.path.splitext(path)[1].lower() in AUDIO and "audio" not in stem.lower():
+        stem += " Audio"
     bits.append(stem)
     return " · ".join(bits)[:120]
 
 
-def scan(folder):
+def scan(folder, strip=()):
     found = []
     for root, _dirs, files in os.walk(folder):
         for name in sorted(files):
@@ -83,7 +89,7 @@ def scan(folder):
             found.append({
                 "path": path, "unit": unit, "book": book,
                 "size": os.path.getsize(path),
-                "title": clean_title(path, unit, book),
+                "title": clean_title(path, unit, book, strip),
             })
     found.sort(key=lambda f: (f["unit"] or 99, f["book"] or "", f["title"]))
     return found
@@ -140,11 +146,23 @@ def main():
     ap.add_argument("--site", default="https://ielts-tracker-production.up.railway.app")
     ap.add_argument("--password", default=os.environ.get("TEACHER_PASSWORD", ""))
     ap.add_argument("--upload", action="store_true", help="actually send them")
+    ap.add_argument("--strip", action="append", default=[],
+                    help="remove this phrase from titles (repeatable)")
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="skip files whose name contains this (repeatable)")
     ap.add_argument("--keep-unfiled", action="store_true",
                     help="upload files with no unit number too")
     args = ap.parse_args()
 
-    items = scan(args.folder)
+    items = scan(args.folder, args.strip)
+    if args.exclude:
+        dropped = [i for i in items
+                   if any(x.lower() in os.path.basename(i["path"]).lower()
+                          for x in args.exclude)]
+        items = [i for i in items if i not in dropped]
+        print("excluded by name (%s): %d file(s)"
+              % (", ".join(args.exclude), len(dropped)))
+        print()
     if not args.keep_unfiled:
         unfiled = [i for i in items if i["unit"] is None]
         items = [i for i in items if i["unit"] is not None]

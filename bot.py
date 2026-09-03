@@ -871,7 +871,7 @@ def offer_units(db, token, student, level_id, collection, index, units):
     lang = student["lang"]
     category = core.sections(collection)[index]
     kb, row = [], []
-    numbers = list(core.UNITS)
+    numbers = core.units_for_level(db, level_id)
     if 0 in units:                      # a Welcome unit sits before Unit 1
         numbers = [0] + numbers
     for n in numbers:
