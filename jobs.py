@@ -212,6 +212,33 @@ def vocab_due(db, token, cfg):
     return sent
 
 
+def rescue_drafts(db, token, cfg):
+    """Send anything a student photographed but forgot to finish.
+
+    The Finish button stops stray photos landing in the wrong task, but it must
+    never be the reason a student's work is not marked.
+    """
+    import bot
+    cutoff = core.iso(core.now() - timedelta(hours=cfg.get("draft_hours", 2)))
+    sent = 0
+    for row in db.execute(
+        "SELECT s.*, a.title FROM submissions s LEFT JOIN assignments a"
+        " ON a.id=s.assignment_id WHERE s.draft=1 AND s.created_at <= ?", (cutoff,)
+    ).fetchall():
+        if not core.page_count(db, row["id"]):
+            continue
+        core.finish_draft(db, row["id"])
+        bot.notify_teachers_new(db, token, row["id"])
+        st = db.execute("SELECT telegram_id, lang FROM students WHERE id=?",
+                        (row["student_id"],)).fetchone()
+        if st and st["telegram_id"]:
+            _send(token, st["telegram_id"],
+                  bot.t(st["lang"], "auto_sent", title=row["title"] or "homework",
+                        n=core.page_count(db, row["id"])))
+        sent += 1
+    return sent
+
+
 def teacher_digest(db, token, cfg):
     """Once a week: who is slipping, and how big the queue is."""
     week = (core.now() + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%G-W%V")
@@ -296,6 +323,7 @@ def tick(cfg):
         if not cfg.get("automation"):
             done["messages"] = "disabled (set automation: true in config.json)"
         elif token and QUIET_START <= local_hour(cfg) < QUIET_END:
+            done["rescued"] = rescue_drafts(db, token, cfg)
             done["due_soon"] = due_soon_reminders(db, token, cfg)
             done["chase"] = hourly_chase(db, token, cfg)
             done["missed"] = missed_nudges(db, token, cfg)

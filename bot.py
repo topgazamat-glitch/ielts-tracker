@@ -110,6 +110,12 @@ T = {
         'mypage_none': 'Your page is not ready yet. Ask your teacher.',
         'page_added': 'Page {n} added to “{title}”. Send more, or move on.',
         'pages_now': '{n} page(s) for “{title}”.',
+        'draft_state': '“{title}” — {n} page(s) ready to send.',
+        'btn_finish': '✅ Finish and send',
+        'btn_delete': '🗑 Delete',
+        'sent_ok': 'Sent to your teacher ✅  “{title}”, {n} page(s).',
+        'locked': '“{title}” has already been sent. Delete it first if you need to change it.',
+        'auto_sent': '“{title}” was still unsent, so I have sent it to your teacher ({n} page(s)).',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -203,6 +209,12 @@ T = {
         'mypage_none': 'Страница пока не готова. Спросите преподавателя.',
         'page_added': 'Страница {n} добавлена к «{title}». Можно отправить ещё.',
         'pages_now': 'Страниц: {n} для «{title}».',
+        'draft_state': '«{title}» — {n} стр. готово к отправке.',
+        'btn_finish': '✅ Отправить',
+        'btn_delete': '🗑 Удалить',
+        'sent_ok': 'Отправлено преподавателю ✅  «{title}», {n} стр.',
+        'locked': '«{title}» уже отправлено. Сначала удалите, если нужно изменить.',
+        'auto_sent': '«{title}» осталось неотправленным, я отправил его преподавателю ({n} стр.).',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -296,6 +308,12 @@ T = {
         'mypage_none': "Sahifa hali tayyor emas. O'qituvchidan so'rang.",
         'page_added': "“{title}” ga {n}-sahifa qo'shildi. Yana yuborishingiz mumkin.",
         'pages_now': '“{title}” uchun {n} ta sahifa.',
+        'draft_state': '“{title}” — {n} ta sahifa yuborishga tayyor.',
+        'btn_finish': '✅ Yuborish',
+        'btn_delete': "🗑 O'chirish",
+        'sent_ok': "O'qituvchiga yuborildi ✅  “{title}”, {n} ta sahifa.",
+        'locked': "“{title}” allaqachon yuborilgan. O'zgartirish uchun avval o'chiring.",
+        'auto_sent': "“{title}” yuborilmagan edi, o'qituvchiga yubordim ({n} ta sahifa).",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -907,6 +925,18 @@ def offer_units(db, token, student, level_id, collection, index, units):
                 t(lang, "pick_unit", section=category), keyboard=kb)
 
 
+def draft_keyboard(lang, sub_id):
+    return [[{"text": t(lang, "btn_finish"), "callback_data": f"fin:{sub_id}"}],
+            [{"text": t(lang, "btn_delete"), "callback_data": f"del:{sub_id}"}]]
+
+
+def draft_state(db, token, student, sub_id, title):
+    lang = student["lang"]
+    return send(token, student["telegram_id"],
+                t(lang, "draft_state", title=title, n=core.page_count(db, sub_id)),
+                keyboard=draft_keyboard(lang, sub_id))
+
+
 def send_unit_pack(db, token, student, level_id, collection, index, unit):
     """Send everything in one unit: the transcript first, then the audio in order.
 
@@ -1393,9 +1423,17 @@ def handle_photo(db, token, msg):
         ).fetchone()
 
     opens = open_assignments(db, student["group_id"])
-    if sub is None and opens:
-        # not part of an album: does this task already have work in progress?
-        sub = core.open_submission(db, student["id"], opens[0]["id"])
+    if sub is None:
+        # whatever they are working on now takes the page, whichever task it is
+        sub = db.execute(
+            "SELECT * FROM submissions WHERE student_id=? AND draft=1"
+            " ORDER BY created_at DESC LIMIT 1", (student["id"],)).fetchone()
+    if sub is None and opens and len(opens) == 1:
+        already = core.sent_submission(db, student["id"], opens[0]["id"])
+        if already:
+            return send(token, tid, t(lang, "locked", title=opens[0]["title"]),
+                        keyboard=[[{"text": t(lang, "btn_delete"),
+                                    "callback_data": f"del:{already['id']}"}]])
 
     first_page = sub is None
     if first_page:
@@ -1412,7 +1450,7 @@ def handle_photo(db, token, msg):
             set_state(db, tid, None)
         cur = db.execute(
             "INSERT INTO submissions (student_id, assignment_id, created_at,"
-            " media_group_id, late, improves) VALUES (?,?,?,?,?,?)",
+            " media_group_id, late, improves, draft) VALUES (?,?,?,?,?,?,1)",
             (student["id"], aid, core.iso(core.now()), mgid, late, improves),
         )
         db.commit()
@@ -1435,19 +1473,16 @@ def handle_photo(db, token, msg):
 
     if not first_page:
         if mgid and sub["media_group_id"] != mgid:
-            # an album joining work already in progress: greet it once, then
-            # keep quiet for the rest of the album
             db.execute("UPDATE submissions SET media_group_id=? WHERE id=?",
                        (mgid, sub_id))
             db.commit()
         elif mgid:
             return                      # the rest of an album
-        title = (opens[0]["title"] if opens else "")
-        return send(token, tid, t(lang, "page_added",
-                                  n=core.page_count(db, sub_id), title=title),
-                    keyboard=[[{"text": t(lang, "undo"),
-                                "callback_data": f"del:{sub_id}"}]])
-    notify_teachers_new(db, token, sub_id)
+        row = db.execute(
+            "SELECT a.title FROM submissions s LEFT JOIN assignments a"
+            " ON a.id=s.assignment_id WHERE s.id=?", (sub_id,)).fetchone()
+        return draft_state(db, token, student, sub_id,
+                           (row["title"] if row and row["title"] else ""))
     if not opens:
         return send(token, tid, t(lang, "no_assignment"))
     kb = None
@@ -1463,10 +1498,7 @@ def handle_photo(db, token, msg):
               for a in ordered[:12]]
         kb.append([{"text": t(lang, "not_listed"), "callback_data": f"pick:{sub_id}:0"}])
         return send(token, tid, t(lang, "which"), keyboard=kb)
-    send(token, tid,
-         t(lang, "received", title=opens[0]["title"]) + "\n" + t(lang, "more_pages"),
-         keyboard=[[{"text": t(lang, "undo"), "callback_data": f"del:{sub_id}"}]])
-    return send(token, tid, remaining_text(db, student, opens[0]["due_at"]))
+    return draft_state(db, token, student, sub_id, opens[0]["title"])
 
 
 def handle_voice(db, token, msg):
@@ -1682,6 +1714,27 @@ def handle_callback(db, token, cq):
             offer_modes_full(db, token, student, int(data.split(":")[1]))
         return
 
+    if data.startswith("fin:"):
+        student = student_of(db, tid)
+        if not student:
+            return
+        sub_id = as_int(data.split(":")[1])
+        row = db.execute("SELECT * FROM submissions WHERE id=? AND student_id=?",
+                         (sub_id, student["id"])).fetchone()
+        if not row or not row["draft"]:
+            return
+        if not core.page_count(db, sub_id):
+            return send(token, tid, t(student["lang"], "no_assignment"))
+        core.finish_draft(db, sub_id)
+        a = db.execute("SELECT * FROM assignments WHERE id=?",
+                       (row["assignment_id"],)).fetchone()
+        notify_teachers_new(db, token, sub_id)
+        send(token, tid, t(student["lang"], "sent_ok",
+                           title=a["title"] if a else "homework",
+                           n=core.page_count(db, sub_id)))
+        return send(token, tid, remaining_text(db, student,
+                                               a["due_at"] if a else None))
+
     if data.startswith("del:"):
         student = student_of(db, tid)
         if not student:
@@ -1766,7 +1819,14 @@ def handle_callback(db, token, cq):
                        (int(sub_id), student["id"]))
             db.commit()
             return send(token, tid, t(student["lang"], "unassigned_ok"))
-        existing = core.open_submission(db, student["id"], int(aid))
+        a_row = db.execute("SELECT * FROM assignments WHERE id=?", (int(aid),)).fetchone()
+        already = core.sent_submission(db, student["id"], int(aid))
+        if already:
+            return send(token, tid, t(student["lang"], "locked",
+                                      title=a_row["title"] if a_row else ""),
+                        keyboard=[[{"text": t(student["lang"], "btn_delete"),
+                                    "callback_data": f"del:{already['id']}"}]])
+        existing = core.open_draft(db, student["id"], int(aid))
         db.execute(
             "UPDATE submissions SET assignment_id=? WHERE id=? AND student_id=?",
             (int(aid), int(sub_id), student["id"]),
@@ -1775,11 +1835,8 @@ def handle_callback(db, token, cq):
         if existing and existing["id"] != int(sub_id):
             core.merge_submissions(db, existing["id"], int(sub_id))
             sub_id = existing["id"]
-        a = db.execute("SELECT * FROM assignments WHERE id=?", (int(aid),)).fetchone()
-        send(token, tid, t(student["lang"], "reassigned", title=a["title"]),
-             keyboard=[[{"text": t(student["lang"], "undo"),
-                         "callback_data": f"del:{sub_id}"}]])
-        return send(token, tid, remaining_text(db, student, a["due_at"]))
+        return draft_state(db, token, student, sub_id,
+                           a_row["title"] if a_row else "")
 
 
 # -------------------------------------------------------------------- loop

@@ -77,6 +77,7 @@ def load_config():
         "chase_hours": 6,        # start this many hours before the deadline
         "chase_threshold": 80,   # only chase students below this percent done
         "chase_max": 5,          # never send more than this many per deadline
+        "draft_hours": 2,        # send an unfinished draft after this long
 
         "timezone_offset_hours": 5,  # Tashkent
     }
@@ -285,6 +286,10 @@ def migrate(db):
         db.execute("ALTER TABLE submissions ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
     if "improves" not in scols:
         db.execute("ALTER TABLE submissions ADD COLUMN improves INTEGER")
+    if "draft" not in scols:
+        # work in progress: pages can still be added, the teacher cannot see it.
+        # everything that already existed was already sent, so it stays 0.
+        db.execute("ALTER TABLE submissions ADD COLUMN draft INTEGER NOT NULL DEFAULT 0")
     db.executescript("""
     CREATE TABLE IF NOT EXISTS materials (
         id INTEGER PRIMARY KEY,
@@ -421,7 +426,7 @@ def student_timeline(db, student_id):
         s["assignment_id"]: s
         for s in db.execute(
             "SELECT * FROM submissions WHERE student_id=? AND assignment_id IS NOT NULL"
-            " ORDER BY created_at",
+            " AND draft=0 ORDER BY created_at",
             (student_id,),
         ).fetchall()
     }
@@ -644,7 +649,7 @@ def set_progress(db, student_id, items):
         return {"done": 0, "total": 0, "percent": None, "remaining": [], "done_ids": set()}
     ids = [a["id"] for a in items]
     rows = db.execute(
-        "SELECT DISTINCT assignment_id FROM submissions WHERE student_id=?"
+        "SELECT DISTINCT assignment_id FROM submissions WHERE student_id=? AND draft=0"
         " AND assignment_id IN (%s)" % ",".join("?" * len(ids)),
         [student_id] + ids,
     ).fetchall()
@@ -704,7 +709,7 @@ def live_completion(db, student_id):
         return None
     done = db.execute(
         "SELECT COUNT(DISTINCT assignment_id) c FROM submissions WHERE student_id=?"
-        " AND assignment_id IS NOT NULL",
+        " AND assignment_id IS NOT NULL AND draft=0",
         (student_id,),
     ).fetchone()["c"]
     return round(100 * min(done, total) / total)
@@ -942,6 +947,33 @@ def materials_in_unit(db, level_id, collection, category, unit, book=None):
 
 def book_label(book):
     return BOOKS.get(book or "class", BOOKS["class"])
+
+
+def open_draft(db, student_id, assignment_id):
+    """The unfinished work for this task, if the student has started it."""
+    if assignment_id is None:
+        return None
+    return db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND assignment_id=? AND draft=1"
+        " ORDER BY created_at DESC LIMIT 1", (student_id, assignment_id)
+    ).fetchone()
+
+
+def sent_submission(db, student_id, assignment_id):
+    """Work already handed in for this task - the reason to refuse more photos."""
+    if assignment_id is None:
+        return None
+    return db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND assignment_id=? AND draft=0"
+        " ORDER BY created_at DESC LIMIT 1", (student_id, assignment_id)
+    ).fetchone()
+
+
+def finish_draft(db, submission_id):
+    """Hand a draft in: from here it is visible to the teacher and locked."""
+    db.execute("UPDATE submissions SET draft=0, created_at=? WHERE id=? AND draft=1",
+               (iso(now()), submission_id))
+    db.commit()
 
 
 def open_submission(db, student_id, assignment_id):

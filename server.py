@@ -87,7 +87,7 @@ def view_login(req, err=""):
 
 def view_overview(req, db):
     pending = db.execute(
-        "SELECT COUNT(*) c FROM submissions WHERE status='pending'"
+        "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
     ).fetchone()["c"]
     students = db.execute("SELECT * FROM students WHERE active=1").fetchall()
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
@@ -158,10 +158,11 @@ def group_name(db, gid):
 
 def view_queue(req, db):
     sub = db.execute(
-        "SELECT * FROM submissions WHERE status='pending' ORDER BY created_at LIMIT 1"
+        "SELECT * FROM submissions WHERE status='pending' AND draft=0"
+        " ORDER BY created_at LIMIT 1"
     ).fetchone()
     remaining = db.execute(
-        "SELECT COUNT(*) c FROM submissions WHERE status='pending'"
+        "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
     ).fetchone()["c"]
     if not sub:
         body = """<h1>Grading queue</h1>
@@ -781,6 +782,26 @@ def portal_home(db, s, token, flash):
     if not lists:
         lists = '<div class="card"><p style="margin:0">Nothing set at the moment.</p></div>'
 
+    drafts = ""
+    for d in db.execute(
+        "SELECT s.id, s.assignment_id, a.title, a.due_at,"
+        " (SELECT COUNT(*) FROM files f WHERE f.submission_id=s.id) pages"
+        " FROM submissions s LEFT JOIN assignments a ON a.id=s.assignment_id"
+        " WHERE s.student_id=? AND s.draft=1 ORDER BY s.created_at", (s["id"],)
+    ).fetchall():
+        drafts += f"""<div class="card">
+  <div class="rowline"><strong>{E(d["title"] or "Unassigned")}</strong>
+    <span class="pill mute">{d["pages"]} page(s) · not sent</span></div>
+  <p class="sub" style="margin:6px 0 10px">Add more photos above, or send it now.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <form method="post" action="/s/{E(token)}/finish/{d["id"]}">
+      <button>Finish and send</button></form>
+    <form method="post" action="/s/{E(token)}/discard/{d["id"]}">
+      <button class="ghost">Delete</button></form>
+  </div></div>"""
+    if drafts:
+        drafts = "<h2>Ready to send</h2>" + drafts
+
     return f"""{flash}
 <h2>Send your homework</h2>
 <div class="card">
@@ -798,6 +819,7 @@ def portal_home(db, s, token, flash):
     <div style="margin-top:12px"><button>Send to teacher</button></div>
   </form>
 </div>
+{drafts}
 <h2>What is left</h2>
 {lists}"""
 
@@ -945,6 +967,38 @@ def view_student_portal(req, db, token, flash=""):
     return student_shell(s, db, token, tab, body)
 
 
+def act_student_finish(req, db, token, sub_id):
+    s = core.student_by_token(db, token)
+    if not s:
+        return redirect(f"/s/{token}")
+    row = db.execute("SELECT * FROM submissions WHERE id=? AND student_id=? AND draft=1",
+                     (sub_id, s["id"])).fetchone()
+    if row and core.page_count(db, sub_id):
+        core.finish_draft(db, sub_id)
+        token_cfg = core.load_config().get("telegram_token")
+        if token_cfg:
+            import bot
+            bot.notify_teachers_new(db, token_cfg, sub_id)
+    return redirect(f"/s/{token}?sent=1")
+
+
+def act_student_discard(req, db, token, sub_id):
+    s = core.student_by_token(db, token)
+    if not s:
+        return redirect(f"/s/{token}")
+    row = db.execute("SELECT * FROM submissions WHERE id=? AND student_id=?",
+                     (sub_id, s["id"])).fetchone()
+    if row and row["status"] != "graded":
+        for f in db.execute("SELECT filename FROM files WHERE submission_id=?", (sub_id,)):
+            path = os.path.join(core.UPLOAD_DIR, f["filename"])
+            if os.path.exists(path):
+                os.remove(path)
+        db.execute("DELETE FROM files WHERE submission_id=?", (sub_id,))
+        db.execute("DELETE FROM submissions WHERE id=?", (sub_id,))
+        db.commit()
+    return redirect(f"/s/{token}")
+
+
 def act_student_upload(req, db, token):
     s = core.student_by_token(db, token)
     if not s:
@@ -974,14 +1028,17 @@ def act_student_upload(req, db, token):
         return redirect(f"/s/{token}?e=small")
 
     # more photos for a task already in progress join it rather than starting again
-    existing = core.open_submission(db, s["id"], aid)
+    already = core.sent_submission(db, s["id"], aid)
+    if already:
+        return redirect(f"/s/{token}?e=locked")
+    existing = core.open_draft(db, s["id"], aid)
     if existing:
         sub_id = existing["id"]
         start = core.page_count(db, sub_id)
     else:
         sub_id = db.execute(
-            "INSERT INTO submissions (student_id, assignment_id, created_at) VALUES (?,?,?)",
-            (s["id"], aid, core.iso(core.now())),
+            "INSERT INTO submissions (student_id, assignment_id, created_at, draft)"
+            " VALUES (?,?,?,1)", (s["id"], aid, core.iso(core.now())),
         ).lastrowid
         start = 0
     for i, (data, w, h, kind) in enumerate(accepted, start):
@@ -1678,7 +1735,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) != 3 or not parts[2]:
             return self._send(*not_found())
         flash = ""
-        if "ok" in query:
+        if query.get("sent"):
+            flash = '<div class="flash">Sent to your teacher.</div>'
+        elif "ok" in query:
             n = query["ok"][0]
             rejected = (query.get("r") or ["0"])[0]
             pages = (query.get("p") or [""])[0]
@@ -1793,6 +1852,16 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_import(
                     {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/(finish|discard)/(\d+)$", path)
+        if m:
+            db = core.connect()
+            try:
+                fn = act_student_finish if m.group(2) == "finish" else act_student_discard
+                return self._send(*fn({"query": {}, "form": {}}, db,
+                                      m.group(1), int(m.group(3))))
             finally:
                 db.close()
 
