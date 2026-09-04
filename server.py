@@ -263,14 +263,21 @@ def view_groups(req, db):
         members = db.execute(
             "SELECT COUNT(*) c FROM students WHERE group_id=? AND active=1", (g["id"],)
         ).fetchone()["c"]
-        avgs = [
-            core.student_stats(db, s["id"])["average"]
-            for s in db.execute(
-                "SELECT id FROM students WHERE group_id=? AND active=1", (g["id"],)
-            ).fetchall()
-        ]
-        avgs = [a for a in avgs if a is not None]
+        avgs, comps, marks = [], [], []
+        for st in db.execute(
+                "SELECT id FROM students WHERE group_id=? AND active=1", (g["id"],)):
+            stats = core.student_stats(db, st["id"])
+            if stats["average"] is not None:
+                avgs.append(stats["average"])
+            c = core.live_completion(db, st["id"])
+            if c is not None:
+                comps.append(c)
+            m = core.mark_stats(db, st["id"])["overall"]
+            if m is not None:
+                marks.append(m)
         gavg = round(sum(avgs) / len(avgs), 2) if avgs else None
+        gcomp = (str(round(sum(comps) / len(comps))) + "%") if comps else "—"
+        gmark = fmt(round(sum(marks) / len(marks), 2) if marks else None)
         if bot_user:
             link = f"https://t.me/{bot_user}?start={g['join_code']}"
             share = (f'<input readonly value="{E(link)}" onclick="this.select()" '
@@ -287,8 +294,10 @@ def view_groups(req, db):
         rows += (
             f'<tr><td><a href="/groups/{g["id"]}">{E(g["name"])}</a></td>'
             f'<td>{lvl}</td>'
+            f"<td>{members}</td><td>{gcomp}</td><td>{score_pill(gavg)}</td>"
+            f"<td>{gmark}</td>"
             f'<td><span class="kbd">{E(g["join_code"])}</span></td>'
-            f"<td>{members}</td><td>{score_pill(gavg)}</td><td>{share}</td></tr>"
+            f"<td>{share}</td></tr>"
         )
     if bot_user:
         invite = ('<p class="sub">Send a group\'s invite link to its students. One tap '
@@ -302,81 +311,213 @@ def view_groups(req, db):
 <label class="f">New group name<input name="name" placeholder="114" required></label>
 <label class="f">Level<select name="level_id">{level_opts}</select></label>
 <button>Create</button></form></div>
-<div class="tablewrap"><table><tr><th>Group</th><th>Level</th><th>Join code</th>
-<th>Students</th><th>Average</th><th>Invite link</th></tr>
-{rows or '<tr><td colspan=6 class="sub">No groups yet.</td></tr>'}</table></div>"""
+<div class="tablewrap"><table><tr><th>Group</th><th>Level</th><th>Students</th>
+<th>Done</th><th>Average</th><th>Lesson mark</th><th>Join code</th>
+<th>Invite link</th></tr>
+{rows or '<tr><td colspan=8 class="sub">No groups yet.</td></tr>'}</table></div>"""
     return html_response(page("Groups", body, "Groups"))
+
+
+def group_rows(db, gid, since=None):
+    """One row per student: effort, attainment, conduct, and a combined index."""
+    rows = []
+    for st in db.execute(
+        "SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name", (gid,)
+    ).fetchall():
+        stats = core.student_stats(db, st["id"])
+        marks = core.mark_stats(db, st["id"], since)
+        completion = core.live_completion(db, st["id"])
+        rows.append({
+            "student": st, "stats": stats, "marks": marks,
+            "completion": completion,
+            "index": core.overall_index(completion, stats["average"], marks["overall"]),
+        })
+    rows.sort(key=lambda r: (-(r["index"] or 0), r["student"]["name"]))
+    return rows
 
 
 def view_group(req, db, gid):
     g = db.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
     if not g:
         return not_found()
+    query = req["query"]
+    tab = (query.get("tab", ["overview"])[0] or "overview")
+    period = (query.get("period", ["weekly"])[0] or "weekly")
+    if period not in ("daily", "weekly", "monthly"):
+        period = "weekly"
+
+    def link(t, label):
+        on = " on" if tab == t else ""
+        return f'<a class="tab{on}" href="/groups/{gid}?tab={t}">{label}</a>'
+    tabs = ('<div class="tabs">' + link("overview", "Overview")
+            + link("marks", "Lesson marks") + link("homework", "Homework")
+            + link("students", "Students") + "</div>")
+
+    level = core.level_name(db, g["level_id"])
+    head = (f'<h1>{E(g["name"])}</h1><p class="sub">'
+            f'{E(level or "no level")} · join code '
+            f'<span class="kbd">{E(g["join_code"])}</span></p>{tabs}')
+
+    if tab == "marks":
+        return html_response(page(g["name"], head + group_marks(db, g, query), "Groups"))
+    if tab == "homework":
+        return html_response(page(g["name"], head + group_homework(db, g), "Groups"))
+    if tab == "students":
+        return html_response(page(g["name"], head + group_students(db, g), "Groups"))
+    return html_response(page(g["name"], head + group_overview(db, g, period), "Groups"))
+
+
+def group_overview(db, g, period):
+    rows = group_rows(db, g["id"])
+    comps = [r["completion"] for r in rows if r["completion"] is not None]
+    avgs = [r["stats"]["average"] for r in rows if r["stats"]["average"] is not None]
+    marks = [r["marks"]["overall"] for r in rows if r["marks"]["overall"] is not None]
+    lessons = db.execute(
+        "SELECT COUNT(DISTINCT day) c FROM lesson_marks m JOIN students s"
+        " ON s.id=m.student_id WHERE s.group_id=?", (g["id"],)).fetchone()["c"]
+
+    cards = ('<div class="grid">'
+             + stat("Students", len(rows))
+             + stat("Homework done", (str(round(sum(comps) / len(comps))) + "%") if comps else "—")
+             + stat("Average score", fmt(round(sum(avgs) / len(avgs), 2) if avgs else None), "/10")
+             + stat("Lesson mark", fmt(round(sum(marks) / len(marks), 2) if marks else None), "/5")
+             + stat("Lessons marked", lessons) + "</div>")
+
+    def plink(p, label):
+        on = " on" if period == p else ""
+        return f'<a class="tab{on}" href="/groups/{g["id"]}?tab=overview&amp;period={p}">{label}</a>'
+    switch = ('<div class="tabs">' + plink("daily", "Daily") + plink("weekly", "Weekly")
+              + plink("monthly", "Monthly") + "</div>")
+    limit = {"daily": 14, "weekly": 8, "monthly": 6}[period]
+    periods = core.group_periods(db, g["id"], period, limit)
+
+    standings = [(r["student"]["name"], r["index"],
+                  (r["completion"] or 0) < 50) for r in rows]
+    return f"""{cards}
+<h2>Progress over time</h2>
+{switch}
+<div class="card">{charts.period_bars(periods)}
+<div class="legend"><span><i style="background:var(--accent)"></i>homework score /10</span>
+<span><i style="background:var(--ink-3)"></i>lesson mark /5, doubled to share the axis</span>
+</div></div>
+<h2>Standing</h2>
+<p class="sub">Half homework done, a quarter average score, a quarter lesson marks.</p>
+<div class="card">{charts.bars_h(standings)}</div>"""
+
+
+def group_students(db, g):
+    rows = group_rows(db, g["id"])
+    out = ""
+    for r in rows:
+        st, s2, m = r["student"], r["stats"], r["marks"]
+        spark = charts.sparkline([t["score"] for t in s2["timeline"] if t["score"] is not None])
+        flag = '<span class="pill risk">at risk</span>' if s2["at_risk"] else ""
+        comp = f'{r["completion"]}%' if r["completion"] is not None else "—"
+        out += (f'<tr><td><a href="/students/{st["id"]}">{E(st["name"])}</a> {flag}</td>'
+                f'<td><strong>{fmt(r["index"])}</strong></td>'
+                f'<td>{comp}</td><td>{score_pill(s2["average"])}</td>'
+                f'<td>{fmt(m["punctuality"])}</td><td>{fmt(m["behaviour"])}</td>'
+                f'<td>{fmt(m["participation"])}</td>'
+                f'<td>{s2["missed"]}</td><td>{spark}</td></tr>')
+    return f"""<h2>Students</h2>
+<p class="sub">Index out of 100. Marks are averages out of 5 across every lesson recorded.</p>
+<div class="tablewrap"><table><tr><th>Student</th><th>Index</th><th>Done</th>
+<th>Average</th><th>Punct.</th><th>Behav.</th><th>Partic.</th><th>Missed</th>
+<th>Trend</th></tr>
+{out or '<tr><td colspan=9 class="sub">Nobody has joined yet.</td></tr>'}</table></div>"""
+
+
+def group_marks(db, g, query):
+    day = (query.get("day", [None])[0] or
+           core.local_day(core.now(), core.load_config()))
+    existing = core.marks_on(db, g["id"], day)
     students = db.execute(
-        "SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name", (gid,)
-    ).fetchall()
-    assignments = db.execute(
-        "SELECT * FROM assignments WHERE group_id=? ORDER BY COALESCE(due_at,created_at), id",
-        (gid,),
+        "SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name", (g["id"],)
     ).fetchall()
 
-    # group average per assignment, used both for its own chart and as the
-    # reference band behind each student's line
-    band, dist_html = [], ""
-    for a in assignments:
-        scores = [
-            r["score"]
-            for r in db.execute(
-                "SELECT score FROM submissions WHERE assignment_id=? AND status='graded'",
-                (a["id"],),
-            ).fetchall()
-        ]
-        band.append(round(sum(scores) / len(scores), 2) if scores else None)
-    timeline = [
-        {"title": a["title"], "score": band[i], "status": "graded" if band[i] else "missing"}
-        for i, a in enumerate(assignments)
-    ]
-
-    # show the spread for the most recent assignment that actually has grades -
-    # the newest one is usually still sitting in the queue
-    for a in reversed(assignments):
-        scores = [
-            r["score"]
-            for r in db.execute(
-                "SELECT score FROM submissions WHERE assignment_id=? AND status='graded'",
-                (a["id"],),
-            ).fetchall()
-        ]
-        if scores:
-            dist_html = (
-                f'<h2>Spread on “{E(a["title"])}”</h2>'
-                f'<div class="card">{charts.distribution(scores)}</div>'
-            )
-            break
+    def picker(sid, field, value):
+        opts = "".join(
+            f'<option value="{n}"{" selected" if value == n else ""}>{n}</option>'
+            for n in range(core.MARK_MAX, 0, -1))
+        blank = '<option value=""{}>—</option>'.format(" selected" if not value else "")
+        return (f'<select name="{field}_{sid}" class="mark">{blank}{opts}</select>')
 
     rows = ""
-    for s in students:
-        st = core.student_stats(db, s["id"])
-        spark = charts.sparkline([t["score"] for t in st["timeline"] if t["score"] is not None])
-        flag = '<span class="pill risk">at risk</span>' if st["at_risk"] else ""
-        comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
-        rows += (
-            f'<tr><td><a href="/students/{s["id"]}">{E(s["name"])}</a> {flag}</td>'
-            f'<td>{score_pill(st["average"])}</td><td>{score_pill(st["last3"])}</td>'
-            f"<td>{comp}</td><td>{spark}</td></tr>"
-        )
+    for st in students:
+        row = existing.get(st["id"])
+        cells = "".join(
+            f'<td>{picker(st["id"], f, row[f] if row else None)}</td>'
+            for f in core.MARK_FIELDS)
+        rows += (f'<tr><td>{E(st["name"])}</td>{cells}'
+                 f'<td><input name="note_{st["id"]}" value="{E((row["note"] if row else "") or "")}"'
+                 f' placeholder="optional" style="width:100%"></td></tr>')
 
-    body = f"""<h1>{E(g["name"])}</h1>
-<p class="sub">Join code <span class="kbd">{E(g["join_code"])}</span> ·
-{len(students)} students · {len(assignments)} assignments</p>
-<h2>Group average over time</h2>
-<div class="card">{charts.score_line(timeline)}</div>
-{dist_html}
-<h2>Students</h2>
-<div class="tablewrap"><table><tr><th>Student</th><th>Average</th><th>Last 3</th>
-<th>Completion</th><th>Trend</th></tr>
-{rows or '<tr><td colspan=5 class="sub">Nobody has joined yet.</td></tr>'}</table></div>"""
-    return html_response(page(g["name"], body, "Groups"))
+    history = ""
+    for h in db.execute(
+        "SELECT m.day, COUNT(*) n, AVG((COALESCE(m.punctuality,0)+COALESCE(m.behaviour,0)"
+        "+COALESCE(m.participation,0))/3.0) avg FROM lesson_marks m"
+        " JOIN students s ON s.id=m.student_id WHERE s.group_id=?"
+        " GROUP BY m.day ORDER BY m.day DESC LIMIT 12", (g["id"],)
+    ).fetchall():
+        history += (f'<tr><td><a href="/groups/{g["id"]}?tab=marks&amp;day={h["day"]}">'
+                    f'{E(h["day"])}</a></td><td>{h["n"]} student(s)</td>'
+                    f'<td>{round(h["avg"], 2)}/5</td></tr>')
+
+    return f"""<h2>Marks for {E(day)}</h2>
+<p class="sub">Give each student 1 to 5 for how they were in the lesson. Saving again
+on the same date replaces what is there.</p>
+<div class="card"><form method="post" action="/groups/{g["id"]}/marks">
+<input type="hidden" name="day" value="{E(day)}">
+<div class="tablewrap"><table><tr><th>Student</th><th>Punctuality</th><th>Behaviour</th>
+<th>Participation</th><th>Note</th></tr>
+{rows or '<tr><td colspan=5 class="sub">Nobody in this class yet.</td></tr>'}</table></div>
+<div class="inline" style="margin-top:12px">
+<label class="f">Lesson date<input type="date" name="day2" value="{E(day)}"></label>
+<button>Save marks</button></div></form></div>
+<h2>Lessons recorded</h2>
+<div class="tablewrap"><table><tr><th>Date</th><th>Marked</th><th>Class average</th></tr>
+{history or '<tr><td colspan=3 class="sub">No lessons marked yet.</td></tr>'}</table></div>"""
+
+
+def group_homework(db, g):
+    rows = ""
+    for a in db.execute(
+        "SELECT * FROM assignments WHERE group_id=? ORDER BY closed,"
+        " COALESCE(due_at, created_at) DESC, id DESC", (g["id"],)
+    ).fetchall():
+        got = db.execute(
+            "SELECT COUNT(*) c FROM submissions WHERE assignment_id=? AND draft=0",
+            (a["id"],)).fetchone()["c"]
+        total = db.execute(
+            "SELECT COUNT(*) c FROM students WHERE group_id=? AND active=1",
+            (g["id"],)).fetchone()["c"]
+        if a["closed"]:
+            state = '<span class="pill mute">closed</span>'
+        elif not a["published"]:
+            state = '<span class="pill mute">draft</span>'
+        elif not core.still_open(a["due_at"]):
+            state = '<span class="pill mute">deadline passed</span>'
+        else:
+            state = '<span class="pill">open</span>'
+        due = (a["due_at"] or "")[:10]
+        rows += f"""<tr><td>
+  <form method="post" action="/assignments/{a["id"]}/edit" class="inline">
+    <input name="title" value="{E(a["title"])}" style="min-width:210px">
+    <input type="date" name="due" value="{E(due)}">
+    <button class="ghost">Save</button>
+  </form></td>
+  <td>{state}</td><td>{got}/{total}</td>
+  <td><form method="post" action="/assignments/{a["id"]}/{"open" if a["closed"] else "close"}">
+      <button class="ghost">{"Reopen" if a["closed"] else "Close"}</button></form></td>
+  <td><form method="post" action="/assignments/{a["id"]}/delete"
+        onsubmit="return confirm('Delete this homework? Student work is kept but unassigned.')">
+      <button class="ghost">Delete</button></form></td></tr>"""
+    return f"""<h2>Homework set for this class</h2>
+<p class="sub">Edit the title or deadline and press Save. Closing hides it from students
+but keeps the scores; deleting keeps the students' work and detaches it.</p>
+<div class="tablewrap"><table><tr><th>Homework</th><th>State</th><th>In</th>
+<th></th><th></th></tr>
+{rows or '<tr><td colspan=5 class="sub">Nothing set yet.</td></tr>'}</table></div>"""
 
 
 def view_student(req, db, sid):
@@ -776,7 +917,7 @@ def portal_home(db, s, token, flash):
         lists += f"""<div class="card">
   <div class="rowline"><strong>{E(when)}</strong>
     <span class="pill{" risk" if pct < 50 else ""}">{prog["done"]}/{prog["total"]}</span></div>
-  <div class="bar"><i style="width:{pct}%"></i></div>
+  <div class="pbar"><i style="width:{pct}%"></i></div>
   <ul class="checklist">{rows}</ul></div>"""
     if not lists:
         lists = '<div class="card"><p style="margin:0">Nothing set at the moment.</p></div>'
@@ -1623,6 +1764,54 @@ def announce_list(db, group_id, ids):
     return sent
 
 
+def act_save_marks(req, db, gid):
+    f = req["form"]
+    day = (f.get("day2", [""])[0] or f.get("day", [""])[0] or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        return redirect(f"/groups/{gid}?tab=marks")
+    for st in db.execute(
+        "SELECT id FROM students WHERE group_id=? AND active=1", (gid,)
+    ).fetchall():
+        values = {}
+        for field in core.MARK_FIELDS:
+            raw = (f.get(f"{field}_{st['id']}", [""])[0] or "").strip()
+            values[field] = int(raw) if raw.isdigit() else None
+        note = (f.get(f"note_{st['id']}", [""])[0] or "").strip()[:200] or None
+        if any(v is not None for v in values.values()) or note:
+            core.save_mark(db, st["id"], day, values, note)
+    db.commit()
+    return redirect(f"/groups/{gid}?tab=marks&day={day}")
+
+
+def act_edit_assignment(req, db, aid):
+    f = req["form"]
+    title = (f.get("title", [""])[0] or "").strip()
+    due = (f.get("due", [""])[0] or "").strip()
+    row = db.execute("SELECT group_id FROM assignments WHERE id=?", (aid,)).fetchone()
+    if title:
+        db.execute("UPDATE assignments SET title=? WHERE id=?", (title[:120], aid))
+    db.execute("UPDATE assignments SET due_at=? WHERE id=?",
+               (f"{due}T23:59:00+00:00" if due else None, aid))
+    db.commit()
+    return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+
+
+def act_delete_assignment(req, db, aid):
+    """Remove the homework but never the students' work."""
+    row = db.execute("SELECT group_id FROM assignments WHERE id=?", (aid,)).fetchone()
+    db.execute("UPDATE submissions SET assignment_id=NULL WHERE assignment_id=?", (aid,))
+    db.execute("DELETE FROM assignments WHERE id=?", (aid,))
+    db.commit()
+    return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+
+
+def act_open_assignment(req, db, aid):
+    row = db.execute("SELECT group_id FROM assignments WHERE id=?", (aid,)).fetchone()
+    db.execute("UPDATE assignments SET closed=0 WHERE id=?", (aid,))
+    db.commit()
+    return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+
+
 def act_close_assignment(req, db, aid):
     db.execute("UPDATE assignments SET closed=1 WHERE id=?", (aid,))
     db.commit()
@@ -1686,6 +1875,10 @@ ROUTES = [
     ("POST", r"^/assignments/new$", act_new_assignment),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),
+    ("POST", r"^/assignments/(\d+)/open$", act_open_assignment),
+    ("POST", r"^/assignments/(\d+)/edit$", act_edit_assignment),
+    ("POST", r"^/assignments/(\d+)/delete$", act_delete_assignment),
+    ("POST", r"^/groups/(\d+)/marks$", act_save_marks),
     ("POST", r"^/assignments/(\d+)/publish$", act_publish_assignment),
     ("POST", r"^/assignments/(\d+)/unpublish$", act_unpublish_assignment),
     ("POST", r"^/students/(\d+)/update$", act_update_student),

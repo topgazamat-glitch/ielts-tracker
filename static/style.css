@@ -467,8 +467,10 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
 .rowline { display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3); margin-bottom: var(--sp-2); }
 
-.bar { background: var(--line); border-radius: 999px; height: 7px; overflow: hidden; }
-.bar i { display: block; height: 7px; background: var(--accent); border-radius: 999px; }
+/* named so it cannot collide with SVG <rect class="bar">: CSS height applies
+   to SVG geometry in modern browsers, which silently flattened the charts */
+.pbar { background: var(--line); border-radius: 999px; height: 7px; overflow: hidden; }
+.pbar i { display: block; height: 7px; background: var(--accent); border-radius: 999px; }
 
 ul.checklist { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
 ul.checklist li {
@@ -520,3 +522,8 @@ ul.checklist li.done { color: var(--ink-3); }
   font-variant-numeric: tabular-nums; }
 
 tr.me td { background: var(--accent-soft); font-weight: 600; }
+
+.chart .bar2 { fill: var(--ink-3); }
+.chart .track { fill: var(--line); }
+.chart .bar.warn { fill: var(--warn); }
+.chart .rowlabel { fill: var(--ink); font-size: 12.5px; }

@@ -305,6 +305,17 @@ def migrate(db):
         created_at TEXT NOT NULL,
         active INTEGER NOT NULL DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS lesson_marks (
+        id INTEGER PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        day TEXT NOT NULL,                 -- YYYY-MM-DD, the lesson date
+        punctuality INTEGER,               -- 1..5
+        behaviour INTEGER,
+        participation INTEGER,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (student_id, day)
+    );
     CREATE TABLE IF NOT EXISTS questions (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -1033,3 +1044,122 @@ def merge_submissions(db, keep_id, drop_id):
                    (keep_id, start + i, f["id"]))
     db.execute("DELETE FROM submissions WHERE id=?", (drop_id,))
     db.commit()
+
+
+# ---------------------------------------------------------- lesson marks
+
+MARK_FIELDS = ("punctuality", "behaviour", "participation")
+MARK_LABELS = {"punctuality": "Punctuality", "behaviour": "Behaviour",
+               "participation": "Participation"}
+MARK_MAX = 5
+
+
+def marks_on(db, group_id, day):
+    """What was recorded for this class on one date, keyed by student."""
+    rows = db.execute(
+        "SELECT m.* FROM lesson_marks m JOIN students s ON s.id=m.student_id"
+        " WHERE s.group_id=? AND m.day=?", (group_id, day)
+    ).fetchall()
+    return {r["student_id"]: r for r in rows}
+
+
+def save_mark(db, student_id, day, values, note=None):
+    clean = {}
+    for field in MARK_FIELDS:
+        v = values.get(field)
+        clean[field] = v if isinstance(v, int) and 1 <= v <= MARK_MAX else None
+    db.execute(
+        "INSERT INTO lesson_marks (student_id, day, punctuality, behaviour,"
+        " participation, note, created_at) VALUES (?,?,?,?,?,?,?)"
+        " ON CONFLICT(student_id, day) DO UPDATE SET punctuality=excluded.punctuality,"
+        " behaviour=excluded.behaviour, participation=excluded.participation,"
+        " note=excluded.note",
+        (student_id, day, clean["punctuality"], clean["behaviour"],
+         clean["participation"], note, iso(now())),
+    )
+
+
+def mark_stats(db, student_id, since=None):
+    """Averages per criterion, and how many lessons were recorded."""
+    sql = "SELECT * FROM lesson_marks WHERE student_id=?"
+    args = [student_id]
+    if since:
+        sql += " AND day >= ?"
+        args.append(since)
+    rows = db.execute(sql, args).fetchall()
+    out = {"lessons": len(rows)}
+    total, count = 0.0, 0
+    for field in MARK_FIELDS:
+        values = [r[field] for r in rows if r[field] is not None]
+        out[field] = round(sum(values) / len(values), 2) if values else None
+        total += sum(values)
+        count += len(values)
+    out["overall"] = round(total / count, 2) if count else None
+    return out
+
+
+def overall_index(completion, average, marks):
+    """One number out of 100, so a class can be ranked on more than scores.
+
+    Half effort, a quarter attainment, a quarter how they are in the room -
+    weighted this way on purpose, because effort is what a student controls.
+    """
+    parts, weights = [], []
+    if completion is not None:
+        parts.append(completion); weights.append(0.5)
+    if average is not None:
+        parts.append(average * 10); weights.append(0.25)
+    if marks is not None:
+        parts.append(marks / MARK_MAX * 100); weights.append(0.25)
+    if not parts:
+        return None
+    return round(sum(p * w for p, w in zip(parts, weights)) / sum(weights))
+
+
+# ------------------------------------------------------- period reporting
+
+def period_key(day, period):
+    d = datetime.strptime(day, "%Y-%m-%d")
+    if period == "daily":
+        return day
+    if period == "weekly":
+        return "%s-W%02d" % d.isocalendar()[:2]
+    return d.strftime("%Y-%m")
+
+
+def group_periods(db, group_id, period="weekly", limit=8):
+    """Average score, completion and lesson mark per day, week or month."""
+    subs = db.execute(
+        "SELECT s.score, s.graded_at, s.created_at FROM submissions s"
+        " JOIN students st ON st.id=s.student_id"
+        " WHERE st.group_id=? AND s.status='graded' AND s.score IS NOT NULL",
+        (group_id,),
+    ).fetchall()
+    marks = db.execute(
+        "SELECT m.* FROM lesson_marks m JOIN students s ON s.id=m.student_id"
+        " WHERE s.group_id=?", (group_id,),
+    ).fetchall()
+
+    buckets = {}
+    for row in subs:
+        day = (row["graded_at"] or row["created_at"] or "")[:10]
+        if not day:
+            continue
+        b = buckets.setdefault(period_key(day, period), {"scores": [], "marks": []})
+        b["scores"].append(row["score"])
+    for row in marks:
+        b = buckets.setdefault(period_key(row["day"], period), {"scores": [], "marks": []})
+        for field in MARK_FIELDS:
+            if row[field] is not None:
+                b["marks"].append(row[field])
+
+    out = []
+    for key in sorted(buckets)[-limit:]:
+        b = buckets[key]
+        out.append({
+            "key": key,
+            "score": round(sum(b["scores"]) / len(b["scores"]), 2) if b["scores"] else None,
+            "mark": round(sum(b["marks"]) / len(b["marks"]), 2) if b["marks"] else None,
+            "count": len(b["scores"]),
+        })
+    return out

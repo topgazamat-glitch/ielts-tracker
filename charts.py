@@ -157,3 +157,78 @@ def sparkline(scores, w=110, h=26):
         f'<svg class="spark {cls}" viewBox="0 0 {w} {h}" aria-hidden="true">'
         f'<polyline points="{pts}"/></svg>'
     )
+
+
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def short_key(key):
+    """2026-W31 -> W31, 2026-09 -> Sep, 2026-09-05 -> 5 Sep."""
+    if "W" in key:
+        return key.split("-")[-1]
+    bits = key.split("-")
+    if len(bits) == 2:
+        return MONTHS[int(bits[1]) - 1]
+    if len(bits) == 3:
+        return "%d %s" % (int(bits[2]), MONTHS[int(bits[1]) - 1])
+    return key
+
+
+def period_bars(rows, label="Progress over time"):
+    """Two series per period: average score out of 10 and lesson mark out of 5."""
+    if not rows:
+        return _empty("Nothing recorded yet")
+    n = len(rows)
+    parts = [_grid()]
+    slot = PLOT_W / max(n, 1)
+    bw = min(38, slot * 0.34)
+    for i, row in enumerate(rows):
+        centre = PAD_L + slot * (i + 0.5)
+        if row["score"] is not None:
+            h = PH_of(row["score"])
+            parts.append(
+                f'<rect class="bar" x="{centre - bw - 2:.1f}" y="{_y(row["score"]):.1f}" '
+                f'width="{bw:.1f}" height="{h:.1f}" rx="3">'
+                f'<title>{escape(row["key"])}: {row["score"]}/10 from {row["count"]} piece(s)'
+                f'</title></rect>')
+        if row["mark"] is not None:
+            scaled = row["mark"] * 2                    # 1-5 shown on the same 0-10 axis
+            h = PH_of(scaled)
+            parts.append(
+                f'<rect class="bar2" x="{centre + 2:.1f}" y="{_y(scaled):.1f}" '
+                f'width="{bw:.1f}" height="{h:.1f}" rx="3">'
+                f'<title>{escape(row["key"])}: lesson mark {row["mark"]}/5</title></rect>')
+        parts.append(
+            f'<text class="ax" x="{centre:.1f}" y="{H - 12}" text-anchor="middle">'
+            f'{escape(short_key(row["key"]))}</text>')
+    parts.append(f'<line class="axis" x1="{PAD_L}" y1="{_y(0):.1f}" '
+                 f'x2="{W - PAD_R}" y2="{_y(0):.1f}"/>')
+    return (f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" '
+            f'aria-label="{escape(label)}">{"".join(parts)}</svg>')
+
+
+def PH_of(value):
+    return max(1.0, PLOT_H * value / 10.0)
+
+
+def bars_h(rows, label="Standings"):
+    """Horizontal 0-100 bars - the combined index per student."""
+    if not rows:
+        return _empty("No students yet")
+    rows = rows[:20]
+    height = 34 + 26 * len(rows) + 16
+    left, right = 150, 46
+    width = W - left - right
+    parts = []
+    for i, (name, value, flagged) in enumerate(rows):
+        y = 18 + i * 26
+        parts.append(f'<text class="rowlabel" x="6" y="{y + 11}">{escape(name[:20])}</text>')
+        parts.append(f'<rect class="track" x="{left}" y="{y}" width="{width}" '
+                     f'height="14" rx="4"/>')
+        if value is not None:
+            parts.append(f'<rect class="{"bar warn" if flagged else "bar"}" x="{left}" '
+                         f'y="{y}" width="{max(3, width * value / 100):.1f}" height="14" rx="4"/>')
+            parts.append(f'<text class="ax" x="{left + width + 8}" y="{y + 11}">{value}</text>')
+    return (f'<svg class="chart" viewBox="0 0 {W} {height}" role="img" '
+            f'aria-label="{escape(label)}">{"".join(parts)}</svg>')
