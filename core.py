@@ -20,8 +20,9 @@ LEVELS = ["Beginner", "Elementary", "Pre-Intermediate", "Intermediate",
 # Materials are filed twice over: which collection, then which shelf inside it.
 COLLECTIONS = {
     "empower": ("Empower materials",
-                ["Unit handouts", "Listening audios", "Reading plus",
-                 "Academic skills", "Unit vocabularies", "Unit tests"]),
+                ["Unit handouts", "Listening audios", "Workbook audios",
+                 "Reading plus", "Academic skills", "Unit vocabularies",
+                 "Unit tests"]),
     "selfstudy": ("Self-Study",
                   ["Reading", "Listening", "Vocabulary", "Grammar", "Writing"]),
 }
