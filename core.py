@@ -942,3 +942,38 @@ def materials_in_unit(db, level_id, collection, category, unit, book=None):
 
 def book_label(book):
     return BOOKS.get(book or "class", BOOKS["class"])
+
+
+def open_submission(db, student_id, assignment_id):
+    """The piece of work already in progress for this task, if any.
+
+    One task means one submission: extra photos join the ungraded one rather
+    than piling up as separate entries in the teacher's queue. Once it has been
+    graded, the next photo starts a fresh attempt.
+    """
+    if assignment_id is None:
+        return None
+    return db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND assignment_id=?"
+        " AND status='pending' ORDER BY created_at DESC LIMIT 1",
+        (student_id, assignment_id),
+    ).fetchone()
+
+
+def page_count(db, submission_id):
+    return db.execute(
+        "SELECT COUNT(*) c FROM files WHERE submission_id=?", (submission_id,)
+    ).fetchone()["c"]
+
+
+def merge_submissions(db, keep_id, drop_id):
+    """Fold one submission's pages into another and remove the empty shell."""
+    if keep_id == drop_id:
+        return
+    start = page_count(db, keep_id)
+    for i, f in enumerate(db.execute(
+            "SELECT * FROM files WHERE submission_id=? ORDER BY ord, id", (drop_id,))):
+        db.execute("UPDATE files SET submission_id=?, ord=? WHERE id=?",
+                   (keep_id, start + i, f["id"]))
+    db.execute("DELETE FROM submissions WHERE id=?", (drop_id,))
+    db.commit()

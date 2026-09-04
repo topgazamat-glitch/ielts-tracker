@@ -8,7 +8,7 @@ import re
 import struct
 
 MAX_BYTES = 50 * 1024 * 1024   # whole request; Telegram will not send more
-MAX_FILES = 6
+MAX_FILES = 12
 
 
 def parse_multipart(body, content_type):

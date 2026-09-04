@@ -973,12 +973,20 @@ def act_student_upload(req, db, token):
     if not accepted:
         return redirect(f"/s/{token}?e=small")
 
-    sub_id = db.execute(
-        "INSERT INTO submissions (student_id, assignment_id, created_at) VALUES (?,?,?)",
-        (s["id"], aid, core.iso(core.now())),
-    ).lastrowid
-    for i, (data, w, h, kind) in enumerate(accepted):
-        name = f"{sub_id}_{i}_{int(core.now().timestamp())}.{'png' if kind == 'png' else 'jpg'}"
+    # more photos for a task already in progress join it rather than starting again
+    existing = core.open_submission(db, s["id"], aid)
+    if existing:
+        sub_id = existing["id"]
+        start = core.page_count(db, sub_id)
+    else:
+        sub_id = db.execute(
+            "INSERT INTO submissions (student_id, assignment_id, created_at) VALUES (?,?,?)",
+            (s["id"], aid, core.iso(core.now())),
+        ).lastrowid
+        start = 0
+    for i, (data, w, h, kind) in enumerate(accepted, start):
+        name = (f"{sub_id}_{i}_{int(core.now().timestamp())}"
+                f".{'png' if kind == 'png' else 'jpg'}")
         with open(os.path.join(core.UPLOAD_DIR, name), "wb") as fh:
             fh.write(data)
         db.execute(
@@ -987,7 +995,8 @@ def act_student_upload(req, db, token):
             (sub_id, name, w, h, i),
         )
     db.commit()
-    return redirect(f"/s/{token}?ok={len(accepted)}&r={rejected}")
+    return redirect(f"/s/{token}?ok={len(accepted)}&r={rejected}"
+                    f"&p={core.page_count(db, sub_id)}")
 
 
 def view_homework(req, db):
@@ -1672,10 +1681,13 @@ class Handler(BaseHTTPRequestHandler):
         if "ok" in query:
             n = query["ok"][0]
             rejected = (query.get("r") or ["0"])[0]
+            pages = (query.get("p") or [""])[0]
             extra = (f" {rejected} photo(s) were too small to read and were not sent."
                      if rejected not in ("0", "") else "")
+            total = (f" That task now has {pages} page(s)."
+                     if pages and pages != n else "")
             flash = (f'<div class="flash">Sent {E(n)} page(s) to your teacher.'
-                     f'{E(extra)}</div>')
+                     f'{E(total)}{E(extra)}</div>')
         elif query.get("e") == ["small"]:
             flash = ('<div class="flash err">Those photos are too small or blurry to read. '
                      'Retake them: page flat, camera directly above, good light.</div>')

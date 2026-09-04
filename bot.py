@@ -108,6 +108,8 @@ T = {
         'mypage': '📱 My page',
         'mypage_text': 'Your own page — homework, materials, progress and class standings, all in one place:\n\n{url}\n\nIt is only yours. Tip: open it and add it to your home screen.',
         'mypage_none': 'Your page is not ready yet. Ask your teacher.',
+        'page_added': 'Page {n} added to “{title}”. Send more, or move on.',
+        'pages_now': '{n} page(s) for “{title}”.',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -199,6 +201,8 @@ T = {
         'mypage': '📱 Моя страница',
         'mypage_text': 'Ваша страница — задания, материалы, прогресс и рейтинг в одном месте:\n\n{url}\n\nОна только ваша. Совет: откройте и добавьте на главный экран.',
         'mypage_none': 'Страница пока не готова. Спросите преподавателя.',
+        'page_added': 'Страница {n} добавлена к «{title}». Можно отправить ещё.',
+        'pages_now': 'Страниц: {n} для «{title}».',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -290,6 +294,8 @@ T = {
         'mypage': '📱 Mening sahifam',
         'mypage_text': "Sizning sahifangiz — vazifalar, materiallar, natijalar va reyting bir joyda:\n\n{url}\n\nU faqat sizniki. Maslahat: ochib, asosiy ekranga qo'shing.",
         'mypage_none': "Sahifa hali tayyor emas. O'qituvchidan so'rang.",
+        'page_added': "“{title}” ga {n}-sahifa qo'shildi. Yana yuborishingiz mumkin.",
+        'pages_now': '“{title}” uchun {n} ta sahifa.',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -1386,9 +1392,13 @@ def handle_photo(db, token, msg):
             (student["id"], mgid),
         ).fetchone()
 
+    opens = open_assignments(db, student["group_id"])
+    if sub is None and opens:
+        # not part of an album: does this task already have work in progress?
+        sub = core.open_submission(db, student["id"], opens[0]["id"])
+
     first_page = sub is None
     if first_page:
-        opens = open_assignments(db, student["group_id"])
         aid = opens[0]["id"] if opens else None
         due = opens[0]["due_at"] if opens else None
         for a in opens:
@@ -1409,7 +1419,6 @@ def handle_photo(db, token, msg):
         sub_id = cur.lastrowid
     else:
         sub_id = sub["id"]
-        opens = open_assignments(db, student["group_id"])
 
     ord_ = db.execute(
         "SELECT COUNT(*) c FROM files WHERE submission_id=?", (sub_id,)
@@ -1425,7 +1434,19 @@ def handle_photo(db, token, msg):
     db.commit()
 
     if not first_page:
-        return  # stay quiet for the rest of an album
+        if mgid and sub["media_group_id"] != mgid:
+            # an album joining work already in progress: greet it once, then
+            # keep quiet for the rest of the album
+            db.execute("UPDATE submissions SET media_group_id=? WHERE id=?",
+                       (mgid, sub_id))
+            db.commit()
+        elif mgid:
+            return                      # the rest of an album
+        title = (opens[0]["title"] if opens else "")
+        return send(token, tid, t(lang, "page_added",
+                                  n=core.page_count(db, sub_id), title=title),
+                    keyboard=[[{"text": t(lang, "undo"),
+                                "callback_data": f"del:{sub_id}"}]])
     notify_teachers_new(db, token, sub_id)
     if not opens:
         return send(token, tid, t(lang, "no_assignment"))
@@ -1745,11 +1766,15 @@ def handle_callback(db, token, cq):
                        (int(sub_id), student["id"]))
             db.commit()
             return send(token, tid, t(student["lang"], "unassigned_ok"))
+        existing = core.open_submission(db, student["id"], int(aid))
         db.execute(
             "UPDATE submissions SET assignment_id=? WHERE id=? AND student_id=?",
             (int(aid), int(sub_id), student["id"]),
         )
         db.commit()
+        if existing and existing["id"] != int(sub_id):
+            core.merge_submissions(db, existing["id"], int(sub_id))
+            sub_id = existing["id"]
         a = db.execute("SELECT * FROM assignments WHERE id=?", (int(aid),)).fetchone()
         send(token, tid, t(student["lang"], "reassigned", title=a["title"]),
              keyboard=[[{"text": t(student["lang"], "undo"),
