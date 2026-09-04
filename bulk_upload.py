@@ -111,14 +111,25 @@ def sign_in(base, password):
     return opener
 
 
-def existing_titles(opener, base, level_id):
-    """What is already there, so a re-run does not duplicate anything."""
+def existing_titles(opener, base, level_id, section=None):
+    """Titles already on the site, within this section only.
+
+    Sections legitimately share titles - 1.01 is a class track and also a
+    workbook track - so comparing across the whole level would skip a whole
+    upload as duplicates.
+    """
     try:
         html = opener.open("%s/materials?level=%d" % (base, level_id),
-                           timeout=120).read().decode()
+                           timeout=180).read().decode()
     except Exception:
         return set()
-    return set(re.findall(r"/materials/\d+/file\">([^<]+)</a>", html))
+    if not section:
+        return set(re.findall(r"/materials/\d+/file\">([^<]+)</a>", html))
+    blocks = re.split(r"<h2[^>]*>([^<]+)</h2>", html)
+    for i in range(1, len(blocks), 2):
+        if blocks[i].strip().lower() == section.strip().lower():
+            return set(re.findall(r"/materials/\d+/file\">([^<]+)</a>", blocks[i + 1]))
+    return set()
 
 
 def post(opener, base, item, level_id, collection, category, group_id=""):
@@ -219,7 +230,7 @@ def main():
         return 1
 
     opener = sign_in(args.site, args.password)
-    already = existing_titles(opener, args.site, level_id)
+    already = existing_titles(opener, args.site, level_id, args.section)
     todo = [i for i in items
             if i["size"] <= 45 * 1024 * 1024 and i["title"] not in already]
     if already:

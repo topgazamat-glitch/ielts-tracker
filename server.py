@@ -1097,13 +1097,36 @@ def portal_materials(db, s, token, query):
         return f'<h2>Materials</h2><div class="tiles">{cards}</div>'
 
     crumb = f'<a class="crumb" href="{base}">Materials</a> › {E(core.collection_label(coll))}'
+    if query.get("audio") and sect is None:
+        counts = core.level_counts(db, level_id, coll)
+        names = core.sections(coll)
+        cards = ""
+        for label, section in (("Class book", "Listening audios"),
+                               ("Work book", "Workbook audios")):
+            if section in names:
+                cards += (f'<a class="tile" href="{base}&amp;c={coll}'
+                          f'&amp;s={names.index(section)}">'
+                          f'<div class="tile-title">{E(label)}</div>'
+                          f'<div class="sub" style="margin:0">'
+                          f'{counts.get(section, 0)} files</div></a>')
+        return (f'<p class="sub">{crumb} › Listening audios</p>'
+                f'<div class="tiles">{cards}</div>')
     if sect is None:
         counts = core.level_counts(db, level_id, coll)
-        cards = "".join(
-            f'<a class="tile" href="{base}&amp;c={coll}&amp;s={i}">'
-            f'<div class="tile-title">{E(name)}</div>'
-            f'<div class="sub" style="margin:0">{counts.get(name, 0)} files</div></a>'
-            for i, name in enumerate(core.sections(coll)))
+        cards = ""
+        for i, name in enumerate(core.sections(coll)):
+            if name == "Workbook audios":
+                continue                     # reached through Listening audios
+            if name == "Listening audios":
+                total = counts.get(name, 0) + counts.get("Workbook audios", 0)
+                cards += (f'<a class="tile" href="{base}&amp;c={coll}&amp;audio=1">'
+                          f'<div class="tile-title">{E(name)}</div>'
+                          f'<div class="sub" style="margin:0">{total} files</div></a>')
+                continue
+            cards += (f'<a class="tile" href="{base}&amp;c={coll}&amp;s={i}">'
+                      f'<div class="tile-title">{E(name)}</div>'
+                      f'<div class="sub" style="margin:0">'
+                      f'{counts.get(name, 0)} files</div></a>')
         return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
 
     names = core.sections(coll)

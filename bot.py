@@ -117,6 +117,9 @@ T = {
         'locked': '“{title}” has already been sent. Delete it first if you need to change it.',
         'auto_sent': '“{title}” was still unsent, so I have sent it to your teacher ({n} page(s)).',
         "paused": 'You are not in a class at the moment. Ask your teacher to add you back.',
+        'pick_book2': 'Listening audios — which book?',
+        'book_class': '📘 Class book',
+        'book_work': '📒 Work book',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -217,6 +220,9 @@ T = {
         'locked': '«{title}» уже отправлено. Сначала удалите, если нужно изменить.',
         'auto_sent': '«{title}» осталось неотправленным, я отправил его преподавателю ({n} стр.).',
         "paused": 'Сейчас вы не в группе. Попросите преподавателя вернуть вас.',
+        'pick_book2': 'Аудио — какая книга?',
+        'book_class': '📘 Учебник',
+        'book_work': '📒 Рабочая тетрадь',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -317,6 +323,9 @@ T = {
         'locked': "“{title}” allaqachon yuborilgan. O'zgartirish uchun avval o'chiring.",
         'auto_sent': "“{title}” yuborilmagan edi, o'qituvchiga yubordim ({n} ta sahifa).",
         "paused": "Hozir siz guruhda emassiz. O'qituvchidan qayta qo'shishni so'rang.",
+        'pick_book2': 'Audiolar — qaysi kitob?',
+        'book_class': '📘 Darslik',
+        'book_work': '📒 Ish daftari',
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -894,12 +903,36 @@ def offer_collections(db, token, student, level_id):
     return send(token, student["telegram_id"], t(lang, "menu_coll", level=lvl), keyboard=kb)
 
 
+# the two audio shelves are one button for students, then a book to choose
+LISTENING, WORKBOOK = "Listening audios", "Workbook audios"
+
+
+def offer_books_for_audio(db, token, student, level_id, collection):
+    lang = student["lang"]
+    names = core.sections(collection)
+    counts = core.level_counts(db, level_id, collection)
+    kb = []
+    for label_key, section in (("book_class", LISTENING), ("book_work", WORKBOOK)):
+        if section in names:
+            kb.append([{"text": "%s (%d)" % (t(lang, label_key), counts.get(section, 0)),
+                        "callback_data": f"ms:{level_id}:{collection}:{names.index(section)}"}])
+    kb.append([{"text": t(lang, "back"), "callback_data": f"mv:{level_id}"}])
+    return send(token, student["telegram_id"], t(lang, "pick_book2"), keyboard=kb)
+
+
 def offer_sections(db, token, student, level_id, collection):
     """Step four: the five shelves inside that collection."""
     lang = student["lang"]
     counts = core.level_counts(db, level_id, collection)
     kb = []
     for i, name in enumerate(core.sections(collection)):
+        if name == WORKBOOK:
+            continue                      # reached through Listening audios
+        if name == LISTENING:
+            total = counts.get(LISTENING, 0) + counts.get(WORKBOOK, 0)
+            kb.append([{"text": "%s (%d)" % (name, total),
+                        "callback_data": f"mbk:{level_id}:{collection}"}])
+            continue
         kb.append([{"text": "%s (%d)" % (name, counts.get(name, 0)),
                     "callback_data": f"ms:{level_id}:{collection}:{i}"}])
     kb.append([{"text": t(lang, "back"), "callback_data": f"mv:{level_id}"}])
@@ -925,9 +958,14 @@ def offer_units(db, token, student, level_id, collection, index, units):
             kb.append(row); row = []
     if row:
         kb.append(row)
-    kb.append([{"text": t(lang, "back"), "callback_data": f"mk:{level_id}:{collection}"}])
+    back = (f"mbk:{level_id}:{collection}" if category in (LISTENING, WORKBOOK)
+            else f"mk:{level_id}:{collection}")
+    kb.append([{"text": t(lang, "back"), "callback_data": back}])
+    # say which book they picked, not the internal shelf name
+    heading = {LISTENING: t(lang, "book_class"), WORKBOOK: t(lang, "book_work")}.get(
+        category, category)
     return send(token, student["telegram_id"],
-                t(lang, "pick_unit", section=category), keyboard=kb)
+                t(lang, "pick_unit", section=heading), keyboard=kb)
 
 
 def draft_keyboard(lang, sub_id):
@@ -1651,6 +1689,14 @@ def handle_callback(db, token, cq):
             lid = as_int(data.split(":")[1])
             if lid:
                 offer_collections(db, token, student, lid)
+        return
+
+    if data.startswith("mbk:"):
+        student = student_of(db, tid)
+        if student:
+            _, lid, coll = data.split(":")
+            if as_int(lid):
+                offer_books_for_audio(db, token, student, as_int(lid), coll)
         return
 
     if data.startswith("mk:"):
