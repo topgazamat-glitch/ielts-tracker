@@ -67,9 +67,6 @@ def clean_title(path, unit, book, strip=()):
     # already tells the student which book it is, so leave that out of the title
     if unit and not re.match(r"^(unit\s*)?0*%d\b" % unit, stem, re.I):
         bits.append("Unit %d" % unit)
-    # some files are misnamed by the publisher: an mp3 that does not say so
-    if os.path.splitext(path)[1].lower() in AUDIO and "audio" not in stem.lower():
-        stem += " Audio"
     bits.append(stem)
     return " · ".join(bits)[:120]
 
@@ -91,6 +88,17 @@ def scan(folder, strip=()):
                 "size": os.path.getsize(path),
                 "title": clean_title(path, unit, book, strip),
             })
+    # only say "Audio" when two files would otherwise share a title, which
+    # happens when a publisher forgets to label the recording
+    seen = {}
+    for f in found:
+        seen.setdefault(f["title"], []).append(f)
+    for title, group in seen.items():
+        if len(group) < 2:
+            continue
+        for f in group:
+            kind = "Audio" if os.path.splitext(f["path"])[1].lower() in AUDIO else "PDF"
+            f["title"] = "%s %s" % (title, kind)
     found.sort(key=lambda f: (f["unit"] or 99, f["book"] or "", f["title"]))
     return found
 
