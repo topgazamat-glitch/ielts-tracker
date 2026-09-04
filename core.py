@@ -1163,3 +1163,28 @@ def group_periods(db, group_id, period="weekly", limit=8):
             "count": len(b["scores"]),
         })
     return out
+
+
+def remove_student(db, student_id):
+    """Delete a student and everything attached to them. Not reversible."""
+    photos = [r["filename"] for r in db.execute(
+        "SELECT f.filename FROM files f JOIN submissions s ON s.id=f.submission_id"
+        " WHERE s.student_id=?", (student_id,))]
+    db.execute("DELETE FROM files WHERE submission_id IN"
+               " (SELECT id FROM submissions WHERE student_id=?)", (student_id,))
+    db.execute("DELETE FROM submission_tags WHERE submission_id IN"
+               " (SELECT id FROM submissions WHERE student_id=?)", (student_id,))
+    for table in ("submissions", "word_progress", "quiz_sessions", "questions",
+                  "parents", "lesson_marks", "students"):
+        db.execute(f"DELETE FROM {table} WHERE student_id=?"
+                   if table != "students" else "DELETE FROM students WHERE id=?",
+                   (student_id,))
+    db.execute("DELETE FROM bot_state WHERE telegram_id="
+               " (SELECT telegram_id FROM students WHERE id=?)", (student_id,))
+    db.commit()
+    return photos
+
+
+def set_student_active(db, student_id, active):
+    db.execute("UPDATE students SET active=? WHERE id=?", (1 if active else 0, student_id))
+    db.commit()

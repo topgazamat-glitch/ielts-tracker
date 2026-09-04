@@ -116,6 +116,7 @@ T = {
         'sent_ok': 'Sent to your teacher ✅  “{title}”, {n} page(s).',
         'locked': '“{title}” has already been sent. Delete it first if you need to change it.',
         'auto_sent': '“{title}” was still unsent, so I have sent it to your teacher ({n} page(s)).',
+        "paused": 'You are not in a class at the moment. Ask your teacher to add you back.',
         "help": "Send a photo of your homework.\n/homework - what is left\n/progress - your chart\n/vocab - word practice\n/language",
     },
     "ru": {
@@ -215,6 +216,7 @@ T = {
         'sent_ok': 'Отправлено преподавателю ✅  «{title}», {n} стр.',
         'locked': '«{title}» уже отправлено. Сначала удалите, если нужно изменить.',
         'auto_sent': '«{title}» осталось неотправленным, я отправил его преподавателю ({n} стр.).',
+        "paused": 'Сейчас вы не в группе. Попросите преподавателя вернуть вас.',
         "help": "Отправьте фото домашней работы.\n/progress - ваш график\n/vocab - слова\n/language",
     },
     "uz": {
@@ -314,6 +316,7 @@ T = {
         'sent_ok': "O'qituvchiga yuborildi ✅  “{title}”, {n} ta sahifa.",
         'locked': "“{title}” allaqachon yuborilgan. O'zgartirish uchun avval o'chiring.",
         'auto_sent': "“{title}” yuborilmagan edi, o'qituvchiga yubordim ({n} ta sahifa).",
+        "paused": "Hozir siz guruhda emassiz. O'qituvchidan qayta qo'shishni so'rang.",
         "help": "Uy vazifangiz rasmini yuboring.\n/progress - grafik\n/vocab - so'zlar\n/language",
     },
 }
@@ -1234,6 +1237,8 @@ def handle_text(db, token, msg):
     text = BUTTON_COMMANDS.get(text, text)
     student = student_of(db, tid)
     lang = student["lang"] if student else "en"
+    if student and not student["active"] and not text.startswith("/start"):
+        return send(token, tid, t(lang, "paused"))
     step, payload = get_state(db, tid)
 
     # a teacher answering a question, or anyone mid-question, is handled first
@@ -1408,6 +1413,8 @@ def handle_photo(db, token, msg):
     student = student_of(db, tid)
     if not student:
         return send(token, tid, t("en", "no_group"))
+    if not student["active"]:
+        return send(token, tid, t(student["lang"], "paused"))
     lang = student["lang"]
 
     photo = max(msg["photo"], key=lambda p: p.get("width", 0) * p.get("height", 0))
@@ -1509,6 +1516,8 @@ def handle_voice(db, token, msg):
     student = student_of(db, tid)
     if not student:
         return send(token, tid, t("en", "no_group"))
+    if not student["active"]:
+        return send(token, tid, t(student["lang"], "paused"))
     lang = student["lang"]
     voice = msg.get("voice") or msg.get("audio") or {}
     opens = open_assignments(db, student["group_id"])

@@ -485,13 +485,41 @@ def group_students(db, g):
                 f'<td>{comp}</td><td>{score_pill(s2["average"])}</td>'
                 f'<td>{fmt(m["punctuality"])}</td><td>{fmt(m["behaviour"])}</td>'
                 f'<td>{fmt(m["participation"])}</td>'
-                f'<td>{s2["missed"]}</td><td>{spark}</td></tr>')
+                f'<td>{s2["missed"]}</td><td>{spark}</td>'
+                f'<td><form method="post" action="/students/{st["id"]}/pause">'
+                f'<button class="ghost">Pause</button></form></td>'
+                f'<td><form method="post" action="/students/{st["id"]}/delete"'
+                f' onsubmit="return confirm(\'Remove {E(st["name"])} and all their work'
+                f' for good? This cannot be undone.\')">'
+                f'<button class="ghost danger">Remove</button></form></td></tr>')
+
+    paused = ""
+    for st in db.execute(
+        "SELECT * FROM students WHERE group_id=? AND active=0 ORDER BY name", (g["id"],)
+    ).fetchall():
+        paused += (f'<tr><td>{E(st["name"])}</td>'
+                   f'<td><form method="post" action="/students/{st["id"]}/resume">'
+                   f'<button class="ghost">Bring back</button></form></td>'
+                   f'<td><form method="post" action="/students/{st["id"]}/delete"'
+                   f' onsubmit="return confirm(\'Remove {E(st["name"])} and all their'
+                   f' work for good?\')">'
+                   f'<button class="ghost danger">Remove</button></form></td></tr>')
+    paused_block = ""
+    if paused:
+        paused_block = (f'<h2>Paused</h2><p class="sub">Out of the standings, the '
+                        f'reminders and their own page until you bring them back.</p>'
+                        f'<div class="tablewrap"><table><tr><th>Student</th><th></th>'
+                        f'<th></th></tr>{paused}</table></div>')
+
     return f"""<h2>Students</h2>
-<p class="sub">Index out of 100. Marks are averages out of 5 across every lesson recorded.</p>
+<p class="sub">Index out of 100. Marks are averages out of 5 across every lesson recorded.
+<strong>Pause</strong> keeps everything but takes them out of the class;
+<strong>Remove</strong> deletes them and their work for good.</p>
 <div class="tablewrap"><table><tr><th>Student</th><th>Index</th><th>Done</th>
 <th>Average</th><th>Punct.</th><th>Behav.</th><th>Partic.</th><th>Missed</th>
-<th>Trend</th></tr>
-{out or '<tr><td colspan=9 class="sub">Nobody has joined yet.</td></tr>'}</table></div>"""
+<th>Trend</th><th></th><th></th></tr>
+{out or '<tr><td colspan=11 class="sub">Nobody has joined yet.</td></tr>'}</table></div>
+{paused_block}"""
 
 
 def group_marks(db, g, query):
@@ -1980,6 +2008,34 @@ def act_close_assignment(req, db, aid):
     return redirect("/assignments")
 
 
+def _back_to_group(db, sid):
+    row = db.execute("SELECT group_id FROM students WHERE id=?", (sid,)).fetchone()
+    return redirect(f"/groups/{row['group_id']}?tab=students" if row and row["group_id"]
+                    else "/roster")
+
+
+def act_pause_student(req, db, sid):
+    where = _back_to_group(db, sid)
+    core.set_student_active(db, sid, False)
+    return where
+
+
+def act_resume_student(req, db, sid):
+    where = _back_to_group(db, sid)
+    core.set_student_active(db, sid, True)
+    return where
+
+
+def act_delete_student(req, db, sid):
+    where = _back_to_group(db, sid)
+    photos = core.remove_student(db, sid)
+    for name in photos:
+        path = os.path.join(core.UPLOAD_DIR, name)
+        if os.path.exists(path):
+            os.remove(path)
+    return where
+
+
 def act_update_student(req, db, sid):
     f = req["form"]
     name = (f.get("name", [""])[0] or "").strip()
@@ -2044,6 +2100,9 @@ ROUTES = [
     ("POST", r"^/assignments/(\d+)/publish$", act_publish_assignment),
     ("POST", r"^/assignments/(\d+)/unpublish$", act_unpublish_assignment),
     ("POST", r"^/students/(\d+)/update$", act_update_student),
+    ("POST", r"^/students/(\d+)/pause$", act_pause_student),
+    ("POST", r"^/students/(\d+)/resume$", act_resume_student),
+    ("POST", r"^/students/(\d+)/delete$", act_delete_student),
     ("POST", r"^/vocab/new$", act_new_word_list),
     ("POST", r"^/vocab/(\d+)/add$", act_add_words),
 ]

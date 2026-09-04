@@ -574,3 +574,6 @@ tr.me td { background: var(--accent-soft); font-weight: 600; }
 .quick:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-1px); }
 .quick .sub { margin: 0; font-size: 12.5px; }
 a.mini { font-size: 12.5px; white-space: nowrap; }
+
+button.ghost.danger { color: var(--warn); border-color: var(--warn-line); }
+button.ghost.danger:hover { background: var(--warn-soft); }
