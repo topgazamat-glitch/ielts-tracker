@@ -281,6 +281,8 @@ def migrate(db):
     cols = {r["name"] for r in db.execute("PRAGMA table_info(students)")}
     if "token" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN token TEXT")
+    if "photo" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN photo TEXT")
     scols = {r["name"] for r in db.execute("PRAGMA table_info(submissions)")}
     if "late" not in scols:
         db.execute("ALTER TABLE submissions ADD COLUMN late INTEGER NOT NULL DEFAULT 0")
@@ -305,6 +307,12 @@ def migrate(db):
         telegram_file_id TEXT,                    -- cached after the first send
         created_at TEXT NOT NULL,
         active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS goals (
+        student_id INTEGER PRIMARY KEY REFERENCES students(id),
+        listening REAL, reading REAL, writing REAL, speaking REAL,
+        target_date TEXT,
+        updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS lesson_marks (
         id INTEGER PRIMARY KEY,
@@ -1189,3 +1197,67 @@ def remove_student(db, student_id):
 def set_student_active(db, student_id, active):
     db.execute("UPDATE students SET active=? WHERE id=?", (1 if active else 0, student_id))
     db.commit()
+
+
+# ------------------------------------------------------------- band scores
+
+BAND_SECTIONS = ("listening", "reading", "writing", "speaking")
+BAND_LABELS = {"listening": "Listening", "reading": "Reading",
+               "writing": "Writing", "speaking": "Speaking"}
+
+
+def valid_band(value):
+    """IELTS bands run 0 to 9 in half steps."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= v <= 9:
+        return None
+    return round(v * 2) / 2
+
+
+def overall_band(scores):
+    """The four sections averaged, rounded the way IELTS rounds.
+
+    A quarter rounds up to the next half band, three quarters up to the next
+    whole band; anything else falls to the nearest half.
+    """
+    values = [v for v in scores if v is not None]
+    if len(values) < 4:
+        return None
+    avg = sum(values) / 4.0
+    floor_half = int(avg * 2) / 2.0
+    return floor_half + 0.5 if (avg - floor_half) >= 0.25 else floor_half
+
+
+def get_goal(db, student_id):
+    return db.execute("SELECT * FROM goals WHERE student_id=?", (student_id,)).fetchone()
+
+
+def save_goal(db, student_id, scores, target_date=None):
+    db.execute(
+        "INSERT INTO goals (student_id, listening, reading, writing, speaking,"
+        " target_date, updated_at) VALUES (?,?,?,?,?,?,?)"
+        " ON CONFLICT(student_id) DO UPDATE SET listening=excluded.listening,"
+        " reading=excluded.reading, writing=excluded.writing,"
+        " speaking=excluded.speaking, target_date=excluded.target_date,"
+        " updated_at=excluded.updated_at",
+        (student_id, scores.get("listening"), scores.get("reading"),
+         scores.get("writing"), scores.get("speaking"), target_date, iso(now())),
+    )
+    db.commit()
+
+
+def band_words(band):
+    if band is None:
+        return ""
+    if band >= 8:
+        return "Very good to expert user"
+    if band >= 7:
+        return "Good user"
+    if band >= 6:
+        return "Competent user"
+    if band >= 5:
+        return "Modest user"
+    return "Limited user"

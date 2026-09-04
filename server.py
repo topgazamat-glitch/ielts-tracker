@@ -981,7 +981,7 @@ def student_shell(s, db, token, tab, body):
     """One page, four tabs, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
     tabs = [("home", "Homework"), ("materials", "Materials"),
-            ("progress", "Progress"), ("class", "Class")]
+            ("progress", "Progress"), ("class", "Class"), ("goal", "My goal")]
     nav = "".join(
         f'<a class="tab{" on" if tab == key else ""}" '
         f'href="/s/{E(token)}?tab={key}">{label}</a>' for key, label in tabs)
@@ -1301,6 +1301,101 @@ is marked.</p>"""
     return html_response(student_page("%s — report" % s["name"], body))
 
 
+def portal_goal(db, s, token, flash=""):
+    """A band card the student sets for themselves - a target, not a result."""
+    goal = core.get_goal(db, s["id"])
+    scores = {k: (goal[k] if goal else None) for k in core.BAND_SECTIONS}
+    overall = core.overall_band([scores[k] for k in core.BAND_SECTIONS])
+    level = core.level_name(db, core.level_of(db, s["group_id"]))
+
+    def picker(field):
+        opts = ['<option value="">—</option>']
+        v = scores[field]
+        n = 9.0
+        while n >= 0:
+            sel = " selected" if v is not None and abs(v - n) < 0.01 else ""
+            opts.append(f'<option value="{n:g}"{sel}>{n:g}</option>')
+            n -= 0.5
+        return (f'<label class="f">{core.BAND_LABELS[field]}'
+                f'<select name="{field}" class="mark">{"".join(opts)}</select></label>')
+
+    photo = (f'<img class="idphoto" src="/s/{E(token)}/photo" alt="">' if s["photo"]
+             else '<div class="idphoto empty">add a photo</div>')
+    target = (goal["target_date"] if goal and goal["target_date"] else "")
+
+    if overall is not None:
+        rows = "".join(
+            f'<tr><td>{core.BAND_LABELS[k]}</td>'
+            f'<td class="bandcell">{scores[k]:g}</td></tr>' for k in core.BAND_SECTIONS)
+        card = f"""<div class="certificate">
+  <div class="cert-top">
+    <div class="cert-title">My IELTS goal</div>
+    <div class="cert-sub">A target I set for myself · not an official test result</div>
+  </div>
+  <div class="cert-body">
+    {photo}
+    <div class="cert-who">
+      <div class="cert-name">{E(s["name"])}</div>
+      <div class="sub" style="margin:2px 0 0">{E(group_name(db, s["group_id"]))}
+        {"· " + E(level) if level else ""}</div>
+      {f'<div class="sub" style="margin:6px 0 0">Aiming for {E(target)}</div>' if target else ""}
+    </div>
+    <div class="cert-overall">
+      <div class="k">Overall band</div>
+      <div class="v">{overall:g}</div>
+      <div class="w">{E(core.band_words(overall))}</div>
+    </div>
+  </div>
+  <table class="cert-table">{rows}</table>
+  <div class="cert-foot">Set on {E((goal["updated_at"] or "")[:10])} ·
+    AzamatEnglish · this card shows a personal goal, not a score awarded by IELTS</div>
+</div>"""
+    else:
+        card = ('<div class="card"><p style="margin:0">Choose a band for all four '
+                'sections and your card will appear here.</p></div>')
+
+    return f"""{flash}
+<h2>My IELTS goal</h2>
+<p class="sub">Set the band you are aiming for in each part. The overall band is
+worked out the way IELTS does it — a quarter rounds up to the next half band.</p>
+{card}
+<div class="card"><form method="post" action="/s/{E(token)}/goal"
+      enctype="multipart/form-data">
+  <div class="inline">{"".join(picker(k) for k in core.BAND_SECTIONS)}
+    <label class="f">Exam date (optional)<input type="date" name="target_date"
+      value="{E(target)}"></label></div>
+  <label class="f" style="margin-top:12px">Your photo (optional)
+    <input type="file" name="photo" accept="image/*"></label>
+  <div style="margin-top:12px"><button>Save my goal</button></div>
+</form></div>"""
+
+
+def act_student_goal(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return redirect(f"/s/{token}")
+    fields, files = req["files"]
+    scores = {k: core.valid_band((fields.get(k, [""])[0] or "").strip())
+              for k in core.BAND_SECTIONS}
+    date = (fields.get("target_date", [""])[0] or "").strip()
+    core.save_goal(db, s["id"], scores, date if re.match(r"^\d{4}-\d{2}-\d{2}$", date) else None)
+    for filename, blob in files[:1]:
+        w, h, kind = uploads.image_size(blob)
+        if kind:
+            name = f"photo_{s['id']}_{int(core.now().timestamp())}." + \
+                   ("png" if kind == "png" else "jpg")
+            with open(os.path.join(core.UPLOAD_DIR, name), "wb") as fh:
+                fh.write(blob)
+            old = s["photo"]
+            db.execute("UPDATE students SET photo=? WHERE id=?", (name, s["id"]))
+            db.commit()
+            if old and old != name:
+                path = os.path.join(core.UPLOAD_DIR, old)
+                if os.path.exists(path):
+                    os.remove(path)
+    return redirect(f"/s/{token}?tab=goal")
+
+
 def view_student_portal(req, db, token, flash=""):
     s = core.student_by_token(db, token)
     if not s:
@@ -1314,6 +1409,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_progress(db, s, token)
     elif tab == "class":
         body = portal_class(db, s, token)
+    elif tab == "goal":
+        body = portal_goal(db, s, token, flash)
     else:
         tab = "home"
         body = portal_home(db, s, token, flash)
@@ -2232,6 +2329,24 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/static/"):
             return self._serve_static(path)
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/photo$", path)
+        if m:
+            db = core.connect()
+            try:
+                st = core.student_by_token(db, m.group(1))
+                if not st or not st["photo"]:
+                    return self._send(*not_found())
+                full = os.path.join(core.UPLOAD_DIR, st["photo"])
+                if not os.path.isfile(full):
+                    return self._send(*not_found())
+                with open(full, "rb") as fh:
+                    blob = fh.read()
+                ctype = "image/png" if st["photo"].endswith(".png") else "image/jpeg"
+                return self._send(200, [("Content-Type", ctype),
+                                        ("Content-Length", str(len(blob))),
+                                        ("Cache-Control", "private, max-age=300")], blob)
+            finally:
+                db.close()
         if path.startswith("/s/"):
             return self._student_get(path, query)
         if path.startswith("/p/"):
@@ -2295,6 +2410,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_import(
                     {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        if re.match(r"^/s/[A-Za-z0-9_-]+/goal$", path):
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_student_goal(
+                    {"query": {}, "form": {}, "files": (fields, files)},
+                    db, path.split("/")[2]))
             finally:
                 db.close()
 
