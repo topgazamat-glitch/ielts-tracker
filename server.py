@@ -1319,45 +1319,90 @@ def portal_goal(db, s, token, flash=""):
         return (f'<label class="f">{core.BAND_LABELS[field]}'
                 f'<select name="{field}" class="mark">{"".join(opts)}</select></label>')
 
-    photo = (f'<img class="idphoto" src="/s/{E(token)}/photo" alt="">' if s["photo"]
-             else '<div class="idphoto empty">add a photo</div>')
+    photo = (f'<img class="cert-photo" src="/s/{E(token)}/photo" alt="">' if s["photo"]
+             else '<div class="cert-photo empty">your photo</div>')
     target = (goal["target_date"] if goal and goal["target_date"] else "")
 
     if overall is not None:
         rows = "".join(
-            f'<tr><td>{core.BAND_LABELS[k]}</td>'
-            f'<td class="bandcell">{scores[k]:g}</td></tr>' for k in core.BAND_SECTIONS)
-        card = f"""<div class="certificate">
-  <div class="cert-top">
-    <div class="cert-title">My IELTS goal</div>
-    <div class="cert-sub">A target I set for myself · not an official test result</div>
-  </div>
-  <div class="cert-body">
-    {photo}
-    <div class="cert-who">
-      <div class="cert-name">{E(s["name"])}</div>
-      <div class="sub" style="margin:2px 0 0">{E(group_name(db, s["group_id"]))}
-        {"· " + E(level) if level else ""}</div>
-      {f'<div class="sub" style="margin:6px 0 0">Aiming for {E(target)}</div>' if target else ""}
+            f'<div class="sk"><span class="sk-name">{core.BAND_LABELS[k]}</span>'
+            f'<span class="sk-dots"></span>'
+            f'<span class="sk-band">{scores[k]:g}</span></div>'
+            for k in core.BAND_SECTIONS)
+        number = "AE-%s-%04d" % ((goal["updated_at"] or "")[:4] or "2026", s["id"])
+        issued = (goal["updated_at"] or "")[:10]
+        card = f"""<div class="cert-wrap"><div class="cert" id="cert">
+  <svg class="cert-guilloche" viewBox="0 0 800 600" preserveAspectRatio="none"
+       aria-hidden="true">
+    <defs><pattern id="weave" width="26" height="26" patternUnits="userSpaceOnUse">
+      <path d="M0 13 Q6.5 0 13 13 T26 13" fill="none" stroke="currentColor"
+            stroke-width=".7"/>
+      <path d="M13 0 Q26 6.5 13 13 T13 26" fill="none" stroke="currentColor"
+            stroke-width=".7"/>
+    </pattern></defs>
+    <rect x="8" y="8" width="784" height="584" fill="url(#weave)" opacity=".5"/>
+    <rect x="8" y="8" width="784" height="584" fill="none" stroke="currentColor"
+          stroke-width="2"/>
+    <rect x="18" y="18" width="764" height="564" fill="none" stroke="currentColor"
+          stroke-width=".8"/>
+    <g fill="none" stroke="currentColor" stroke-width="1.2">
+      <path d="M18 54 q0-36 36-36 M30 54 q0-24 24-24"/>
+      <path d="M782 54 q0-36-36-36 M770 54 q0-24-24-24"/>
+      <path d="M18 546 q0 36 36 36 M30 546 q0 24 24 24"/>
+      <path d="M782 546 q0 36-36 36 M770 546 q0 24-24 24"/>
+    </g>
+  </svg>
+  <div class="cert-watermark">AE</div>
+  <div class="cert-inner">
+    <div class="cert-brand"><span class="cert-mark">A</span>AzamatEnglish</div>
+    <div class="cert-kicker">Certificate of Achievement</div>
+    <div class="cert-rule"><span></span>&#10022;<span></span></div>
+    <p class="cert-lede">This is to certify that</p>
+    <div class="cert-holder">{E(s["name"])}</div>
+    <p class="cert-lede">of {E(group_name(db, s["group_id"]))}
+      {"· " + E(level) if level else ""} achieved the following band scores</p>
+    <div class="cert-main">
+      {photo}
+      <div class="cert-skills">{rows}</div>
+      <div class="cert-seal">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <defs><radialGradient id="foil" cx="35%" cy="30%">
+            <stop offset="0%" stop-color="#f7e3a1"/><stop offset="45%" stop-color="#d8b04a"/>
+            <stop offset="100%" stop-color="#a97c1c"/></radialGradient></defs>
+          <circle cx="60" cy="60" r="52" fill="url(#foil)"/>
+          <circle cx="60" cy="60" r="44" fill="none" stroke="#fff" stroke-opacity=".55"/>
+          <circle cx="60" cy="60" r="52" fill="none" stroke="#8a6413" stroke-width="1.5"/>
+        </svg>
+        <div class="cert-sealtext"><span class="k">Overall</span>
+          <span class="v">{overall:g}</span></div>
+      </div>
     </div>
-    <div class="cert-overall">
-      <div class="k">Overall band</div>
-      <div class="v">{overall:g}</div>
-      <div class="w">{E(core.band_words(overall))}</div>
+    <div class="cert-descriptor">{E(core.band_words(overall))}</div>
+    <div class="cert-sign">
+      <div><div class="sig">Azamat</div><div class="line"></div><span>Teacher</span></div>
+      <div><div class="sig"></div><div class="line"></div>
+        <span>Issued {E(issued)}</span></div>
     </div>
+    <div class="cert-serial">No. {E(number)}
+      {"· exam date " + E(target) if target else ""}</div>
+    <div class="cert-note">Awarded by AzamatEnglish for a mock examination.
+      This is not an IELTS Test Report Form and is not issued by IELTS,
+      British Council, IDP or Cambridge.</div>
   </div>
-  <table class="cert-table">{rows}</table>
-  <div class="cert-foot">Set on {E((goal["updated_at"] or "")[:10])} ·
-    AzamatEnglish · this card shows a personal goal, not a score awarded by IELTS</div>
-</div>"""
+</div>
+</div>
+<div style="margin-bottom:16px"><button type="button" onclick="window.print()">
+  Print or save as PDF</button></div>
+"""
     else:
         card = ('<div class="card"><p style="margin:0">Choose a band for all four '
                 'sections and your card will appear here.</p></div>')
 
     return f"""{flash}
-<h2>My IELTS goal</h2>
-<p class="sub">Set the band you are aiming for in each part. The overall band is
-worked out the way IELTS does it — a quarter rounds up to the next half band.</p>
+<h2>My certificate</h2>
+<p class="sub">Set the band you are aiming for — or the one you got in a mock exam —
+and your certificate appears below. The overall band is worked out the way IELTS
+works it out: a quarter rounds up to the next half band.</p>
 {card}
 <div class="card"><form method="post" action="/s/{E(token)}/goal"
       enctype="multipart/form-data">
