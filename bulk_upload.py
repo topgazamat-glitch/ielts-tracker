@@ -139,7 +139,8 @@ def post(opener, base, item, level_id, collection, category, group_id=""):
         "title": item["title"], "level_id": str(level_id or ""),
         "collection": collection, "category": category,
         "group_id": group_id, "note": "",
-        "unit": str(item["unit"] or ""), "book": item["book"] or "",
+        "unit": "" if item["unit"] is None else str(item["unit"]),
+        "book": item["book"] or "",
     }
     for key, value in fields.items():
         parts.append(('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n'
@@ -198,7 +199,8 @@ def main():
     print("%-5s %-11s %-9s %s" % ("UNIT", "BOOK", "SIZE", "TITLE"))
     for i in items:
         print("%-5s %-11s %-9s %s" % (
-            i["unit"] or "?", core.book_label(i["book"]) if i["book"] else "?",
+            "W" if i["unit"] == 0 else (i["unit"] or "?"),
+            core.book_label(i["book"]) if i["book"] else "?",
             core.human_size(i["size"]), i["title"][:60]))
     if unknown:
         print()

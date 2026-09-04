@@ -1872,7 +1872,10 @@ def act_new_material(req, db):
     if category not in core.sections(collection):
         category = core.sections(collection)[0]
     raw_unit = (fields.get("unit", [""])[0] or "").strip()
-    unit = int(raw_unit) if raw_unit.isdigit() and int(raw_unit) in core.UNITS else None
+    # 0 is the Welcome unit - it is a real unit for filing, it just sits
+    # before Unit 1 and so is not in core.UNITS.
+    unit = (int(raw_unit) if raw_unit.isdigit()
+            and (int(raw_unit) in core.UNITS or int(raw_unit) == 0) else None)
     book = (fields.get("book", [""])[0] or "").strip()
     book = book if book in core.BOOKS else None
     db.execute(
