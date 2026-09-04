@@ -78,6 +78,7 @@ def load_config():
         "chase_threshold": 80,   # only chase students below this percent done
         "chase_max": 5,          # never send more than this many per deadline
         "draft_hours": 2,        # send an unfinished draft after this long
+        "late_window_hours": 0,  # how long past a deadline students may still send
 
         "timezone_offset_hours": 5,  # Tashkent
     }
@@ -634,13 +635,36 @@ def homework_items(db, group_id, due_at):
     ).fetchall()
 
 
-def open_sets(db, group_id):
-    """Open homework grouped by deadline, soonest first."""
+def still_open(due_at, cfg=None):
+    """Is this deadline still accepting work?
+
+    A task whose deadline has passed disappears from the student's list, so a
+    new week's homework is never shown next to last week's.
+    """
+    if not due_at:
+        return True
+    cfg = cfg or load_config()
+    grace = timedelta(hours=cfg.get("late_window_hours", 0))
+    end = parse(due_at)
+    return end is None or (end + grace) >= now()
+
+
+def open_sets(db, group_id, for_student=False):
+    """Open homework grouped by deadline, soonest first.
+
+    for_student drops anything past its deadline; the teacher keeps seeing
+    everything on the dashboard.
+    """
     rows = db.execute(
         "SELECT DISTINCT due_at FROM assignments WHERE group_id=? AND published=1"
         " AND closed=0 ORDER BY due_at IS NULL, due_at", (group_id,)
     ).fetchall()
-    return [(r["due_at"], homework_items(db, group_id, r["due_at"])) for r in rows]
+    out = []
+    for r in rows:
+        if for_student and not still_open(r["due_at"]):
+            continue
+        out.append((r["due_at"], homework_items(db, group_id, r["due_at"])))
+    return out
 
 
 def set_progress(db, student_id, items):

@@ -747,11 +747,10 @@ def student_shell(s, db, token, tab, body):
 
 def portal_home(db, s, token, flash):
     st = core.student_stats(db, s["id"])
-    opens = db.execute(
+    opens = [a for a in db.execute(
         "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
         " ORDER BY COALESCE(due_at, created_at) DESC, id DESC",
-        (s["group_id"],),
-    ).fetchall()
+        (s["group_id"],)).fetchall() if core.still_open(a["due_at"])]
     if opens:
         opts = "".join(f'<option value="{a["id"]}">{E(a["title"])}</option>' for a in opens)
         picker = (f'<label class="f">Which task?<select name="assignment_id">{opts}</select></label>'
@@ -763,7 +762,7 @@ def portal_home(db, s, token, flash):
         picker = '<p class="sub" style="margin:0 0 10px">No open task right now.</p>'
 
     lists = ""
-    for due_at, items in core.open_sets(db, s["group_id"]):
+    for due_at, items in core.open_sets(db, s["group_id"], for_student=True):
         prog = core.set_progress(db, s["id"], items)
         left = core.due_in_words(due_at)
         when = (f'{due_at[:10]} · {left}' if due_at else "no deadline")

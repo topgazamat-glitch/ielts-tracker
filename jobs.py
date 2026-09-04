@@ -273,9 +273,12 @@ PHRASES = {
         "uz": "Eslatma: “{title}” ertaga topshiriladi. Tayyor bo'lganda rasmini yuboring.",
     },
     "missed": {
-        "en": "You have not sent “{title}” yet. You can still send it — late is better than missing.",
-        "ru": "Вы ещё не отправили «{title}». Можно отправить сейчас — лучше поздно, чем никогда.",
-        "uz": "Siz hali “{title}” ni yubormadingiz. Hozir ham yuborsangiz bo'ladi.",
+        "en": "The deadline for “{title}” has passed and you did not send it. "
+              "Speak to your teacher if you still want it marked.",
+        "ru": "Срок сдачи «{title}» истёк, работа не отправлена. "
+              "Обратитесь к преподавателю, если хотите её сдать.",
+        "uz": "“{title}” muddati tugadi, ish yuborilmadi. "
+              "Baholanishini istasangiz, o'qituvchi bilan gaplashing.",
     },
 }
 

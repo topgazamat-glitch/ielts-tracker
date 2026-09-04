@@ -541,11 +541,13 @@ def student_of(db, tid):
 
 
 def open_assignments(db, group_id):
-    return db.execute(
+    """What a student may still send work for: published, not closed, not past."""
+    rows = db.execute(
         "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
         " ORDER BY COALESCE(due_at, created_at) DESC, id DESC",
         (group_id,),
     ).fetchall()
+    return [a for a in rows if core.still_open(a["due_at"])]
 
 
 
@@ -1107,7 +1109,7 @@ def rating_text(db, student):
 
 def checklist_text(db, student, lang):
     """Every open set, with a tick or an empty box per item."""
-    sets = core.open_sets(db, student["group_id"])
+    sets = core.open_sets(db, student["group_id"], for_student=True)
     if not sets:
         return t(lang, "hw_none")
     blocks = []
@@ -1191,7 +1193,7 @@ def join_group_row(db, token, tid, name, g, lang):
     send(token, tid, t(lang, "welcome2"))
     if student:
         send_my_page(db, token, student)
-        sets = core.open_sets(db, student["group_id"])
+        sets = core.open_sets(db, student["group_id"], for_student=True)
         if sets:
             send(token, tid, checklist_text(db, student, lang))
 
@@ -1220,7 +1222,7 @@ def join_group(db, token, tid, name, code, lang):
     send(token, tid, t(lang, "welcome2"))
     if student:
         send_my_page(db, token, student)
-        sets = core.open_sets(db, student["group_id"])
+        sets = core.open_sets(db, student["group_id"], for_student=True)
         if sets:
             send(token, tid, checklist_text(db, student, lang))
     return
