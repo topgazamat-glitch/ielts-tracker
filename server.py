@@ -251,6 +251,25 @@ document.addEventListener('keydown', e => {{
     return html_response(page("Grade", body, "Grade"))
 
 
+def ring(percent, size=64):
+    """A small progress ring - reads faster than a number on a card."""
+    if percent is None:
+        percent = 0
+    r = (size - 8) / 2
+    circ = 2 * 3.14159 * r
+    done = circ * min(100, max(0, percent)) / 100
+    colour = "var(--warn)" if percent < 50 else "var(--accent)"
+    return (f'<svg class="ring" viewBox="0 0 {size} {size}" width="{size}" height="{size}">'
+            f'<circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="var(--line)"'
+            f' stroke-width="6"/>'
+            f'<circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="{colour}"'
+            f' stroke-width="6" stroke-linecap="round"'
+            f' stroke-dasharray="{done:.1f} {circ:.1f}"'
+            f' transform="rotate(-90 {size/2} {size/2})"/>'
+            f'<text x="50%" y="54%" text-anchor="middle" class="ringtext">{percent}%</text>'
+            "</svg>")
+
+
 def view_groups(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
     bot_user = core.meta_get(db, "bot_username", "")
@@ -258,64 +277,54 @@ def view_groups(req, db):
     level_opts = ('<option value="">— no level —</option>'
                   + "".join(f'<option value="{l["id"]}">{E(l["name"])}</option>'
                             for l in levels))
-    rows = ""
+
+    cards = ""
     for g in groups:
-        members = db.execute(
-            "SELECT COUNT(*) c FROM students WHERE group_id=? AND active=1", (g["id"],)
-        ).fetchone()["c"]
-        avgs, comps, marks = [], [], []
-        for st in db.execute(
-                "SELECT id FROM students WHERE group_id=? AND active=1", (g["id"],)):
-            stats = core.student_stats(db, st["id"])
-            if stats["average"] is not None:
-                avgs.append(stats["average"])
-            c = core.live_completion(db, st["id"])
-            if c is not None:
-                comps.append(c)
-            m = core.mark_stats(db, st["id"])["overall"]
-            if m is not None:
-                marks.append(m)
-        gavg = round(sum(avgs) / len(avgs), 2) if avgs else None
-        gcomp = (str(round(sum(comps) / len(comps))) + "%") if comps else "—"
-        gmark = fmt(round(sum(marks) / len(marks), 2) if marks else None)
-        if bot_user:
-            link = f"https://t.me/{bot_user}?start={g['join_code']}"
-            share = (f'<input readonly value="{E(link)}" onclick="this.select()" '
-                     f'style="width:100%;font-size:12px;'
-                     f'font-family:ui-monospace,Menlo,monospace">')
-        else:
-            share = '<span class="sub">—</span>'
-        picker = "".join(
-            f'<option value="{l["id"]}"{" selected" if l["id"]==g["level_id"] else ""}>'
-            f'{E(l["name"])}</option>' for l in levels)
-        lvl = (f'<form method="post" action="/groups/{g["id"]}/level">'
-               f'<select name="level_id" onchange="this.form.submit()">'
-               f'<option value="">— none —</option>{picker}</select></form>')
-        rows += (
-            f'<tr><td><a href="/groups/{g["id"]}">{E(g["name"])}</a></td>'
-            f'<td>{lvl}</td>'
-            f"<td>{members}</td><td>{gcomp}</td><td>{score_pill(gavg)}</td>"
-            f"<td>{gmark}</td>"
-            f'<td><span class="kbd">{E(g["join_code"])}</span></td>'
-            f"<td>{share}</td></tr>"
-        )
+        rows = group_rows(db, g["id"])
+        comps = [r["completion"] for r in rows if r["completion"] is not None]
+        avgs = [r["stats"]["average"] for r in rows if r["stats"]["average"] is not None]
+        marks = [r["marks"]["overall"] for r in rows if r["marks"]["overall"] is not None]
+        comp = round(sum(comps) / len(comps)) if comps else 0
+        avg = round(sum(avgs) / len(avgs), 1) if avgs else None
+        mark = round(sum(marks) / len(marks), 1) if marks else None
+        risky = sum(1 for r in rows if r["stats"]["at_risk"])
+        level = core.level_name(db, g["level_id"]) or "no level"
+        warn = (f'<span class="pill risk">{risky} at risk</span>' if risky else "")
+        cards += f"""<a class="groupcard" href="/groups/{g["id"]}">
+  <div class="gc-head">
+    <div><div class="gc-name">{E(g["name"])}</div>
+      <div class="sub" style="margin:2px 0 0">{E(level)} · {len(rows)} students</div></div>
+    {ring(comp)}
+  </div>
+  <div class="gc-figures">
+    <div><span class="k">Average</span><span class="v">{fmt(avg)}</span></div>
+    <div><span class="k">Lesson</span><span class="v">{fmt(mark)}</span></div>
+    <div><span class="k">Code</span><span class="v mono">{E(g["join_code"])}</span></div>
+  </div>
+  <div class="gc-foot">{warn}<span class="gc-open">Open class →</span></div>
+</a>"""
+
+    invite = ""
     if bot_user:
-        invite = ('<p class="sub">Send a group\'s invite link to its students. One tap '
-                  'opens your bot and joins them - they never type a code.</p>')
-    else:
-        invite = ('<p class="sub">Students join with a group code. Once the bot has run '
-                  'once with a token, ready-made invite links appear here.</p>')
-    body = f"""<h1>Groups</h1>
-{invite}
+        links = "".join(
+            f'<tr><td>{E(g["name"])}</td><td><input readonly onclick="this.select()" '
+            f'value="https://t.me/{bot_user}?start={g["join_code"]}" '
+            f'style="width:100%;font-size:12px;font-family:ui-monospace,Menlo,monospace">'
+            f'</td></tr>' for g in groups)
+        invite = (f'<h2>Invite links</h2><div class="tablewrap"><table>'
+                  f'<tr><th>Class</th><th>Send this to that class</th></tr>{links}'
+                  f'</table></div>')
+
+    body = f"""<h1>Your classes</h1>
+<p class="sub">Click a class to see its students, marks, homework and progress.</p>
+<div class="groupgrid">{cards or '<div class="card">No classes yet.</div>'}</div>
+<h2>Add a class</h2>
 <div class="card"><form method="post" action="/groups/new" class="inline">
-<label class="f">New group name<input name="name" placeholder="114" required></label>
+<label class="f">Name<input name="name" placeholder="114" required></label>
 <label class="f">Level<select name="level_id">{level_opts}</select></label>
 <button>Create</button></form></div>
-<div class="tablewrap"><table><tr><th>Group</th><th>Level</th><th>Students</th>
-<th>Done</th><th>Average</th><th>Lesson mark</th><th>Join code</th>
-<th>Invite link</th></tr>
-{rows or '<tr><td colspan=8 class="sub">No groups yet.</td></tr>'}</table></div>"""
-    return html_response(page("Groups", body, "Groups"))
+{invite}"""
+    return html_response(page("Classes", body, "Groups"))
 
 
 def group_rows(db, gid, since=None):
@@ -351,7 +360,9 @@ def view_group(req, db, gid):
         return f'<a class="tab{on}" href="/groups/{gid}?tab={t}">{label}</a>'
     tabs = ('<div class="tabs">' + link("overview", "Overview")
             + link("marks", "Lesson marks") + link("homework", "Homework")
-            + link("students", "Students") + "</div>")
+            + link("students", "Students") + "</div>"
+            + f'<p class="sub" style="margin-top:-8px">'
+            f'<a href="/groups">← all classes</a></p>')
 
     level = core.level_name(db, g["level_id"])
     head = (f'<h1>{E(g["name"])}</h1><p class="sub">'
@@ -375,34 +386,90 @@ def group_overview(db, g, period):
     lessons = db.execute(
         "SELECT COUNT(DISTINCT day) c FROM lesson_marks m JOIN students s"
         " ON s.id=m.student_id WHERE s.group_id=?", (g["id"],)).fetchone()["c"]
-
-    cards = ('<div class="grid">'
-             + stat("Students", len(rows))
-             + stat("Homework done", (str(round(sum(comps) / len(comps))) + "%") if comps else "—")
-             + stat("Average score", fmt(round(sum(avgs) / len(avgs), 2) if avgs else None), "/10")
-             + stat("Lesson mark", fmt(round(sum(marks) / len(marks), 2) if marks else None), "/5")
-             + stat("Lessons marked", lessons) + "</div>")
+    waiting = db.execute(
+        "SELECT COUNT(*) c FROM submissions s JOIN students st ON st.id=s.student_id"
+        " WHERE st.group_id=? AND s.status='pending' AND s.draft=0", (g["id"],)
+    ).fetchone()["c"]
+    comp = round(sum(comps) / len(comps)) if comps else 0
 
     def plink(p, label):
         on = " on" if period == p else ""
-        return f'<a class="tab{on}" href="/groups/{g["id"]}?tab=overview&amp;period={p}">{label}</a>'
+        return (f'<a class="tab{on}" href="/groups/{g["id"]}?period={p}">{label}</a>')
     switch = ('<div class="tabs">' + plink("daily", "Daily") + plink("weekly", "Weekly")
               + plink("monthly", "Monthly") + "</div>")
     limit = {"daily": 14, "weekly": 8, "monthly": 6}[period]
     periods = core.group_periods(db, g["id"], period, limit)
 
-    standings = [(r["student"]["name"], r["index"],
-                  (r["completion"] or 0) < 50) for r in rows]
-    return f"""{cards}
-<h2>Progress over time</h2>
+    # a sentence a human can read, before any chart
+    trend = ""
+    scored = [p for p in periods if p["score"] is not None]
+    if len(scored) >= 2:
+        change = scored[-1]["score"] - scored[0]["score"]
+        word = "up" if change > 0.2 else ("down" if change < -0.2 else "steady")
+        trend = (f" Scores are {word}"
+                 + (f" {abs(round(change, 1))} points" if word != "steady" else "")
+                 + f" over the last {len(scored)} {period[:-2] if period.endswith('ly') else period}s.")
+    risky = [r for r in rows if r["stats"]["at_risk"]]
+    summary = (f"{len(rows)} students, {comp}% of homework in."
+               + trend
+               + (f" {len(risky)} need attention: "
+                  + ", ".join(E(r["student"]["name"]) for r in risky[:4]) + "."
+                  if risky else " Nobody is flagged."))
+
+    student_rows = ""
+    for i, r in enumerate(rows, 1):
+        st, s2, m = r["student"], r["stats"], r["marks"]
+        medal = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}.get(i, str(i) + ".")
+        cpct = r["completion"] if r["completion"] is not None else 0
+        bar = (f'<div class="pbar" style="width:96px"><i style="width:{cpct}%;'
+               f'background:{"var(--warn)" if cpct < 50 else "var(--accent)"}"></i></div>')
+        flag = '<span class="pill risk">at risk</span>' if s2["at_risk"] else ""
+        ptok = core.parent_token(db, st["id"])
+        student_rows += (
+            f'<tr><td>{medal}</td>'
+            f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a> {flag}</td>'
+            f'<td><strong>{fmt(r["index"])}</strong></td>'
+            f'<td>{bar}</td><td>{cpct}%</td>'
+            f'<td>{score_pill(s2["average"])}</td>'
+            f'<td>{fmt(m["overall"])}</td><td>{s2["missed"]}</td>'
+            f'<td><a class="mini" href="/p/{E(ptok)}">Parent report</a></td></tr>')
+
+    return f"""<div class="grid">
+{stat("Students", len(rows))}{stat("Homework done", str(comp) + "%")}
+{stat("Average score", fmt(round(sum(avgs) / len(avgs), 2) if avgs else None), "/10")}
+{stat("Lesson mark", fmt(round(sum(marks) / len(marks), 2) if marks else None), "/5")}
+{stat("To grade", waiting)}</div>
+<div class="card"><p style="margin:0">{summary}</p></div>
+
+<div class="quicklinks">
+  <a class="quick" href="/groups/{g["id"]}?tab=marks">
+    <strong>Mark today's lesson</strong>
+    <span class="sub">Punctuality, behaviour, participation · {lessons} lessons recorded</span></a>
+  <a class="quick" href="/groups/{g["id"]}?tab=homework">
+    <strong>Homework for this class</strong>
+    <span class="sub">Edit, close or delete what you have set</span></a>
+  <a class="quick" href="/queue">
+    <strong>Grade waiting work</strong>
+    <span class="sub">{waiting} piece(s) across all classes</span></a>
+</div>
+
+<h2>How the class is doing</h2>
 {switch}
 <div class="card">{charts.period_bars(periods)}
 <div class="legend"><span><i style="background:var(--accent)"></i>homework score /10</span>
 <span><i style="background:var(--ink-3)"></i>lesson mark /5, doubled to share the axis</span>
 </div></div>
-<h2>Standing</h2>
-<p class="sub">Half homework done, a quarter average score, a quarter lesson marks.</p>
-<div class="card">{charts.bars_h(standings)}</div>"""
+
+<h2>Live standing</h2>
+<p class="sub">Index out of 100: half homework done, a quarter average score,
+a quarter lesson marks. Click a name for their full record, or send a parent the
+report link.</p>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Index</th>
+<th>Homework</th><th></th><th>Average</th><th>Lesson</th><th>Missed</th><th></th></tr>
+{student_rows or '<tr><td colspan=9 class="sub">Nobody has joined this class yet.</td></tr>'}
+</table></div>
+<div class="card">{charts.bars_h([(r["student"]["name"], r["index"],
+    (r["completion"] or 0) < 50) for r in rows])}</div>"""
 
 
 def group_students(db, g):
@@ -578,6 +645,22 @@ def view_student(req, db, sid):
 <h2>History</h2>
 <div class="tablewrap"><table><tr><th>Assignment</th><th>Score</th><th>Feedback</th></tr>
 {hist or '<tr><td colspan=3 class="sub">No assignments yet.</td></tr>'}</table></div>
+<h2>Report for parents</h2>
+<div class="card">
+<p class="sub" style="margin:0 0 8px">A read-only page you can send to a parent:
+scores, homework, and how they are in class. No password, and nothing they can change.</p>
+<div style="display:flex;gap:8px">
+  <input id="plink2" readonly value="/p/{E(core.parent_token(db, s['id']))}"
+         style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:13px">
+  <button type="button" class="ghost" onclick="copy2()">Copy</button>
+  <a class="ghost" style="align-self:center" href="/p/{E(core.parent_token(db, s['id']))}"
+     target="_blank">Preview</a>
+</div></div>
+<script>
+const b2 = document.getElementById('plink2');
+b2.value = location.origin + b2.value;
+function copy2() {{ b2.select(); navigator.clipboard.writeText(b2.value); }}
+</script>
 <h2>Their private link</h2>
 <div class="card">
 <p class="sub" style="margin:0 0 8px">Send this to {E(s["name"])} only. It opens their own
@@ -1086,6 +1169,85 @@ def portal_class(db, s, token):
 <p class="sub">Ordered by how much homework is done first, then average score.</p>
 <div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Done</th>
 <th style="text-align:right">Average</th></tr>{out}</table></div>"""
+
+
+def view_parent_report(req, db, token):
+    """A read-only page a parent can open - no login, no upload, no materials."""
+    row = db.execute("SELECT * FROM parents WHERE token=?", (token,)).fetchone()
+    if not row:
+        return html_response(student_page("Not found",
+            "<h1>Link not recognised</h1><p class='sub'>Ask the teacher for the "
+            "current link.</p>"), 404)
+    s = db.execute("SELECT * FROM students WHERE id=?", (row["student_id"],)).fetchone()
+    if not s:
+        return not_found()
+
+    st = core.student_stats(db, s["id"])
+    marks = core.mark_stats(db, s["id"])
+    completion = core.live_completion(db, s["id"])
+    index = core.overall_index(completion, st["average"], marks["overall"])
+    level = core.level_name(db, core.level_of(db, s["group_id"]))
+
+    band = []
+    for t in st["timeline"]:
+        r = db.execute(
+            "SELECT AVG(score) a FROM submissions WHERE assignment_id=? AND status='graded'"
+            " AND draft=0", (t["assignment_id"],)).fetchone()
+        band.append(round(r["a"], 2) if r["a"] is not None else None)
+
+    hist = ""
+    for t in reversed(st["timeline"][-12:]):
+        if t["score"] is not None:
+            state = score_pill(t["score"])
+        elif t["submission_id"]:
+            state = '<span class="pill mute">waiting to be marked</span>'
+        else:
+            state = '<span class="pill risk">not handed in</span>'
+        hist += f'<tr><td>{E(t["title"])}</td><td style="text-align:right">{state}</td></tr>'
+
+    mark_cards = "".join(
+        stat(core.MARK_LABELS[f], fmt(marks[f]), "/5") for f in core.MARK_FIELDS)
+    recent = ""
+    for m in db.execute(
+        "SELECT * FROM lesson_marks WHERE student_id=? ORDER BY day DESC LIMIT 8",
+        (s["id"],)
+    ).fetchall():
+        vals = " · ".join(
+            f"{core.MARK_LABELS[f][:5]} {m[f]}" for f in core.MARK_FIELDS
+            if m[f] is not None)
+        note = f' <span class="sub">{E(m["note"])}</span>' if m["note"] else ""
+        recent += f'<tr><td>{E(m["day"])}</td><td>{E(vals)}{note}</td></tr>'
+
+    verdict = "doing well" if (index or 0) >= 75 else (
+        "making progress" if (index or 0) >= 50 else "needs support")
+    body = f"""<div class="whoami">
+  <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
+  <div><div class="name">{E(s["name"])}</div>
+    <div class="sub" style="margin:0">{E(group_name(db, s["group_id"]))}
+      {"· " + E(level) if level else ""} · report for parents</div></div>
+</div>
+<div class="card"><p style="margin:0">Overall this student is <strong>{verdict}</strong>:
+{completion if completion is not None else 0}% of homework handed in,
+an average score of {fmt(st["average"])} out of 10, and
+{fmt(marks["overall"])} out of 5 for how they are in class across
+{marks["lessons"]} lesson(s).</p></div>
+<div class="grid">{stat("Overall index", fmt(index), "/100")}
+{stat("Homework done", (str(completion) + "%") if completion is not None else "—")}
+{stat("Average score", fmt(st["average"]), "/10")}
+{stat("Not handed in", st["missed"])}</div>
+<h2>In the classroom</h2>
+<div class="grid">{mark_cards}</div>
+<div class="tablewrap">{"<table>" + recent + "</table>" if recent
+   else '<div class="card"><p style="margin:0" class="sub">No lessons marked yet.</p></div>'}</div>
+<h2>Homework, piece by piece</h2>
+<div class="card">{charts.score_line(st["timeline"], band=band)}
+<div class="legend"><span><i style="background:var(--accent)"></i>their trend</span>
+<span><i style="background:var(--ink-3)"></i>class average</span>
+<span style="color:var(--warn)">✕ not handed in</span></div></div>
+<div class="tablewrap"><table>{hist or '<tr><td class="sub">Nothing yet.</td></tr>'}</table></div>
+<p class="sub">Prepared by their teacher. Figures update by themselves as work
+is marked.</p>"""
+    return html_response(student_page("%s — report" % s["name"], body))
 
 
 def view_student_portal(req, db, token, flash=""):
@@ -1990,6 +2152,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static(path)
         if path.startswith("/s/"):
             return self._student_get(path, query)
+        if path.startswith("/p/"):
+            parts = path.split("/")
+            db = core.connect()
+            try:
+                return self._send(*view_parent_report(None, db, parts[2] if len(parts) > 2 else ""))
+            finally:
+                db.close()
         if re.match(r"^/materials/\d+/file$", path):
             db = core.connect()
             try:
