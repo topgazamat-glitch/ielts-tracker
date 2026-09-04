@@ -4,6 +4,7 @@ Runs on the Python standard library alone: python3 server.py
 """
 import html
 import json
+import time
 import os
 import re
 import secrets
@@ -17,6 +18,19 @@ import uploads
 
 CFG = core.load_config()
 SESSIONS = {}
+LOGIN_ATTEMPTS = {}          # client -> [timestamps of recent failures]
+MAX_ATTEMPTS, LOCKOUT = 6, 900
+
+
+def login_blocked(client):
+    now = time.time()
+    tries = [t for t in LOGIN_ATTEMPTS.get(client, []) if now - t < LOCKOUT]
+    LOGIN_ATTEMPTS[client] = tries
+    return len(tries) >= MAX_ATTEMPTS
+
+
+def login_failed(client):
+    LOGIN_ATTEMPTS.setdefault(client, []).append(time.time())
 E = html.escape
 
 
@@ -60,7 +74,8 @@ def score_pill(s):
 # ------------------------------------------------------------------- pages
 
 def view_login(req, err=""):
-    msg = '<div class="flash err">Wrong password</div>' if err else ""
+    text = err if isinstance(err, str) and err else "Wrong password"
+    msg = f'<div class="flash err">{E(text)}</div>' if err else ""
     body = f"""<div class="login card"><h1>Sign in</h1>
 <p class="sub">Teacher access only.</p>{msg}
 <form method="post" action="/login" class="inline">
@@ -1324,10 +1339,17 @@ def act_delete_material(req, db, mid):
     return redirect("/materials")
 
 
-def serve_material(db, mid):
+def serve_material(db, mid, student=None):
     row = db.execute("SELECT * FROM materials WHERE id=? AND active=1", (mid,)).fetchone()
     if not row:
         return not_found()
+    if student is not None:
+        # a student may only reach their own level's shelf
+        own = core.level_of(db, student["group_id"])
+        if row["level_id"] not in (None, own):
+            return not_found()
+        if row["group_id"] not in (None, student["group_id"]):
+            return not_found()
     path = os.path.join(core.MATERIAL_DIR, row["filename"])
     if not os.path.isfile(path):
         return not_found()
@@ -1680,8 +1702,17 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             db.close()
 
+    SECURITY_HEADERS = [
+        ("X-Content-Type-Options", "nosniff"),
+        ("X-Frame-Options", "DENY"),
+        ("Referrer-Policy", "same-origin"),
+        ("Strict-Transport-Security", "max-age=31536000"),
+    ]
+
     def _send(self, status, headers, body):
         self.send_response(status)
+        for k, v in self.SECURITY_HEADERS:
+            self.send_header(k, v)
         for k, v in headers:
             self.send_header(k, v)
         self.end_headers()
@@ -1699,7 +1730,13 @@ class Handler(BaseHTTPRequestHandler):
         if re.match(r"^/materials/\d+/file$", path):
             db = core.connect()
             try:
-                return self._send(*serve_material(db, int(path.split("/")[2])))
+                student = None
+                if not self._session():
+                    token = (query.get("s") or [""])[0]
+                    student = core.student_by_token(db, token)
+                    if not student:
+                        return self._send(*redirect("/login"))
+                return self._send(*serve_material(db, int(path.split("/")[2]), student))
             finally:
                 db.close()
         if path == "/login":
@@ -1762,15 +1799,22 @@ class Handler(BaseHTTPRequestHandler):
         form = urllib.parse.parse_qs(raw, keep_blank_values=True)
 
         if path == "/login":
+            client = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0]
+            if login_blocked(client):
+                return self._send(*view_login(None, err="Too many attempts. "
+                                              "Wait 15 minutes."))
             # read the file fresh, so changing the password only needs a save
             expected = core.load_config()["teacher_password"]
             if secrets.compare_digest(form.get("password", [""])[0], expected):
+                LOGIN_ATTEMPTS.pop(client, None)
                 token = secrets.token_urlsafe(24)
                 SESSIONS[token] = True
                 return self._send(
                     *redirect("/", [("Set-Cookie",
                                      f"ta_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")])
                 )
+            login_failed(client)
+            time.sleep(1.0)          # make guessing slow as well as limited
             return self._send(*view_login(None, err=True))
         if not self._session():
             return self._send(*redirect("/login"))
@@ -1790,9 +1834,9 @@ class Handler(BaseHTTPRequestHandler):
                     import traceback
                     traceback.print_exc()
                     return self._send(*html_response(
-                        page("Error", f"<h1>Something broke</h1>"
-                             f"<div class='card'><code>{E(str(exc))}</code></div>"
-                             "<p><a href='/'>Back to overview</a></p>"), 500))
+                        page("Error", "<h1>Something broke</h1><div class='card'>"
+                             "<p style='margin:0'>The details are in the server log."
+                             "</p></div><p><a href='/'>Back to overview</a></p>"), 500))
                 finally:
                     db.close()
         return self._send(*not_found())
