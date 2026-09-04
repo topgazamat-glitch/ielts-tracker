@@ -864,7 +864,7 @@ def portal_materials(db, s, token, query):
         icon = "&#9834;" if (m["mime"] or "").startswith("audio") else "&#128196;"
         note = f'<span class="sub">{E(m["note"])}</span>' if m["note"] else ""
         parts.append(
-            f'<a class="filerow" href="/materials/{m["id"]}/file">'
+            f'<a class="filerow" href="/materials/{m["id"]}/file?s={E(token)}">'
             f'<span class="ficon">{icon}</span>'
             f'<span class="fname">{E(m["title"])}{note}</span>'
             f'<span class="fsize">{E(core.human_size(m["size"]))}</span></a>')
