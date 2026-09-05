@@ -44,10 +44,10 @@ def page(title, body, active=""):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{E(title)} · AzamatEnglish</title>
+<title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head><body>
 <header class="top">
-<span class="brand"><span class="mark">A</span>AzamatEnglish</span>
+<span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/questions', 'Questions')}</nav>
@@ -1138,9 +1138,9 @@ def student_page(title, body):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{E(title)} · AzamatEnglish</title>
+<title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head>
-<body><header class="top"><span class="brand"><span class="mark">A</span>AzamatEnglish</span></header>
+<body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span></header>
 <main style="max-width:600px">{body}</main></body></html>"""
 
 
@@ -1496,7 +1496,7 @@ def portal_goal(db, s, token, flash=""):
             f'<span class="sk-dots"></span>'
             f'<span class="sk-band">{scores[k]:g}</span></div>'
             for k in core.BAND_SECTIONS)
-        number = "AE-%s-%04d" % ((goal["updated_at"] or "")[:4] or "2026", s["id"])
+        number = "OA-%s-%04d" % ((goal["updated_at"] or "")[:4] or "2026", s["id"])
         issued = (goal["updated_at"] or "")[:10]
         card = f"""<div class="cert-wrap"><div class="cert" id="cert">
   <svg class="cert-guilloche" viewBox="0 0 800 600" preserveAspectRatio="none"
@@ -1519,9 +1519,9 @@ def portal_goal(db, s, token, flash=""):
       <path d="M782 546 q0 36-36 36 M770 546 q0 24-24 24"/>
     </g>
   </svg>
-  <div class="cert-watermark">AE</div>
+  <div class="cert-watermark">OA</div>
   <div class="cert-inner">
-    <div class="cert-brand"><span class="cert-mark">A</span>AzamatEnglish</div>
+    <div class="cert-brand"><span class="cert-mark">O</span>OlimovAzamat</div>
     <div class="cert-kicker">Certificate of Achievement</div>
     <div class="cert-rule"><span></span>&#10022;<span></span></div>
     <p class="cert-lede">This is to certify that</p>
@@ -1552,7 +1552,7 @@ def portal_goal(db, s, token, flash=""):
     </div>
     <div class="cert-serial">No. {E(number)}
       {"· exam date " + E(target) if target else ""}</div>
-    <div class="cert-note">Awarded by AzamatEnglish for a mock examination.
+    <div class="cert-note">Awarded by OlimovAzamat for a mock examination.
       This is not an IELTS Test Report Form and is not issued by IELTS,
       British Council, IDP or Cambridge.</div>
   </div>
