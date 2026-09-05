@@ -276,6 +276,11 @@ td a:hover { color: var(--accent); }
 }
 .pill.risk { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
 .pill.mute { background: var(--line-soft); color: var(--ink-3); border-color: var(--line); }
+.pill.good { background: #e4f8ee; color: #06713f; border-color: #a8e6c6; }
+.pill.watch { background: var(--gold-soft); color: #8a6400;
+  border-color: #f2dfa4; }
+.pill.gold { background: var(--gold-soft); color: #8a6400;
+  border-color: #f2dfa4; font-variant-numeric: tabular-nums; }
 
 .kbd {
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -762,10 +767,12 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 .grid .stat .v small { color: rgba(255,255,255,.72); }
 .grid .stat:nth-child(2) { background: var(--info); }
 .grid .stat:nth-child(3) { background: var(--violet); }
-.grid .stat:nth-child(4) { background: var(--ok); }
-.grid .stat:nth-child(5) { background: var(--amber); color: #2b2000; }
-.grid .stat:nth-child(5) .k { color: rgba(43,32,0,.7); }
-.grid .stat:nth-child(5) .v { color: #2b2000; }
+.grid .stat:nth-child(4) { background: var(--amber); color: #2b2000; }
+.grid .stat:nth-child(4) .k { color: rgba(43,32,0,.68); }
+.grid .stat:nth-child(4) .v { color: #2b2000; }
+.grid .stat:nth-child(5) { background: var(--ok); color: #fff; }
+.grid .stat:nth-child(5) .k { color: rgba(255,255,255,.78); }
+.grid .stat:nth-child(5) .v { color: #fff; }
 
 /* today: soft blocks, tinted by how much they matter */
 .todo {
@@ -792,4 +799,14 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
   .grid .stat .v { color: #100d15; }
   .grid .stat .v small { color: rgba(16,13,21,.66); }
   .todo.urgent .todo-head, .todo.urgent .sub { color: var(--warn); }
+}
+
+.pill.watch, .pill.gold { font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  .pill.watch, .pill.gold { background: var(--gold-soft); color: var(--gold);
+    border-color: #4a3a12; }
+  .pill.good { background: #12301f; color: var(--ok); border-color: #1e4c31; }
+  .grid .stat:nth-child(4) { color: #241b00; }
+  .grid .stat:nth-child(4) .k { color: rgba(36,27,0,.7); }
+  .grid .stat:nth-child(4) .v { color: #241b00; }
 }

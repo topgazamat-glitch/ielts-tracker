@@ -64,11 +64,25 @@ def fmt(v, dash="—"):
     return dash if v is None else v
 
 
+def bar_colour(pct):
+    return ("var(--warn)" if pct < 34
+            else "var(--amber)" if pct < 67 else "var(--accent)")
+
+
+def band_class(value, low, high):
+    """Three states, not two: below `low` is a problem, at or above `high` is
+    fine, and the stretch between them is the part worth watching."""
+    if value is None:
+        return "mute"
+    if value < low:
+        return "risk"
+    return "good" if value >= high else "watch"
+
+
 def score_pill(s):
     if s is None:
         return '<span class="pill mute">—</span>'
-    cls = "risk" if s < 5 else ""
-    return f'<span class="pill {cls}">{s:g}/10</span>'
+    return f'<span class="pill {band_class(s, 5, 8)}">{s:g}/10</span>'
 
 
 # ------------------------------------------------------------------- pages
@@ -389,7 +403,7 @@ def ring(percent, size=64):
     r = (size - 8) / 2
     circ = 2 * 3.14159 * r
     done = circ * min(100, max(0, percent)) / 100
-    colour = "var(--warn)" if percent < 50 else "var(--accent)"
+    colour = bar_colour(percent)
     return (f'<svg class="ring" viewBox="0 0 {size} {size}" width="{size}" height="{size}">'
             f'<circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="var(--line)"'
             f' stroke-width="6"/>'
@@ -553,7 +567,7 @@ def group_overview(db, g, period):
         medal = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}.get(i, str(i) + ".")
         cpct = r["completion"] if r["completion"] is not None else 0
         bar = (f'<div class="pbar" style="width:96px"><i style="width:{cpct}%;'
-               f'background:{"var(--warn)" if cpct < 50 else "var(--accent)"}"></i></div>')
+               f'background:{bar_colour(cpct)}"></i></div>')
         flag = '<span class="pill risk">at risk</span>' if s2["at_risk"] else ""
         ptok = core.parent_token(db, st["id"])
         student_rows += (
@@ -722,7 +736,7 @@ def group_homework(db, g):
         elif not a["published"]:
             state = '<span class="pill mute">draft</span>'
         elif not core.still_open(a["due_at"]):
-            state = '<span class="pill mute">deadline passed</span>'
+            state = '<span class="pill watch">deadline passed</span>'
         else:
             state = '<span class="pill">open</span>'
         due = (a["due_at"] or "")[:10]
@@ -1762,9 +1776,10 @@ def view_ratings(req, db):
         st = r["student"]
         comp = r["completion"] if r["completion"] is not None else 0
         bar = (f'<div style="background:var(--line);border-radius:4px;height:8px;width:90px">'
-               f'<div style="background:{"var(--warn)" if comp < 50 else "var(--accent)"};'
+               f'<div style="background:{bar_colour(comp)};'
                f'height:8px;border-radius:4px;width:{comp}%"></div></div>')
-        streak = f'&#128293; {r["streak"]}' if r["streak"] >= 2 else ""
+        streak = (f'<span class="pill gold">&#128293; {r["streak"]}</span>'
+                  if r["streak"] >= 2 else "")
         body_rows += (
             f'<tr><td>{medals.get(r["rank"], str(r["rank"]) + ".")}</td>'
             f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>'
