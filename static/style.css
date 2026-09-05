@@ -810,3 +810,11 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
   .grid .stat:nth-child(4) .k { color: rgba(36,27,0,.7); }
   .grid .stat:nth-child(4) .v { color: #241b00; }
 }
+
+.standing {
+  background: var(--accent-soft); border-radius: 12px;
+  padding: 13px 16px; margin-bottom: var(--sp-4);
+  font-size: 15px; color: var(--ink);
+}
+.standing strong { color: var(--brand); }
+@media (prefers-color-scheme: dark) { .standing strong { color: var(--brand-lift); } }

@@ -870,6 +870,51 @@ def rating_rows(db, group_id=None):
     return rows
 
 
+def next_step(db, student_id):
+    """Where a student stands, and the nearest thing they could do about it.
+
+    A rank on its own does not move anybody. A rank plus one reachable action
+    does, so this works out how many more pieces of homework would close the
+    gap to whoever is directly above them, and says so in those terms.
+
+    Returns None when there is nothing honest to say - no class, no standings,
+    or a gap that homework alone cannot close.
+    """
+    me = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if not me or not me["group_id"]:
+        return None
+    rows = rating_rows(db, me["group_id"])
+    mine = next((i for i, r in enumerate(rows) if r["student"]["id"] == student_id), None)
+    if mine is None or len(rows) < 2:
+        return None
+
+    out = {"rank": rows[mine]["rank"], "of": len(rows), "index": rows[mine]["index"],
+           "ahead": None, "behind": None, "tasks": None, "gap": None}
+
+    if mine > 0:
+        above = rows[mine - 1]
+        out["ahead"] = above["student"]["name"]
+        gap = (above["index"] or 0) - (rows[mine]["index"] or 0)
+        out["gap"] = round(gap, 1)
+        total = db.execute(
+            "SELECT COUNT(*) c FROM assignments WHERE group_id=? AND published=1",
+            (me["group_id"],)).fetchone()["c"]
+        # handing in one more piece moves completion by 100/total, and completion
+        # is half of the index
+        if total:
+            per_task = 0.5 * (100.0 / total)
+            if gap <= 0:
+                # level on points, separated only by name: one more breaks the tie
+                out["tasks"] = 1
+            elif per_task > 0:
+                need = int(gap // per_task) + (1 if gap % per_task else 0)
+                if 1 <= need <= 3:
+                    out["tasks"] = need
+    if mine + 1 < len(rows):
+        out["behind"] = rows[mine + 1]["student"]["name"]
+    return out
+
+
 def most_improved(db, group_id=None, limit=10):
     """Ranked purely on gain against the student's own previous month.
 

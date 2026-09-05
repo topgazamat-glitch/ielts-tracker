@@ -1372,6 +1372,30 @@ def portal_progress(db, s, token):
 <div class="tablewrap"><table>{hist or '<tr><td class="sub">Nothing yet.</td></tr>'}</table></div>"""
 
 
+def standing_line(db, s):
+    """One sentence telling a student where they are and what would move them."""
+    n = core.next_step(db, s["id"])
+    if not n:
+        return ""
+    place = "%d%s of %d" % (n["rank"],
+                            {1: "st", 2: "nd", 3: "rd"}.get(
+                                n["rank"] if n["rank"] < 20 else n["rank"] % 10, "th"),
+                            n["of"])
+    if n["rank"] == 1:
+        tail = (f'{E(n["behind"])} is right behind you.' if n["behind"]
+                else "Top of the class.")
+    elif n["tasks"]:
+        tail = ("Hand in one more piece of homework and you pass %s."
+                % E(n["ahead"]) if n["tasks"] == 1 else
+                "Hand in %d more pieces of homework and you pass %s."
+                % (n["tasks"], E(n["ahead"])))
+    elif n["gap"]:
+        tail = "You are %g points behind %s." % (n["gap"], E(n["ahead"]))
+    else:
+        tail = "Level with %s." % E(n["ahead"])
+    return (f'<div class="standing"><strong>You are {place}.</strong> {tail}</div>')
+
+
 def portal_class(db, s, token):
     rows = core.rating_rows(db, s["group_id"])
     medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
@@ -1382,11 +1406,15 @@ def portal_class(db, s, token):
         out += (f'<tr class="{"me" if me else ""}">'
                 f'<td>{medals.get(r["rank"], str(r["rank"]) + ".")}</td>'
                 f'<td>{E(r["student"]["name"])}{" &#9668;" if me else ""}</td>'
-                f'<td>{comp}%</td><td style="text-align:right">{score_pill(r["average"])}</td></tr>')
+                f'<td><strong>{fmt(r["index"])}</strong></td>'
+                f'<td>{comp}%</td>'
+                f'<td style="text-align:right">{score_pill(r["average"])}</td></tr>')
     return f"""<h2>Class standings</h2>
-<p class="sub">Ordered by how much homework is done first, then average score.</p>
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Done</th>
-<th style="text-align:right">Average</th></tr>{out}</table></div>"""
+<p class="sub">Half of the score is homework handed in, a quarter your marks, and a
+quarter punctuality, behaviour and taking part in the lesson.</p>
+{standing_line(db, s)}
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Score</th>
+<th>Done</th><th style="text-align:right">Average</th></tr>{out}</table></div>"""
 
 
 def view_parent_report(req, db, token):
@@ -2312,7 +2340,8 @@ def notify_graded(db, sid):
     if not token:
         return
     row = db.execute(
-        "SELECT s.score, s.note, st.telegram_id, st.lang, a.title FROM submissions s"
+        "SELECT s.score, s.note, st.id sid, st.telegram_id, st.lang, a.title"
+        " FROM submissions s"
         " JOIN students st ON st.id=s.student_id"
         " LEFT JOIN assignments a ON a.id=s.assignment_id WHERE s.id=?",
         (sid,),
@@ -2329,7 +2358,7 @@ def notify_graded(db, sid):
     import bot  # local import keeps the web app importable without the bot
 
     bot.send_score(token, row["telegram_id"], row["lang"], row["title"], row["score"],
-                   tags, row["note"], sid)
+                   tags, row["note"], sid, student_id=row["sid"])
 
 
 def act_skip(req, db):

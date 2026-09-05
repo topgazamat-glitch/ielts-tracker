@@ -32,6 +32,10 @@ T = {
         "which": "Which assignment is this for?",
         "reassigned": "Moved to “{title}” ✅",
         "scored": "“{title}” — {score}/10",
+        "standing_top": "You are {rank} of {of} in the class. {behind} is right behind you.",
+        "standing_one": "You are {rank} of {of} in the class. Hand in one more piece of homework and you pass {ahead}.",
+        "standing_many": "You are {rank} of {of} in the class. Hand in {tasks} more pieces of homework and you pass {ahead}.",
+        "standing_gap": "You are {rank} of {of} in the class, {gap} points behind {ahead}.",
         "no_scores": "No graded work yet.",
         "progress": "Your progress\nAverage: {avg}/10\nLast 3: {last3}/10\n"
                     "Submitted: {done} · Missed: {missed}",
@@ -135,6 +139,10 @@ T = {
         "which": "К какому заданию это относится?",
         "reassigned": "Перенесено в «{title}» ✅",
         "scored": "«{title}» — {score}/10",
+        "standing_top": "Вы {rank}-й из {of} в группе. {behind} сразу за вами.",
+        "standing_one": "Вы {rank}-й из {of} в группе. Сдайте ещё одно задание — и обойдёте {ahead}.",
+        "standing_many": "Вы {rank}-й из {of} в группе. Сдайте ещё {tasks} задания — и обойдёте {ahead}.",
+        "standing_gap": "Вы {rank}-й из {of} в группе, отстаёте от {ahead} на {gap} баллов.",
         "no_scores": "Проверенных работ пока нет.",
         "progress": "Ваш прогресс\nСредний балл: {avg}/10\nПоследние 3: {last3}/10\n"
                     "Сдано: {done} · Пропущено: {missed}",
@@ -238,6 +246,10 @@ T = {
         "which": "Bu qaysi topshiriq uchun?",
         "reassigned": "“{title}” ga ko'chirildi ✅",
         "scored": "“{title}” — {score}/10",
+        "standing_top": "Siz sinfda {of} tadan {rank}-o‘rindasiz. {behind} ortingizdan kelmoqda.",
+        "standing_one": "Siz sinfda {of} tadan {rank}-o‘rindasiz. Yana bitta vazifa topshiring va {ahead}dan o‘tasiz.",
+        "standing_many": "Siz sinfda {of} tadan {rank}-o‘rindasiz. Yana {tasks} ta vazifa topshiring va {ahead}dan o‘tasiz.",
+        "standing_gap": "Siz sinfda {of} tadan {rank}-o‘rindasiz, {ahead}dan {gap} ball ortdasiz.",
         "no_scores": "Hali tekshirilgan ish yo'q.",
         "progress": "Sizning natijangiz\nO'rtacha: {avg}/10\nOxirgi 3 ta: {last3}/10\n"
                     "Topshirilgan: {done} · O'tkazib yuborilgan: {missed}",
@@ -367,7 +379,8 @@ def send(token, chat_id, text, keyboard=None, markup=None):
     return call(token, "sendMessage", chat_id=chat_id, text=text, reply_markup=markup)
 
 
-def send_score(token, chat_id, lang, title, score, tags, note, sub_id=None):
+def send_score(token, chat_id, lang, title, score, tags, note, sub_id=None,
+               student_id=None):
     """Called right after a grade is saved, from the dashboard or from Telegram."""
     lang = lang or "en"
     lines = [t(lang, "scored", title=title or "homework", score=f"{score:g}")]
@@ -375,10 +388,39 @@ def send_score(token, chat_id, lang, title, score, tags, note, sub_id=None):
         lines.append("• " + "\n• ".join(tags))
     if note:
         lines.append(note)
+    if student_id:
+        where = standing_sentence(lang, student_id)
+        if where:
+            lines.append(where)
     kb = None
     if sub_id and score is not None and score < 8:
         kb = [[{"text": t(lang, "improve"), "callback_data": f"imp:{sub_id}"}]]
     send(token, chat_id, "\n\n".join(lines), keyboard=kb)
+
+
+def standing_sentence(lang, student_id):
+    """Where they now stand and the nearest way up - sent with the grade, which
+    is the one moment a student is certain to be reading."""
+    db = core.connect()
+    try:
+        n = core.next_step(db, student_id)
+    finally:
+        db.close()
+    if not n:
+        return None
+    if n["rank"] == 1:
+        if not n["behind"]:
+            return None
+        return t(lang, "standing_top", rank=n["rank"], of=n["of"], behind=n["behind"])
+    if n["tasks"] == 1:
+        return t(lang, "standing_one", rank=n["rank"], of=n["of"], ahead=n["ahead"])
+    if n["tasks"]:
+        return t(lang, "standing_many", rank=n["rank"], of=n["of"],
+                 tasks=n["tasks"], ahead=n["ahead"])
+    if n["gap"]:
+        return t(lang, "standing_gap", rank=n["rank"], of=n["of"],
+                 gap="%g" % n["gap"], ahead=n["ahead"])
+    return None
 
 
 def send_photo(token, chat_id, png_bytes, caption=""):
