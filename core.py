@@ -803,11 +803,42 @@ def live_completion(db, student_id):
     return round(100 * min(done, total) / total)
 
 
-def rating_rows(db, group_id=None):
-    """Live standings: completion, average score and streak, best first.
+def improvement(db, student_id, weeks=4):
+    """How much a student has gained on their own recent past.
 
-    Completion is ranked before score on purpose - it is the part a student
-    fully controls, so the table rewards effort rather than raw ability.
+    Compares the average of the last `weeks` against the `weeks` before that.
+    This is the one measure a weaker student can top outright, because it asks
+    nothing about ability - only about getting better than you were.
+
+    Returns None until there are at least two graded pieces in each window;
+    below that the number is noise, not progress.
+    """
+    now_ = now()
+    mid = iso(now_ - timedelta(weeks=weeks))
+    start = iso(now_ - timedelta(weeks=weeks * 2))
+
+    def avg(lo, hi):
+        r = db.execute(
+            "SELECT AVG(score) a, COUNT(*) n FROM submissions WHERE student_id=?"
+            " AND status='graded' AND score IS NOT NULL"
+            " AND created_at >= ? AND created_at < ?", (student_id, lo, hi)).fetchone()
+        return (r["a"], r["n"])
+
+    before, n_before = avg(start, mid)
+    after, n_after = avg(mid, iso(now_ + timedelta(days=1)))
+    if n_before < 2 or n_after < 2:
+        return None
+    return round(after - before, 2)
+
+
+def rating_rows(db, group_id=None):
+    """Live standings, best first, on everything a student is judged by.
+
+    Ranked on overall_index rather than homework alone: effort is half of it,
+    attainment a quarter, and how they are in the room - punctuality, behaviour,
+    participation - the last quarter. All three are things the teacher already
+    records, and leaving conduct out meant a student who is never late and always
+    speaks up earned nothing for it.
     """
     where = "WHERE active=1" + (" AND group_id=?" if group_id else "")
     args = (group_id,) if group_id else ()
@@ -815,9 +846,11 @@ def rating_rows(db, group_id=None):
     for st in db.execute(f"SELECT * FROM students {where}", args).fetchall():
         stats = student_stats(db, st["id"])
         v = vocab_stats(db, st["id"])
+        marks = mark_stats(db, st["id"])
+        completion = live_completion(db, st["id"])
         rows.append({
             "student": st,
-            "completion": live_completion(db, st["id"]),
+            "completion": completion,
             "due_completion": stats["completion"],
             "average": stats["average"],
             "graded": stats["graded_count"],
@@ -825,12 +858,28 @@ def rating_rows(db, group_id=None):
             "streak": streak(db, st["id"]),
             "vocab": v["known"],
             "at_risk": stats["at_risk"],
+            "marks": marks["overall"],
+            "lessons": marks["lessons"],
+            "index": overall_index(completion, stats["average"], marks["overall"]),
+            "gain": improvement(db, st["id"]),
         })
-    rows.sort(key=lambda r: (-(r["completion"] or 0), -(r["average"] or 0),
-                             r["student"]["name"]))
+    rows.sort(key=lambda r: (-(r["index"] or 0), -(r["completion"] or 0),
+                             -(r["average"] or 0), r["student"]["name"]))
     for i, r in enumerate(rows, 1):
         r["rank"] = i
     return rows
+
+
+def most_improved(db, group_id=None, limit=10):
+    """Ranked purely on gain against the student's own previous month.
+
+    Only students who actually went up: a table headed "most improved" that
+    lists people who got worse is a punishment, not an encouragement.
+    """
+    rows = [r for r in rating_rows(db, group_id)
+            if r["gain"] is not None and r["gain"] > 0]
+    rows.sort(key=lambda r: (-r["gain"], r["student"]["name"]))
+    return rows[:limit]
 
 
 def parent_token(db, student_id):

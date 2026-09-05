@@ -1759,46 +1759,117 @@ ordered worst first, so whoever needs chasing is at the top.</p>{blocks}"""
 
 
 
-def view_ratings(req, db):
-    """Live standings: completion first, then average score."""
-    gid = req["query"].get("group", [None])[0]
-    gid = int(gid) if gid and gid.isdigit() else None
-    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
-    def tab(href, label, on):
-        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
-    tabs = ('<div class="tabs">' + tab("/ratings", "All groups", gid is None)
-            + "".join(tab(f'/ratings?group={g["id"]}', g["name"], gid == g["id"])
-                      for g in groups) + "</div>")
-    rows = core.rating_rows(db, gid)
+def rating_table(db, rows, show_group=False):
     medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
     body_rows = ""
     for r in rows:
         st = r["student"]
         comp = r["completion"] if r["completion"] is not None else 0
-        bar = (f'<div style="background:var(--line);border-radius:4px;height:8px;width:90px">'
-               f'<div style="background:{bar_colour(comp)};'
+        bar = (f'<div style="background:var(--line);border-radius:4px;height:8px;'
+               f'width:90px"><div style="background:{bar_colour(comp)};'
                f'height:8px;border-radius:4px;width:{comp}%"></div></div>')
         streak = (f'<span class="pill gold">&#128293; {r["streak"]}</span>'
                   if r["streak"] >= 2 else "")
+        gain = ""
+        if r["gain"] is not None and abs(r["gain"]) >= 0.1:
+            up = r["gain"] > 0
+            gain = (f'<span class="pill {"good" if up else "risk"}">'
+                    f'{"+" if up else ""}{r["gain"]:g}</span>')
+        group_cell = (f'<td>{E(group_name(db, st["group_id"]))}</td>'
+                      if show_group else "")
         body_rows += (
             f'<tr><td>{medals.get(r["rank"], str(r["rank"]) + ".")}</td>'
             f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>'
-            f'<td>{E(group_name(db, st["group_id"]))}</td>'
+            f'{group_cell}'
+            f'<td><strong>{fmt(r["index"])}</strong></td>'
             f'<td>{bar}</td><td>{comp}%</td>'
-            f'<td>{score_pill(r["average"])}</td><td>{r["graded"]}</td>'
-            f'<td>{r["missed"]}</td><td>{streak}</td><td>{r["vocab"]}</td></tr>'
-        )
+            f'<td>{score_pill(r["average"])}</td>'
+            f'<td>{fmt(r["marks"])}</td>'
+            f'<td>{gain}</td><td>{r["missed"]}</td><td>{streak}</td>'
+            f'<td>{r["vocab"]}</td></tr>')
+    head = ('<th>#</th><th>Student</th>' + ("<th>Group</th>" if show_group else "")
+            + '<th>Score /100</th><th>Homework</th><th></th><th>Average</th>'
+            '<th>Lesson /5</th><th>Change</th><th>Missed</th><th>Streak</th>'
+            '<th>Words</th>')
+    cols = 12 if show_group else 11
+    return (f'<div class="tablewrap"><table><tr>{head}</tr>{body_rows}'
+            f'</table></div>' if body_rows else
+            f'<div class="card"><p class="sub" style="margin:0">Nobody here yet.</p></div>')
+
+
+def improved_table(db, rows):
+    """Ranked on gain alone - the one table a weaker student can win."""
+    if not rows:
+        return ('<div class="card"><p class="sub" style="margin:0">Nothing to compare '
+                'yet. It needs a student who went up, with at least two graded pieces '
+                'this month and two the month before.</p></div>')
+    out = ""
+    for i, r in enumerate(rows, 1):
+        st = r["student"]
+        up = r["gain"] > 0
+        out += (f'<tr><td>{i}.</td>'
+                f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>'
+                f'<td>{E(group_name(db, st["group_id"]))}</td>'
+                f'<td><span class="pill {"good" if up else "risk"}">'
+                f'{"+" if up else ""}{r["gain"]:g}</span></td>'
+                f'<td>{score_pill(r["average"])}</td></tr>')
+    return ('<div class="tablewrap"><table><tr><th>#</th><th>Student</th>'
+            '<th>Group</th><th>Change this month</th><th>Average now</th></tr>'
+            + out + "</table></div>")
+
+
+def view_ratings(req, db):
+    """Standings on everything a student is judged by, class by class."""
+    gid = req["query"].get("group", [None])[0]
+    gid = int(gid) if gid and gid.isdigit() else None
+    scope = req["query"].get("scope", [""])[0]
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    tabs = ('<div class="tabs">'
+            + tab("/ratings", "By class", gid is None and scope != "all")
+            + tab("/ratings?scope=all", "Whole school", scope == "all")
+            + "".join(tab(f'/ratings?group={g["id"]}', g["name"], gid == g["id"])
+                      for g in groups) + "</div>")
+
+    if scope == "all":
+        note = ("Everyone in one list. Useful for a school-wide prize, but a Beginner "
+                "and an Intermediate are set different homework, so the fair comparison "
+                "is the one class by class.")
+        tables = rating_table(db, core.rating_rows(db), show_group=True)
+        improved = improved_table(db, core.most_improved(db))
+    elif gid:
+        note = "Ranked within this class."
+        tables = rating_table(db, core.rating_rows(db, gid))
+        improved = improved_table(db, core.most_improved(db, gid))
+    else:
+        note = ("Each class ranked against itself, which is the only fair comparison "
+                "&mdash; classes are set different work.")
+        tables = ""
+        for g in groups:
+            rows = core.rating_rows(db, g["id"])
+            if not rows:
+                continue
+            tables += (f'<h2 style="margin-top:28px">{E(g["name"])} '
+                       f'<span class="sub" style="font-weight:400">'
+                       f'{E(core.level_name(db, g["level_id"]) or "no level")}</span></h2>'
+                       + rating_table(db, rows))
+        improved = improved_table(db, core.most_improved(db))
+
     dl = f'/export.csv?group={gid}' if gid else '/export.csv'
     body = f"""<h1>Ratings</h1>
-<p class="sub">Ranked by homework completed first, then average score — effort is the
-part a student controls.</p>
+<p class="sub">Ranked on the whole picture, not homework alone: half is effort, a
+quarter the scores, a quarter how they are in the room. {note}</p>
 {tabs}
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Group</th>
-<th>Completion</th><th></th><th>Average</th><th>Graded</th><th>Missed</th>
-<th>Streak</th><th>Words</th></tr>
-{body_rows or '<tr><td colspan=10 class="sub">Nobody has joined yet.</td></tr>'}</table></div>
-<p><a href="{dl}">Download as CSV</a> — opens in Excel.</p>"""
+{tables}
+<h2 style="margin-top:34px">Most improved</h2>
+<p class="sub">Measured against the student&rsquo;s own last month, so this is the
+table anyone can win &mdash; it asks nothing about how strong they already were.</p>
+{improved}
+<p style="margin-top:20px"><a href="{dl}">Download as CSV</a> — opens in Excel.</p>"""
     return html_response(page("Ratings", body, "Ratings"))
+
 
 
 def view_questions(req, db):
@@ -1898,14 +1969,18 @@ def act_import(req, db):
 def view_export(req, db):
     gid = req["query"].get("group", [None])[0]
     gid = int(gid) if gid and gid.isdigit() else None
-    out = ["rank,name,group,completion_percent,average_score,graded,missed,streak,words_known"]
+    out = ["rank,name,group,overall_score,completion_percent,average_score,"
+           "lesson_mark,change_this_month,graded,missed,streak,words_known"]
     for r in core.rating_rows(db, gid):
         st = r["student"]
         name = '"%s"' % st["name"].replace('"', "'")
         out.append(",".join(str(x) for x in [
             r["rank"], name, '"%s"' % group_name(db, st["group_id"]),
+            r["index"] if r["index"] is not None else "",
             r["completion"] if r["completion"] is not None else "",
             r["average"] if r["average"] is not None else "",
+            r["marks"] if r["marks"] is not None else "",
+            r["gain"] if r["gain"] is not None else "",
             r["graded"], r["missed"], r["streak"], r["vocab"],
         ]))
     payload = "\n".join(out).encode("utf-8-sig")   # BOM so Excel reads it correctly
