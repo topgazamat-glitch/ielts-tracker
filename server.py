@@ -129,15 +129,77 @@ def view_overview(req, db):
         risk_html = '<div class="card"><p class="sub" style="margin:0">Nobody is flagged. '
         risk_html += "Students appear here after two consecutive misses or a falling trend.</p></div>"
 
-    action = (
-        f'<div class="card"><strong>{pending}</strong> submission(s) waiting. '
-        f'<a href="/queue">Start grading →</a></div>'
-        if pending
-        else ""
-    )
-    body = f"""<h1>Overview</h1><p class="sub">Where every group and student stands right now.</p>
-{action}{cards}<h2>Needs attention</h2>{risk_html}"""
+    body = f"""{today_block(db, pending)}
+<h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}"""
     return html_response(page("Overview", body, "Overview"))
+
+
+def todo(href, headline, detail, urgent=False):
+    return (f'<a class="todo{" urgent" if urgent else ""}" href="{href}">'
+            f'<div class="todo-head">{headline}</div>'
+            f'<div class="sub" style="margin:2px 0 0">{detail}</div></a>')
+
+
+def today_block(db, pending):
+    """The first thing on the screen should be the work, not the statistics."""
+    cfg = core.load_config()
+    today = core.local_day(core.now(), cfg)
+    items = ""
+
+    if pending:
+        oldest = db.execute(
+            "SELECT created_at FROM submissions WHERE status='pending' AND draft=0"
+            " ORDER BY created_at LIMIT 1").fetchone()
+        waited = ""
+        when = core.parse(oldest["created_at"]) if oldest else None
+        if when:
+            hours = (core.now() - when).total_seconds() / 3600
+            waited = ("waiting %d days" % (hours // 24) if hours >= 48
+                      else "waiting since yesterday" if hours >= 24
+                      else "arrived today")
+        items += todo("/queue", "%d to grade" % pending, waited or "in the queue",
+                      urgent=pending >= 10)
+
+    # a class that got a list of six tasks is one line, not six
+    for r in db.execute(
+        "SELECT a.group_id, g.name gname, COUNT(*) tasks,"
+        "  (SELECT COUNT(*) FROM students st WHERE st.group_id=a.group_id"
+        "   AND st.active=1) total,"
+        "  (SELECT COUNT(DISTINCT s.student_id) FROM submissions s WHERE s.draft=0"
+        "   AND s.assignment_id IN (SELECT id FROM assignments b"
+        "     WHERE b.group_id=a.group_id AND b.closed=0 AND b.published=1"
+        "     AND b.due_at LIKE ?)) got"
+        " FROM assignments a JOIN groups g ON g.id=a.group_id"
+        " WHERE a.closed=0 AND a.published=1 AND a.due_at LIKE ?"
+        " GROUP BY a.group_id ORDER BY g.name",
+        (today + "%", today + "%")).fetchall():
+        items += todo(f'/groups/{r["group_id"]}?tab=homework',
+                      "%s · due today" % E(r["gname"]),
+                      "%d task%s — %d of %d students in"
+                      % (r["tasks"], "" if r["tasks"] == 1 else "s",
+                         r["got"], r["total"]),
+                      urgent=bool(r["total"]) and r["got"] * 2 < r["total"])
+
+    week = core.iso(core.now() - timedelta(days=7))
+    silent = db.execute(
+        "SELECT COUNT(*) c FROM students s WHERE s.active=1 AND NOT EXISTS ("
+        "  SELECT 1 FROM submissions x WHERE x.student_id=s.id AND x.draft=0"
+        "  AND x.created_at > ?)", (week,)).fetchone()["c"]
+    if silent:
+        items += todo("/ratings", "%d sent nothing this week" % silent,
+                      "Bottom of the ratings table", urgent=silent >= 5)
+
+    unread = db.execute(
+        "SELECT COUNT(*) c FROM questions WHERE answer IS NULL").fetchone()["c"]
+    if unread:
+        items += todo("/questions", "%d question%s waiting" % (unread, "" if unread == 1 else "s"),
+                      "Students asked you something")
+
+    if not items:
+        return ('<h1>Today</h1><div class="card"><p style="margin:0">'
+                'Nothing is waiting. Everything is graded and every class is up to '
+                'date.</p></div>')
+    return f'<h1>Today</h1><div class="todos">{items}</div>'
 
 
 def reason(st):
@@ -181,10 +243,21 @@ def view_queue(req, db):
     st = core.student_stats(db, student["id"])
     tags = db.execute("SELECT * FROM tags ORDER BY sort, id").fetchall()
 
-    shots = "".join(
-        f'<img src="/media/{E(f["filename"])}" alt="page {i+1}" onclick="this.classList.toggle(\'zoom\')">'
-        for i, f in enumerate(files)
-    ) or '<p class="sub">No image attached.</p>'
+    shots = "".join(shot(f, i) for i, f in enumerate(files)) \
+        or '<p class="sub">No image attached.</p>'
+
+    # while this student is being scored, quietly pull the next one's pages, so
+    # the queue never makes the teacher wait for a download again
+    nxt = db.execute(
+        "SELECT * FROM submissions WHERE status='pending' AND draft=0 AND id<>?"
+        " ORDER BY created_at LIMIT 1", (sub["id"],)
+    ).fetchone()
+    ahead = []
+    if nxt:
+        ahead = [screen_name(f) for f in db.execute(
+            "SELECT * FROM files WHERE submission_id=? ORDER BY ord, id LIMIT 4",
+            (nxt["id"],)).fetchall()]
+    prefetch = json.dumps(["/media/" + n for n in ahead])
 
     pad = "".join(
         f'<button type="button" data-score="{n}" onclick="pick({n})">{n}</button>'
@@ -247,8 +320,66 @@ document.addEventListener('keydown', e => {{
     location.href = '/skip?submission_id={sub["id"]}';
   }}
 }});
+// tap a page to see it full size - the big file is only fetched if you ask
+function zoom(img) {{
+  if (img.dataset.full && img.src.indexOf(img.dataset.full) < 0) {{
+    img.src = img.dataset.full;
+  }}
+  img.classList.toggle('zoom');
+}}
+window.addEventListener('load', function () {{
+  ({prefetch}).forEach(function (u) {{ new Image().src = u; }});
+}});
 </script>"""
     return html_response(page("Grade", body, "Grade"))
+
+
+def restore_photo(name):
+    """Bring a page back from Telegram after its file was dropped from disk.
+
+    Nothing is lost when a photo is offloaded - Telegram keeps the original and
+    we keep its file_id - so an old submission still opens, it just takes a
+    moment the first time.
+    """
+    token = core.load_config().get("telegram_token")
+    if not token:
+        return False
+    db = core.connect()
+    row = db.execute(
+        "SELECT telegram_file_id FROM files WHERE (filename=? OR preview=?)"
+        " AND telegram_file_id IS NOT NULL LIMIT 1", (name, name)).fetchone()
+    if not row:
+        return False
+    try:
+        import bot
+        if not bot.download_photo(token, row["telegram_file_id"], name):
+            return False
+    except Exception:
+        return False
+    db.execute("UPDATE files SET offloaded=0 WHERE filename=?", (name,))
+    db.commit()
+    return os.path.isfile(os.path.join(core.UPLOAD_DIR, name))
+
+
+def screen_name(f):
+    """The copy to put on screen: the small one when we have it."""
+    try:
+        return f["preview"] or f["filename"]
+    except (IndexError, KeyError):
+        return f["filename"]
+
+
+def shot(f, i):
+    """One page of homework. Page 1 loads at once, the rest as they are reached,
+    and the full-size file waits until it is asked for."""
+    small = screen_name(f)
+    dims = ""
+    if f["width"] and f["height"]:
+        dims = f' width="{f["width"]}" height="{f["height"]}"'
+    full = f' data-full="/media/{E(f["filename"])}"' if small != f["filename"] else ""
+    lazy = "" if i == 0 else ' loading="lazy"'
+    return (f'<img src="/media/{E(small)}" alt="page {i+1}"{dims}{full}{lazy}'
+            f' decoding="async" onclick="zoom(this)">')
 
 
 def ring(percent, size=64):
@@ -607,9 +738,31 @@ def group_homework(db, g):
   <td><form method="post" action="/assignments/{a["id"]}/delete"
         onsubmit="return confirm('Delete this homework? Student work is kept but unassigned.')">
       <button class="ghost">Delete</button></form></td></tr>"""
+    last = core.last_homework_batch(db, g["id"])
+    if last:
+        when = (last[0]["due_at"] or last[0]["created_at"] or "")[:10]
+        titles = ", ".join(a["title"] for a in last[:3])
+        if len(last) > 3:
+            titles += " and %d more" % (len(last) - 3)
+        repeat = f"""<div class="card">
+  <form method="post" action="/groups/{g["id"]}/repeat" class="inline">
+    <div style="flex:1;min-width:220px">
+      <div style="font-weight:600">Set the same homework again</div>
+      <div class="sub" style="margin:2px 0 0">{E(titles)} — last due {E(when)}</div>
+    </div>
+    <label class="f" style="margin:0">New deadline
+      <input type="date" name="due" value="{E(core.shift_days(when, 7))}" required></label>
+    <label class="check"><input type="checkbox" name="announce" value="1" checked>
+      <span>Tell students</span></label>
+    <button>Repeat {len(last)} task{"" if len(last) == 1 else "s"}</button>
+  </form></div>"""
+    else:
+        repeat = ""
+
     return f"""<h2>Homework set for this class</h2>
 <p class="sub">Edit the title or deadline and press Save. Closing hides it from students
 but keeps the scores; deleting keeps the students' work and detaches it.</p>
+{repeat}
 <div class="tablewrap"><table><tr><th>Homework</th><th>State</th><th>In</th>
 <th></th><th></th></tr>
 {rows or '<tr><td colspan=5 class="sub">Nothing set yet.</td></tr>'}</table></div>"""
@@ -1746,6 +1899,117 @@ def view_export(req, db):
                  ("Content-Length", str(len(payload)))], payload
 
 
+def crumbs(db, level_id, coll, cat, unit, base):
+    bits = [f'<a class="crumb" href="{base[:-1]}">All sections</a>']
+    if coll:
+        bits.append(f'<a class="crumb" href="{base}c={coll}">'
+                    f'{E(core.collection_label(coll))}</a>')
+    if cat:
+        bits.append(f'<a class="crumb" href="{base}c={coll}&amp;s={E(cat)}">{E(cat)}</a>')
+    if unit is not None:
+        bits.append("Welcome" if unit == 0 else "Unit %d" % unit)
+    return '<p class="sub">' + " &rsaquo; ".join(bits) + "</p>"
+
+
+def tile(href, title, sub, small=False, empty=False):
+    return (f'<a class="tile{" small" if small else ""}{" empty" if empty else ""}"'
+            f' href="{href}"><div class="tile-title">{title}</div>'
+            f'<div class="sub" style="margin:0">{sub}</div></a>')
+
+
+def unit_files(db, level_id, coll, cat, unit):
+    """Unit -1 is the drawer for anything filed without a unit number."""
+    if unit is None:
+        return core.materials_at_level(db, level_id, coll, cat)
+    if unit == -1:
+        return [m for m in core.materials_at_level(db, level_id, coll, cat)
+                if not m["unit"]]
+    return core.materials_in_unit(db, level_id, coll, cat, unit)
+
+
+def level_tiles(db, levels):
+    """No level picked yet - show the shelves rather than every file at once."""
+    cards = ""
+    for l in levels:
+        n = len(core.materials_at_level(db, l["id"]))
+        cards += tile(f'/materials?level={l["id"]}', E(l["name"]),
+                      "%d files" % n, empty=not n)
+    return ('<p class="sub">Pick a level, or search above.</p>'
+            f'<div class="tiles">{cards}</div>')
+
+
+def shelf_tiles(db, level_id, base):
+    """Collections first - the same three steps students take in the bot."""
+    counts = core.collection_counts(db, level_id)
+    cards = "".join(
+        tile(f'{base}c={k}', E(core.collection_label(k)), "%d files" % counts.get(k, 0))
+        for k in core.COLLECTION_ORDER)
+    return f'<div class="tiles">{cards}</div>'
+
+
+def section_tiles(db, level_id, coll, base):
+    counts = core.level_counts(db, level_id, coll)
+    cards = "".join(
+        tile(f'{base}c={coll}&amp;s={urllib.parse.quote(name)}', E(name),
+             "%d files" % counts.get(name, 0), empty=not counts.get(name))
+        for name in core.sections(coll))
+    return (crumbs(db, level_id, coll, "", None, base)
+            + f'<div class="tiles">{cards}</div>')
+
+
+def unit_tiles(db, level_id, coll, cat, base):
+    units = core.units_in(db, level_id, coll, cat)
+    numbers = core.units_for_level(db, level_id)
+    if 0 in units:
+        numbers = [0] + numbers
+    href = f'{base}c={coll}&amp;s={urllib.parse.quote(cat)}'
+    cards = "".join(
+        tile(f'{href}&amp;u={n}', "Welcome" if n == 0 else "Unit %d" % n,
+             "%d files" % units.get(n, 0), small=True, empty=n not in units)
+        for n in numbers)
+    loose = [m for m in core.materials_at_level(db, level_id, coll, cat) if not m["unit"]]
+    if loose:
+        cards += tile(f'{href}&amp;u=-1', "No unit", "%d files" % len(loose), small=True)
+    return (crumbs(db, level_id, coll, cat, None, base)
+            + f'<div class="tiles">{cards}</div>')
+
+
+def material_hits(db, q, level_id):
+    """Type a track number and get the file - faster than walking the tree."""
+    like = "%" + q.replace("%", "") + "%"
+    sql = ("SELECT * FROM materials WHERE active=1 AND (title LIKE ? OR original_name LIKE ?)")
+    args = [like, like]
+    if level_id:
+        sql += " AND (level_id IS NULL OR level_id IS ?)"
+        args.append(level_id)
+    mats = db.execute(sql + " ORDER BY title LIMIT 200", args).fetchall()
+    head = f'<p class="sub">{len(mats)} match{"" if len(mats) == 1 else "es"} for "{E(q)}"</p>'
+    return material_table(db, mats, head)
+
+
+def material_table(db, mats, head):
+    if not mats:
+        return head + ('<div class="card"><p style="margin:0">Nothing here yet.</p></div>')
+    rows = ""
+    for m in mats:
+        scope = core.level_name(db, m["level_id"]) or "All levels"
+        if m["unit"]:
+            scope += " · Unit %d" % m["unit"]
+        if m["book"]:
+            scope += " · " + core.book_label(m["book"])
+        if m["group_id"]:
+            scope += " · " + group_name(db, m["group_id"])
+        note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
+                if m["note"] else "")
+        rows += (f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
+                 f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
+                 f'<td>{E(core.human_size(m["size"]))}</td>'
+                 f'<td><form method="post" action="/materials/{m["id"]}/delete">'
+                 f'<button class="ghost">Remove</button></form></td></tr>')
+    return (head + '<div class="tablewrap"><table><tr><th>Title</th><th>Level</th>'
+            '<th>File</th><th>Size</th><th></th></tr>' + rows + "</table></div>")
+
+
 def view_materials(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
     levels = db.execute("SELECT * FROM levels ORDER BY sort").fetchall()
@@ -1758,43 +2022,39 @@ def view_materials(req, db):
             + "".join(tab(f'/materials?level={l["id"]}', l["name"], only == l["id"])
                       for l in levels) + "</div>")
 
-    blocks = ""
-    for key in core.COLLECTION_ORDER:
-        section_html = ""
-        for cat in core.sections(key):
-            sql = "SELECT * FROM materials WHERE active=1 AND collection=? AND category=?"
-            args = [key, cat]
-            if only:
-                sql += " AND level_id=?"
-                args.append(only)
-            mats = db.execute(sql + " ORDER BY created_at DESC", args).fetchall()
-            if not mats:
-                continue
-            rows = ""
-            for m in mats:
-                scope = core.level_name(db, m["level_id"]) or "All levels"
-                if m["unit"]:
-                    scope += " · Unit %d" % m["unit"]
-                if m["book"]:
-                    scope += " · " + core.book_label(m["book"])
-                if m["group_id"]:
-                    scope += " · " + group_name(db, m["group_id"])
-                note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
-                        if m["note"] else "")
-                rows += (
-                    f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
-                    f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
-                    f'<td>{E(core.human_size(m["size"]))}</td>'
-                    f'<td><form method="post" action="/materials/{m["id"]}/delete">'
-                    f'<button class="ghost">Remove</button></form></td></tr>')
-            section_html += (f'<h2>{E(cat)}</h2><div class="tablewrap"><table>'
-                             f'<tr><th>Title</th><th>Level</th><th>File</th><th>Size</th>'
-                             f'<th></th></tr>{rows}</table></div>')
-        if section_html:
-            blocks += (f'<h2 style="font-size:19px;margin-top:32px">'
-                       f'{E(core.collection_label(key))}</h2>{section_html}')
-    if not blocks:
-        blocks = ('<div class="card"><p style="margin:0">Nothing uploaded here yet.</p></div>')
+    q = (req["query"].get("q", [""])[0] or "").strip()
+    coll = (req["query"].get("c", [""])[0] or "")
+    cat = (req["query"].get("s", [""])[0] or "")
+    unit = req["query"].get("u", [None])[0]
+    unit = int(unit) if unit and unit.lstrip("-").isdigit() else None
+
+    base = "/materials" + (f"?level={only}" if only else "?")
+    if not base.endswith(("?", "&")):
+        base += "&"
+
+    search = f'''<div class="card" style="padding:12px 14px">
+<form method="get" action="/materials" class="inline">
+  {f'<input type="hidden" name="level" value="{only}">' if only else ""}
+  <input name="q" value="{E(q)}" placeholder="Search by name, e.g. 8.03 or transcripts"
+         style="min-width:280px">
+  <button class="ghost">Search</button>
+  {f'<a class="mini" href="{base[:-1]}">Clear</a>' if q else ""}
+</form></div>'''
+
+    if q:
+        blocks = search + material_hits(db, q, only)
+    elif not only:
+        blocks = search + level_tiles(db, levels)
+    elif not coll or coll not in core.COLLECTIONS:
+        blocks = search + shelf_tiles(db, only, base)
+    elif not cat:
+        blocks = search + section_tiles(db, only, coll, base)
+    elif unit is None and core.units_in(db, only, coll, cat):
+        blocks = search + unit_tiles(db, only, coll, cat, base)
+    else:
+        blocks = search + material_table(
+            db, unit_files(db, only, coll, cat, unit),
+            crumbs(db, only, coll, cat, unit, base))
 
     lopts = ('<option value="">All levels</option>'
              + "".join(f'<option value="{l["id"]}">{E(l["name"])}</option>' for l in levels))
@@ -1811,6 +2071,9 @@ def view_materials(req, db):
     body = f"""<h1>Materials</h1>
 <p class="sub">Filed by level, then collection, then section — the same tree students
 walk through in the bot.</p>
+{tabs}
+{blocks}
+<details class="adder"><summary>Add a file</summary>
 <div class="card"><form method="post" action="/materials/new" enctype="multipart/form-data">
 <div class="inline" style="margin-bottom:12px">
 <label class="f">Title<input name="title" placeholder="Unit 5 handout" required></label>
@@ -1846,8 +2109,7 @@ function fillSections() {{
 document.getElementById('coll').addEventListener('change', fillSections);
 fillSections();
 </script>
-{tabs}
-{blocks}"""
+</details>"""
     return html_response(page("Materials", body, "Materials"))
 
 
@@ -2031,6 +2293,32 @@ def act_new_assignment(req, db):
     if publish_now and f.get("announce", [""])[0] == "1":
         announce(db, aid)
     return redirect("/assignments")
+
+
+def act_repeat_homework(req, db, gid):
+    """Give the same list of tasks again with a new deadline.
+
+    Setting homework is the most repetitive thing on the site: the same six or
+    seven tasks, a week later. This is that, in one press.
+    """
+    due = (req["form"].get("due", [""])[0] or "").strip()
+    if not due:
+        return redirect(f"/groups/{gid}?tab=homework")
+    due_iso = f"{due}T23:59:00+00:00"
+    made = []
+    for a in core.last_homework_batch(db, gid):
+        if already_set(db, gid, a["title"], due_iso):
+            continue
+        made.append(db.execute(
+            "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
+            " published) VALUES (?,?,?,?,?,1)",
+            (gid, a["title"], a["task_type"], due_iso, core.iso(core.now())),
+        ).lastrowid)
+    db.commit()
+    if made and req["form"].get("announce", [""])[0] == "1":
+        for aid in made:
+            announce(db, aid)
+    return redirect(f"/groups/{gid}?tab=homework")
 
 
 def announce(db, aid):
@@ -2258,6 +2546,7 @@ ROUTES = [
     ("POST", r"^/skip$", act_skip),
     ("POST", r"^/groups/new$", act_new_group),
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
+    ("POST", r"^/groups/(\d+)/repeat$", act_repeat_homework),
     ("POST", r"^/assignments/new$", act_new_assignment),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),
@@ -2303,7 +2592,10 @@ class Handler(BaseHTTPRequestHandler):
         name = os.path.basename(urllib.parse.unquote(path))
         full = os.path.join(core.UPLOAD_DIR, name)
         if not os.path.isfile(full):
-            return self._send(*not_found())
+            # old pages are dropped from the disk once they are months past
+            # grading, but Telegram keeps them, so fetch it back on demand
+            if not restore_photo(name):
+                return self._send(*not_found())
         with open(full, "rb") as fh:
             data = fh.read()
         ctype = ("audio/ogg" if name.endswith((".oga", ".ogg"))

@@ -108,6 +108,7 @@ def load_config():
     env("CHASE_HOURS", "chase_hours", int)
     env("CHASE_THRESHOLD", "chase_threshold", int)
     env("CHASE_MAX", "chase_max", int)
+    env("PHOTO_KEEP_DAYS", "photo_keep_days", int)
     return cfg
 
 
@@ -283,6 +284,13 @@ def migrate(db):
         db.execute("ALTER TABLE students ADD COLUMN token TEXT")
     if "photo" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN photo TEXT")
+    fcols = {r["name"] for r in db.execute("PRAGMA table_info(files)")}
+    if "preview" not in fcols:
+        # a screen-sized copy, so grading does not pull the full page shot
+        db.execute("ALTER TABLE files ADD COLUMN preview TEXT")
+    if "offloaded" not in fcols:
+        # 1 = the big file has been deleted from disk; Telegram still has it
+        db.execute("ALTER TABLE files ADD COLUMN offloaded INTEGER NOT NULL DEFAULT 0")
     scols = {r["name"] for r in db.execute("PRAGMA table_info(submissions)")}
     if "late" not in scols:
         db.execute("ALTER TABLE submissions ADD COLUMN late INTEGER NOT NULL DEFAULT 0")
@@ -370,7 +378,43 @@ def migrate(db):
         # assignments that already existed were live, so they stay live
         db.execute("ALTER TABLE assignments ADD COLUMN published INTEGER NOT NULL DEFAULT 0")
         db.execute("UPDATE assignments SET published=1")
+    # these tables arrived after the first release, so their indexes live here
+    db.executescript("""
+    CREATE INDEX IF NOT EXISTS idx_sub_queue ON submissions(status, draft, created_at);
+    CREATE INDEX IF NOT EXISTS idx_students_group ON students(group_id, active);
+    CREATE INDEX IF NOT EXISTS idx_assign_group ON assignments(group_id, closed);
+    CREATE INDEX IF NOT EXISTS idx_mat_shelf
+        ON materials(level_id, collection, category, unit);
+    CREATE INDEX IF NOT EXISTS idx_marks_student ON lesson_marks(student_id, day);
+    CREATE INDEX IF NOT EXISTS idx_goals_student ON goals(student_id);
+    """)
     db.commit()
+
+
+def shift_days(day, n):
+    """'2026-09-01' plus n days, as the same kind of string."""
+    try:
+        d = datetime.strptime(day[:10], "%Y-%m-%d") + timedelta(days=n)
+    except (ValueError, TypeError):
+        d = now() + timedelta(days=n)
+    return d.strftime("%Y-%m-%d")
+
+
+def last_homework_batch(db, group_id):
+    """The most recent set of tasks given to a class, in the order they were set.
+
+    Homework is usually handed out as a list on one day, so 'last week's
+    homework' means everything sharing that newest deadline.
+    """
+    newest = db.execute(
+        "SELECT COALESCE(due_at, created_at) k FROM assignments WHERE group_id=?"
+        " ORDER BY k DESC LIMIT 1", (group_id,)).fetchone()
+    if not newest or not newest["k"]:
+        return []
+    return db.execute(
+        "SELECT * FROM assignments WHERE group_id=?"
+        " AND substr(COALESCE(due_at, created_at), 1, 10)=? ORDER BY id",
+        (group_id, newest["k"][:10])).fetchall()
 
 
 def student_token(db, student_id):

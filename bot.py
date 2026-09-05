@@ -515,6 +515,22 @@ def send_document(token, chat_id, path, filename, caption="", file_id=None, mime
     return None
 
 
+PREVIEW_MAX_WIDTH = 1280
+
+
+def preview_size(sizes, full):
+    """The biggest of Telegram's copies that is still small enough to read on
+    screen. Returns None when the only copy we have is the full one."""
+    smaller = [p for p in sizes
+               if p.get("file_id") != full.get("file_id")
+               and p.get("width", 0) <= PREVIEW_MAX_WIDTH]
+    if not smaller:
+        return None
+    best = max(smaller, key=lambda p: p.get("width", 0))
+    # a thumbnail too small to read is worse than no preview at all
+    return best if best.get("width", 0) >= 640 else None
+
+
 def download_photo(token, file_id, dest_name):
     info = call(token, "getFile", file_id=file_id)
     if not info.get("ok"):
@@ -1508,13 +1524,25 @@ def handle_photo(db, token, msg):
     ord_ = db.execute(
         "SELECT COUNT(*) c FROM files WHERE submission_id=?", (sub_id,)
     ).fetchone()["c"]
-    fname = f"{sub_id}_{ord_}_{int(time.time())}.jpg"
+    stamp = int(time.time())
+    fname = f"{sub_id}_{ord_}_{stamp}.jpg"
     if not download_photo(token, photo["file_id"], fname):
         return send(token, tid, "Could not download that photo, please resend.")
+
+    # Telegram hands us the same page at several sizes for free. Keep a screen
+    # sized one as well, so grading loads a few hundred KB instead of megabytes.
+    preview = None
+    small = preview_size(msg["photo"], photo)
+    if small:
+        pname = f"{sub_id}_{ord_}_{stamp}_s.jpg"
+        if download_photo(token, small["file_id"], pname):
+            preview = pname
+
     db.execute(
-        "INSERT INTO files (submission_id, filename, telegram_file_id, width, height, ord)"
-        " VALUES (?,?,?,?,?,?)",
-        (sub_id, fname, photo["file_id"], photo.get("width"), photo.get("height"), ord_),
+        "INSERT INTO files (submission_id, filename, telegram_file_id, width, height,"
+        " ord, preview) VALUES (?,?,?,?,?,?,?)",
+        (sub_id, fname, photo["file_id"], photo.get("width"), photo.get("height"),
+         ord_, preview),
     )
     db.commit()
 

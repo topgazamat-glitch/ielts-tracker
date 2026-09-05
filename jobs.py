@@ -312,6 +312,43 @@ def backup(db_path=None):
     return dest
 
 
+def offload_old_photos(db, cfg):
+    """Let go of page photos that have been graded for months.
+
+    Only pages that still have their screen-sized copy on disk are let go, so
+    the submission always stays readable; the full-resolution file is fetched
+    back from Telegram the moment anyone zooms in. That rule also keeps us off
+    the photos sent to an earlier bot token, whose file_ids this bot cannot
+    resolve. Without this the disk grows by roughly 150 MB a day and never
+    shrinks.
+    """
+    days = cfg.get("photo_keep_days") or 90
+    if days <= 0:
+        return "off"
+    cutoff = core.iso(core.now() - timedelta(days=days))
+    freed = gone = 0
+    for f in db.execute(
+        "SELECT f.id, f.filename, f.preview FROM files f"
+        " JOIN submissions s ON s.id=f.submission_id"
+        " WHERE f.offloaded=0 AND f.telegram_file_id IS NOT NULL"
+        " AND f.preview IS NOT NULL AND s.status='graded' AND s.created_at < ?",
+        (cutoff,)
+    ).fetchall():
+        if not os.path.isfile(os.path.join(core.UPLOAD_DIR, f["preview"])):
+            continue                      # no readable copy left, so keep the big one
+        path = os.path.join(core.UPLOAD_DIR, f["filename"])
+        try:
+            if os.path.isfile(path):
+                freed += os.path.getsize(path)
+                os.remove(path)
+            db.execute("UPDATE files SET offloaded=1 WHERE id=?", (f["id"],))
+            gone += 1
+        except OSError:
+            continue
+    db.commit()
+    return "%d files, %s freed" % (gone, core.human_size(freed)) if gone else 0
+
+
 def tick(cfg):
     """One pass. Safe to call as often as you like; the work is deduplicated."""
     token = cfg.get("telegram_token")
@@ -323,6 +360,11 @@ def tick(cfg):
         else:
             done["backup"] = os.path.basename(backup())
             core.mark_sent(db, "backup", core.now().strftime("%Y-%m-%d"))
+        if core.already_sent(db, "offload", core.now().strftime("%Y-%m-%d")):
+            done["offload"] = "already today"
+        else:
+            done["offload"] = offload_old_photos(db, cfg)
+            core.mark_sent(db, "offload", core.now().strftime("%Y-%m-%d"))
         if not cfg.get("automation"):
             done["messages"] = "disabled (set automation: true in config.json)"
         elif token and QUIET_START <= local_hour(cfg) < QUIET_END:

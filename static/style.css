@@ -343,7 +343,7 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
   box-shadow: var(--shadow-1);
 }
 .shots img {
-  width: 100%; border-radius: var(--r-sm); display: block;
+  width: 100%; height: auto; border-radius: var(--r-sm); display: block;
   margin-bottom: var(--sp-2); cursor: zoom-in;
   background: var(--surface-2);
 }
@@ -673,3 +673,30 @@ button.ghost.danger:hover { background: var(--warn-soft); }
   main { padding: 0; max-width: none; }
   .cert { box-shadow: none; aspect-ratio: 800 / 600; }
 }
+
+/* ------------------------------------------------------------ today list */
+
+.todos { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-5);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.todo {
+  display: block; padding: var(--sp-4);
+  background: var(--surface); border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md); color: var(--ink); box-shadow: var(--shadow-1);
+  transition: transform .08s var(--ease), border-color .14s var(--ease);
+}
+.todo:hover { text-decoration: none; transform: translateY(-1px);
+  border-color: var(--accent); border-left-color: var(--accent); }
+.todo.urgent { border-left-color: var(--warn); }
+.todo.urgent:hover { border-color: var(--warn); border-left-color: var(--warn); }
+.todo-head { font-size: 17px; font-weight: 620; letter-spacing: -.01em; }
+
+.adder { margin-top: var(--sp-5); }
+.adder > summary {
+  cursor: pointer; display: inline-block; padding: 9px 14px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font-weight: 560; color: var(--ink);
+  margin-bottom: var(--sp-3);
+}
+.adder > summary:hover { border-color: var(--accent); color: var(--accent); }
+.adder[open] > summary { color: var(--accent); }
