@@ -1,6 +1,8 @@
 """Shared config, database access and domain logic."""
+import hashlib
 import json
 import os
+import random
 import sqlite3
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -341,6 +343,45 @@ def migrate(db):
         answer TEXT,
         answered_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS games (
+        id INTEGER PRIMARY KEY,
+        group_id INTEGER REFERENCES groups(id),
+        list_id INTEGER REFERENCES word_lists(id),
+        code TEXT UNIQUE,
+        state TEXT NOT NULL DEFAULT 'lobby',   -- lobby | question | reveal | done
+        q_index INTEGER NOT NULL DEFAULT -1,
+        q_count INTEGER NOT NULL DEFAULT 10,
+        seconds INTEGER NOT NULL DEFAULT 20,
+        opened_at TEXT,                        -- when the current question went up
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS game_questions (
+        id INTEGER PRIMARY KEY,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        ord INTEGER NOT NULL,
+        word_id INTEGER NOT NULL REFERENCES words(id),
+        options TEXT NOT NULL,                 -- JSON, four translations
+        answer INTEGER NOT NULL                -- which of them is right
+    );
+    CREATE TABLE IF NOT EXISTS game_players (
+        id INTEGER PRIMARY KEY,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        score INTEGER NOT NULL DEFAULT 0,
+        correct INTEGER NOT NULL DEFAULT 0,
+        joined_at TEXT NOT NULL,
+        UNIQUE (game_id, student_id)
+    );
+    CREATE TABLE IF NOT EXISTS game_answers (
+        id INTEGER PRIMARY KEY,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        question_id INTEGER NOT NULL REFERENCES game_questions(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        choice INTEGER,
+        correct INTEGER NOT NULL DEFAULT 0,
+        ms INTEGER,
+        UNIQUE (game_id, question_id, student_id)
+    );
     CREATE TABLE IF NOT EXISTS parents (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -387,6 +428,9 @@ def migrate(db):
         ON materials(level_id, collection, category, unit);
     CREATE INDEX IF NOT EXISTS idx_marks_student ON lesson_marks(student_id, day);
     CREATE INDEX IF NOT EXISTS idx_goals_student ON goals(student_id);
+    CREATE INDEX IF NOT EXISTS idx_game_live ON games(group_id, state);
+    CREATE INDEX IF NOT EXISTS idx_game_q ON game_questions(game_id, ord);
+    CREATE INDEX IF NOT EXISTS idx_game_ans ON game_answers(game_id, question_id);
     """)
     db.commit()
 
@@ -637,6 +681,161 @@ def record_answer(db, student_id, word_id, was_correct):
         (student_id, word_id, seen, correct, streak,
          iso(now() + timedelta(days=days)), iso(now())),
     )
+    db.commit()
+
+
+# ------------------------------------------------------------ live vocabulary game
+#
+# A room of phones answering the same question at the same time. There is no
+# socket here on purpose: each phone asks "what is on screen now?" once a second
+# and gets a few hundred bytes back. On classroom mobile data that beats a live
+# connection, because a missed poll simply retries while a dropped socket ends
+# the game for that student.
+
+GAME_BASE = 500          # points for being right at all
+GAME_SPEED = 500         # the most that answering fast can add
+GAME_CODE_CHARS = "ACDEFGHJKLMNPQRTUVWXY3479"   # no O/0, no I/1, no S/5
+
+
+def game_code(db):
+    while True:
+        code = "".join(secrets.choice(GAME_CODE_CHARS) for _ in range(5))
+        if not db.execute("SELECT 1 FROM games WHERE code=?", (code,)).fetchone():
+            return code
+
+
+def make_game(db, group_id, list_id, q_count=10, seconds=20):
+    """Draw the questions up front, so the game cannot stall mid-round.
+
+    Wrong options come from other words on the same list, which makes them
+    plausible rather than absurd - a student has to actually know the word.
+    """
+    words = db.execute(
+        "SELECT id, term, translation FROM words WHERE list_id=? ORDER BY id",
+        (list_id,)).fetchall()
+    if len(words) < 4:
+        return None
+    picked = list(words)
+    random.shuffle(picked)
+    picked = picked[:max(1, min(q_count, len(picked)))]
+
+    gid = db.execute(
+        "INSERT INTO games (group_id, list_id, code, q_count, seconds, created_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (group_id, list_id, game_code(db), len(picked), seconds, iso(now()))).lastrowid
+
+    pool = [w["translation"] for w in words]
+    for i, w in enumerate(picked):
+        others = [t for t in pool if t != w["translation"]]
+        random.shuffle(others)
+        options = others[:3] + [w["translation"]]
+        random.shuffle(options)
+        db.execute(
+            "INSERT INTO game_questions (game_id, ord, word_id, options, answer)"
+            " VALUES (?,?,?,?,?)",
+            (gid, i, w["id"], json.dumps(options, ensure_ascii=False),
+             options.index(w["translation"])))
+    db.commit()
+    return gid
+
+
+def live_game(db, group_id):
+    """The game this class is in the middle of, if any."""
+    return db.execute(
+        "SELECT * FROM games WHERE group_id=? AND state IN ('lobby','question','reveal')"
+        " ORDER BY id DESC LIMIT 1", (group_id,)).fetchone()
+
+
+def game_question(db, game):
+    if game["q_index"] < 0:
+        return None
+    return db.execute("SELECT * FROM game_questions WHERE game_id=? AND ord=?",
+                      (game["id"], game["q_index"])).fetchone()
+
+
+def shuffle_for(student_id, question_id, n=4):
+    """A per-student order for the answers, stable across polls.
+
+    Two students side by side see the same four words in different places, so
+    copying a neighbour's screen tells you nothing.
+    """
+    seed = hashlib.sha256(("%d:%d" % (student_id, question_id)).encode()).digest()
+    order = list(range(n))
+    # Fisher-Yates driven by the digest, so it is the same every time it is asked
+    for i in range(n - 1, 0, -1):
+        j = seed[i] % (i + 1)
+        order[i], order[j] = order[j], order[i]
+    return order
+
+
+def game_seconds_left(game):
+    if game["state"] != "question" or not game["opened_at"]:
+        return 0
+    gone = (now() - parse(game["opened_at"])).total_seconds()
+    return max(0, round(game["seconds"] - gone, 1))
+
+
+def join_game(db, game_id, student_id):
+    db.execute("INSERT OR IGNORE INTO game_players (game_id, student_id, joined_at)"
+               " VALUES (?,?,?)", (game_id, student_id, iso(now())))
+    db.commit()
+
+
+def answer_game(db, game, student_id, choice):
+    """Score one answer. Right and fast beats right and slow; nothing is lost by
+    a student whose phone dropped and came back."""
+    q = game_question(db, game)
+    if not q or game["state"] != "question":
+        return None
+    if db.execute("SELECT 1 FROM game_answers WHERE game_id=? AND question_id=?"
+                  " AND student_id=?", (game["id"], q["id"], student_id)).fetchone():
+        return None                                   # one answer per question
+    left = game_seconds_left(game)
+    if left <= 0:
+        return None
+    was_right = (choice == q["answer"])
+    points = 0
+    if was_right:
+        points = GAME_BASE + int(GAME_SPEED * (left / float(game["seconds"])))
+    db.execute(
+        "INSERT INTO game_answers (game_id, question_id, student_id, choice, correct, ms)"
+        " VALUES (?,?,?,?,?,?)",
+        (game["id"], q["id"], student_id, choice, 1 if was_right else 0,
+         int((game["seconds"] - left) * 1000)))
+    db.execute("UPDATE game_players SET score=score+?, correct=correct+? "
+               "WHERE game_id=? AND student_id=?",
+               (points, 1 if was_right else 0, game["id"], student_id))
+    db.commit()
+    record_answer(db, student_id, q["word_id"], was_right)   # feeds the bot's revision
+    return {"correct": was_right, "points": points, "answer": q["answer"]}
+
+
+def game_board(db, game_id, limit=None):
+    rows = db.execute(
+        "SELECT p.*, s.name FROM game_players p JOIN students s ON s.id=p.student_id"
+        " WHERE p.game_id=? ORDER BY p.score DESC, s.name", (game_id,)).fetchall()
+    return rows[:limit] if limit else rows
+
+
+def advance_game(db, game_id):
+    """Lobby -> question -> reveal -> question ... -> done."""
+    g = db.execute("SELECT * FROM games WHERE id=?", (game_id,)).fetchone()
+    if not g or g["state"] == "done":
+        return
+    if g["state"] in ("lobby", "reveal"):
+        nxt = g["q_index"] + 1
+        if nxt >= g["q_count"]:
+            db.execute("UPDATE games SET state='done' WHERE id=?", (game_id,))
+        else:
+            db.execute("UPDATE games SET state='question', q_index=?, opened_at=?"
+                       " WHERE id=?", (nxt, iso(now()), game_id))
+    else:
+        db.execute("UPDATE games SET state='reveal' WHERE id=?", (game_id,))
+    db.commit()
+
+
+def end_game(db, game_id):
+    db.execute("UPDATE games SET state='done' WHERE id=?", (game_id,))
     db.commit()
 
 

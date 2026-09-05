@@ -50,7 +50,7 @@ def page(title, body, active=""):
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
-{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/questions', 'Questions')}</nav>
+{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
 <span class="right"><a href="/logout">Sign out</a></span></header>
 <main>{body}</main></body></html>"""
 
@@ -1994,6 +1994,338 @@ def act_import(req, db):
                        f'<div class="flash">Imported: {E(summary or "nothing new")}.</div>')
 
 
+# ------------------------------------------------------------- live game
+
+def view_play(req, db):
+    """Set a game up. Everything about it is decided here, then it just runs."""
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    lists = db.execute(
+        "SELECT l.*, (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) n"
+        " FROM word_lists l WHERE l.active=1 ORDER BY l.title").fetchall()
+    playable = [l for l in lists if l["n"] >= 4]
+
+    live = ""
+    for g in db.execute(
+        "SELECT * FROM games WHERE state IN ('lobby','question','reveal')"
+        " ORDER BY id DESC").fetchall():
+        live += (f'<div class="card"><strong>{E(group_name(db, g["group_id"]))}</strong> '
+                 f'&middot; code <span class="kbd">{E(g["code"])}</span> '
+                 f'&middot; <a href="/play/{g["id"]}">open the board &rarr;</a></div>')
+
+    if not playable:
+        body = ("<h1>Live game</h1><div class=\"card\"><p style=\"margin:0\">"
+                "You need a word list with at least four words in it. Add one on the "
+                "<a href='/vocab'>Vocabulary</a> page and it will appear here.</p></div>")
+        return html_response(page("Live game", body, "Play"))
+
+    gopts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
+    lopts = "".join(f'<option value="{l["id"]}">{E(l["title"])} ({l["n"]} words)</option>'
+                    for l in playable)
+    body = f"""<h1>Live game</h1>
+<p class="sub">A word on the big screen, four answers on their phones. Right earns
+points, right and fast earns more. Every answer also counts towards the student&rsquo;s
+revision in the bot, so a game on Tuesday changes what they are asked on Thursday.</p>
+{live}
+<div class="card"><form method="post" action="/play/new" class="inline">
+  <label class="f">Class<select name="group_id">{gopts}</select></label>
+  <label class="f">Word list<select name="list_id">{lopts}</select></label>
+  <label class="f">Questions<select name="q_count">
+    <option>5</option><option selected>10</option><option>15</option>
+    <option>20</option></select></label>
+  <label class="f">Seconds each<select name="seconds">
+    <option>10</option><option>15</option><option selected>20</option>
+    <option>30</option></select></label>
+  <button>Start a game</button>
+</form></div>"""
+    return html_response(page("Live game", body, "Play"))
+
+
+def act_new_game(req, db):
+    f = req["form"]
+    gid = f.get("group_id", [None])[0]
+    lid = f.get("list_id", [None])[0]
+    if not gid or not lid:
+        return redirect("/play")
+    def num(key, default):
+        v = f.get(key, [""])[0]
+        return int(v) if v.isdigit() else default
+    game_id = core.make_game(db, int(gid), int(lid), num("q_count", 10), num("seconds", 20))
+    if not game_id:
+        return redirect("/play")
+    invite_to_game(db, game_id)
+    return redirect(f"/play/{game_id}")
+
+
+def invite_to_game(db, game_id):
+    """Nudge the class in Telegram so nobody has to be told a link out loud."""
+    token = CFG.get("telegram_token")
+    g = db.execute("SELECT * FROM games WHERE id=?", (game_id,)).fetchone()
+    if not token or not g:
+        return
+    try:
+        import bot
+        for st in db.execute(
+            "SELECT * FROM students WHERE group_id=? AND active=1"
+            " AND telegram_id IS NOT NULL", (g["group_id"],)).fetchall():
+            base = core.meta_get(db, "site_url") or ""
+            url = base + "/s/" + core.student_token(db, st["id"]) + "/game"
+            bot.send(token, st["telegram_id"],
+                     bot.t(st["lang"] or "en", "game_invite", url=url))
+    except Exception:
+        pass
+
+
+def view_game_board(req, db, game_id):
+    """The projector. Big type, no chrome - it is read from the back of a room."""
+    g = db.execute("SELECT * FROM games WHERE id=?", (game_id,)).fetchone()
+    if not g:
+        return not_found()
+    body = f"""<h1 style="margin-bottom:4px">{E(group_name(db, g["group_id"]))}</h1>
+<p class="sub">Open your own page and tap <strong>Join the game</strong> &mdash; or use the link the bot just sent. Code <span class="kbd">{E(g["code"])}</span></p>
+<div id="board"></div>
+<div style="display:flex;gap:8px;margin-top:18px">
+  <button onclick="step()" id="go">Start</button>
+  <button class="ghost" onclick="if(confirm('End this game?'))location.href='/play/{g["id"]}/end'">End game</button>
+</div>
+<script>
+const GID = {g["id"]};
+let last = "";
+function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
+  ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
+async function poll() {{
+  try {{
+    const r = await fetch('/play/' + GID + '/state.json', {{cache:'no-store'}});
+    const s = await r.json();
+    render(s);
+  }} catch (e) {{}}
+  setTimeout(poll, 900);
+}}
+function render(s) {{
+  document.getElementById('go').textContent =
+    s.state === 'lobby' ? 'Start' :
+    s.state === 'question' ? 'Show the answer' :
+    s.state === 'reveal' ? 'Next question' : 'Finished';
+  document.getElementById('go').disabled = (s.state === 'done');
+  let h = '';
+  if (s.state === 'lobby') {{
+    h = '<div class="gcard"><div class="gbig">' + s.players.length +
+        ' in the room</div><div class="gnames">' +
+        s.players.map(p => esc(p.name)).join(' &middot; ') + '</div></div>';
+  }} else if (s.state === 'question') {{
+    h = '<div class="gcard"><div class="gsmall">Question ' + (s.q_index + 1) +
+        ' of ' + s.q_count + ' &middot; ' + s.left + 's</div>' +
+        '<div class="gword">' + esc(s.term) + '</div>' +
+        '<div class="gsmall">' + s.answered + ' of ' + s.players.length +
+        ' answered</div></div>';
+  }} else if (s.state === 'reveal') {{
+    h = '<div class="gcard"><div class="gsmall">The answer was</div>' +
+        '<div class="gword">' + esc(s.answer_text) + '</div>' +
+        '<div class="gsmall">' + esc(s.term) + '</div></div>' + board(s.board);
+  }} else {{
+    h = '<div class="gcard"><div class="gsmall">Final</div>' +
+        '<div class="gword">' + (s.board[0] ? esc(s.board[0].name) : '&mdash;') +
+        '</div></div>' + board(s.board);
+  }}
+  if (h !== last) {{ document.getElementById('board').innerHTML = h; last = h; }}
+}}
+function board(rows) {{
+  if (!rows.length) return '';
+  return '<div class="tablewrap"><table><tr><th>#</th><th>Student</th>' +
+    '<th>Right</th><th style="text-align:right">Points</th></tr>' +
+    rows.map((r, i) => '<tr><td>' + (i + 1) + '.</td><td>' + esc(r.name) +
+      '</td><td>' + r.correct + '</td><td style="text-align:right"><strong>' +
+      r.score + '</strong></td></tr>').join('') + '</table></div>';
+}}
+async function step() {{
+  await fetch('/play/' + GID + '/next', {{method:'POST'}});
+  last = ""; 
+}}
+poll();
+</script>"""
+    return html_response(page("Game", body, "Play"))
+
+
+def game_state_json(req, db, game_id):
+    g = db.execute("SELECT * FROM games WHERE id=?", (game_id,)).fetchone()
+    if not g:
+        return not_found()
+    q = core.game_question(db, g)
+    answered = 0
+    term = answer_text = ""
+    if q:
+        term = db.execute("SELECT term FROM words WHERE id=?",
+                          (q["word_id"],)).fetchone()["term"]
+        answer_text = json.loads(q["options"])[q["answer"]]
+        answered = db.execute(
+            "SELECT COUNT(*) c FROM game_answers WHERE game_id=? AND question_id=?",
+            (g["id"], q["id"])).fetchone()["c"]
+    board = [{"name": r["name"], "score": r["score"], "correct": r["correct"]}
+             for r in core.game_board(db, g["id"])]
+    payload = {"state": g["state"], "q_index": g["q_index"], "q_count": g["q_count"],
+               "left": core.game_seconds_left(g), "term": term,
+               "answer_text": answer_text, "answered": answered,
+               "players": [{"name": b["name"]} for b in board], "board": board}
+    return json_response(payload)
+
+
+def act_game_next(req, db, game_id):
+    core.advance_game(db, game_id)
+    return json_response({"ok": True})
+
+
+def act_game_end(req, db, game_id):
+    core.end_game(db, game_id)
+    return redirect("/play")
+
+
+def json_response(payload):
+    blob = json.dumps(payload).encode("utf-8")
+    return 200, [("Content-Type", "application/json; charset=utf-8"),
+                 ("Cache-Control", "no-store"),
+                 ("Content-Length", str(len(blob)))], blob
+
+
+def view_student_game(req, db, token):
+    """The phone. Four big targets, nothing to read but the answers."""
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    g = core.live_game(db, s["group_id"])
+    if not g:
+        body = ("<h1>No game running</h1><div class=\"card\"><p style=\"margin:0\">"
+                "Your teacher has not started one. This page will work the moment "
+                "they do.</p></div>"
+                f"<p><a href=\"/s/{E(token)}\">Back to my page</a></p>")
+        return html_response(student_page("Game", body))
+    core.join_game(db, g["id"], s["id"])
+    body = f"""<h1 style="margin-bottom:2px">Vocabulary game</h1>
+<p class="sub" id="sub">Waiting for your teacher to start&hellip;</p>
+<div id="play"></div>
+<script>
+const TOK = {json.dumps(token)};
+let shown = -1, locked = false, last = "";
+function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
+  ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
+async function poll() {{
+  try {{
+    const r = await fetch('/s/' + TOK + '/game.json', {{cache:'no-store'}});
+    render(await r.json());
+  }} catch (e) {{}}
+  setTimeout(poll, 1000);
+}}
+function render(s) {{
+  document.getElementById('sub').textContent = s.sub;
+  let h = '';
+  if (s.state === 'question') {{
+    if (s.q !== shown) {{ shown = s.q; locked = s.answered; }}
+    if (s.answered || s.left <= 0) locked = true;   // time up locks it too
+    h = '<div class="gcard"><div class="gsmall">' + s.left + 's</div>' +
+        '<div class="gword">' + esc(s.term) + '</div></div>' +
+        '<div class="gopts">' + s.options.map((o, i) =>
+          '<button class="gopt c' + i + (locked ? ' off' : '') + '" ' +
+          (locked ? 'disabled' : 'onclick="pick(' + i + ')"') + '>' +
+          esc(o) + '</button>').join('') + '</div>';
+    if (locked) h += '<p class="sub">' + (s.answered ? 'Answer sent.' : 'Time up.') +
+      ' Waiting for the others&hellip;</p>';
+  }} else if (s.state === 'reveal') {{
+    shown = -1; locked = false;
+    h = '<div class="gcard ' + (s.was_right ? 'right' : 'wrong') + '">' +
+        '<div class="gbig">' + (s.was_right ? 'Correct' : 'Not this time') + '</div>' +
+        '<div class="gsmall">' + esc(s.term) + ' &mdash; ' + esc(s.answer_text) +
+        '</div></div><div class="gcard"><div class="gsmall">Your points</div>' +
+        '<div class="gbig">' + s.score + '</div></div>';
+  }} else if (s.state === 'done') {{
+    h = '<div class="gcard"><div class="gsmall">Finished &mdash; you got ' +
+        s.correct + ' right</div><div class="gbig">' + s.score + ' points</div>' +
+        '<div class="gsmall">' + s.place + '</div></div>' +
+        '<p><a href="/s/' + TOK + '">Back to my page</a></p>';
+  }} else {{
+    h = '<div class="gcard"><div class="gbig">You are in</div>' +
+        '<div class="gsmall">Look at the screen</div></div>';
+  }}
+  if (h !== last) {{ document.getElementById('play').innerHTML = h; last = h; }}
+}}
+async function pick(i) {{
+  locked = true; last = "";
+  await fetch('/s/' + TOK + '/game/answer', {{method:'POST',
+    headers: {{'Content-Type':'application/x-www-form-urlencoded'}},
+    body: 'choice=' + i}});
+}}
+poll();
+</script>"""
+    return html_response(student_page("Game", body))
+
+
+def student_game_json(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    g = core.live_game(db, s["group_id"]) or db.execute(
+        "SELECT * FROM games WHERE group_id=? ORDER BY id DESC LIMIT 1",
+        (s["group_id"],)).fetchone()
+    if not g:
+        return json_response({"state": "none", "sub": "No game running."})
+    me = db.execute("SELECT * FROM game_players WHERE game_id=? AND student_id=?",
+                    (g["id"], s["id"])).fetchone()
+    out = {"state": g["state"], "score": me["score"] if me else 0,
+           "correct": me["correct"] if me else 0, "sub": "", "q": g["q_index"]}
+    q = core.game_question(db, g)
+
+    if g["state"] == "question" and q:
+        opts = json.loads(q["options"])
+        order = core.shuffle_for(s["id"], q["id"])
+        out["options"] = [opts[i] for i in order]
+        out["term"] = db.execute("SELECT term FROM words WHERE id=?",
+                                 (q["word_id"],)).fetchone()["term"]
+        out["left"] = int(core.game_seconds_left(g))
+        out["answered"] = bool(db.execute(
+            "SELECT 1 FROM game_answers WHERE game_id=? AND question_id=? AND student_id=?",
+            (g["id"], q["id"], s["id"])).fetchone())
+        out["sub"] = "Question %d of %d" % (g["q_index"] + 1, g["q_count"])
+    elif g["state"] == "reveal" and q:
+        opts = json.loads(q["options"])
+        out["answer_text"] = opts[q["answer"]]
+        out["term"] = db.execute("SELECT term FROM words WHERE id=?",
+                                 (q["word_id"],)).fetchone()["term"]
+        row = db.execute(
+            "SELECT correct FROM game_answers WHERE game_id=? AND question_id=?"
+            " AND student_id=?", (g["id"], q["id"], s["id"])).fetchone()
+        out["was_right"] = bool(row and row["correct"])
+        out["sub"] = "Question %d of %d" % (g["q_index"] + 1, g["q_count"])
+    elif g["state"] == "done":
+        board = core.game_board(db, g["id"])
+        place = next((i for i, r in enumerate(board, 1)
+                      if r["student_id"] == s["id"]), None)
+        out["place"] = ("%d of %d" % (place, len(board))) if place else ""
+        out["sub"] = "Game over"
+    else:
+        out["sub"] = "Waiting for your teacher to start…"
+    return json_response(out)
+
+
+def act_student_answer(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    g = core.live_game(db, s["group_id"])
+    if not g:
+        return json_response({"ok": False})
+    raw = (req["form"].get("choice", [""])[0] or "").strip()
+    if not raw.isdigit():
+        return json_response({"ok": False})
+    q = core.game_question(db, g)
+    if not q:
+        return json_response({"ok": False})
+    # they tapped a position on their own shuffled screen; translate it back
+    order = core.shuffle_for(s["id"], q["id"])
+    shown = int(raw)
+    if not 0 <= shown < len(order):
+        return json_response({"ok": False})
+    core.join_game(db, g["id"], s["id"])
+    result = core.answer_game(db, g, s["id"], order[shown])
+    return json_response({"ok": bool(result)})
+
+
 def view_export(req, db):
     gid = req["query"].get("group", [None])[0]
     gid = int(gid) if gid and gid.isdigit() else None
@@ -2666,6 +2998,12 @@ ROUTES = [
     ("POST", r"^/groups/new$", act_new_group),
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
     ("POST", r"^/groups/(\d+)/repeat$", act_repeat_homework),
+    ("GET",  r"^/play$", view_play),
+    ("GET",  r"^/play/(\d+)$", view_game_board),
+    ("GET",  r"^/play/(\d+)/state\.json$", game_state_json),
+    ("GET",  r"^/play/(\d+)/end$", act_game_end),
+    ("POST", r"^/play/new$", act_new_game),
+    ("POST", r"^/play/(\d+)/next$", act_game_next),
     ("POST", r"^/assignments/new$", act_new_assignment),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),
@@ -2724,6 +3062,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _student_get(self, path, query):
         parts = path.split("/")
+        if len(parts) == 4 and parts[3] in ("game", "game.json"):
+            db = core.connect()
+            try:
+                fn = view_student_game if parts[3] == "game" else student_game_json
+                return self._send(*fn({"query": query}, db, parts[2]))
+            finally:
+                db.close()
         if len(parts) != 3 or not parts[2]:
             return self._send(*not_found())
         flash = ""
@@ -2890,6 +3235,17 @@ class Handler(BaseHTTPRequestHandler):
                 fn = act_student_finish if m.group(2) == "finish" else act_student_discard
                 return self._send(*fn({"query": {}, "form": {}}, db,
                                       m.group(1), int(m.group(3))))
+            finally:
+                db.close()
+
+        if path.startswith("/s/") and path.endswith("/game/answer"):
+            token = path.split("/")[2]
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_student_answer(
+                    {"query": {}, "form": form}, db, token))
             finally:
                 db.close()
 
