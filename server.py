@@ -2089,7 +2089,19 @@ def view_game_board(req, db, game_id):
 </div>
 <script>
 const GID = {g["id"]};
-let last = "";
+let last = "", ac = null, lastTick = -1, lastState = "";
+// the projector is the thing with speakers, so the room hears the clock here
+function beep(freq, ms, type) {{
+  try {{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), gain = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    gain.gain.setValueAtTime(0.2, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + ms / 1000);
+    o.connect(gain); gain.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + ms / 1000);
+  }} catch (e) {{}}
+}}
 function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
   ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
 async function poll() {{
@@ -2101,6 +2113,15 @@ async function poll() {{
   setTimeout(poll, 900);
 }}
 function render(s) {{
+  if (s.state === 'question' && s.left <= 5 && s.left > 0 && s.left !== lastTick) {{
+    lastTick = s.left; beep(760, 80);
+  }}
+  if (s.state !== lastState) {{
+    if (s.state === 'reveal') beep(520, 120);
+    if (s.state === 'done') {{ beep(660, 140);
+      setTimeout(() => beep(880, 180), 150); setTimeout(() => beep(1100, 260), 320); }}
+    lastState = s.state;
+  }}
   document.getElementById('go').textContent =
     s.state === 'lobby' ? 'Start' :
     s.state === 'question' ? 'Show the answer' :
@@ -2109,8 +2130,9 @@ function render(s) {{
   let h = '';
   if (s.state === 'lobby') {{
     h = '<div class="gcard"><div class="gbig">' + s.players.length +
-        ' in the room</div><div class="gnames">' +
-        s.players.map(p => esc(p.name)).join(' &middot; ') + '</div></div>';
+        ' in the room</div><div class="groom">' +
+        s.players.map(p => '<span class="gface"><b>' + p.who + '</b>' +
+          esc(p.name) + '</span>').join('') + '</div></div>';
   }} else if (s.state === 'question') {{
     h = '<div class="gcard"><div class="gsmall">Question ' + (s.q_index + 1) +
         ' of ' + s.q_count + ' &middot; ' + s.left + 's</div>' +
@@ -2122,19 +2144,34 @@ function render(s) {{
         '<div class="gword">' + esc(s.answer_text) + '</div>' +
         '<div class="gsmall">' + esc(s.term) + '</div></div>' + board(s.board);
   }} else {{
-    h = '<div class="gcard"><div class="gsmall">Final</div>' +
-        '<div class="gword">' + (s.board[0] ? esc(s.board[0].name) : '&mdash;') +
-        '</div></div>' + board(s.board);
+    h = podium(s.board) + board(s.board.slice(3));
   }}
   if (h !== last) {{ document.getElementById('board').innerHTML = h; last = h; }}
 }}
-function board(rows) {{
+function board(rows, from) {{
   if (!rows.length) return '';
-  return '<div class="tablewrap"><table><tr><th>#</th><th>Student</th>' +
-    '<th>Right</th><th style="text-align:right">Points</th></tr>' +
-    rows.map((r, i) => '<tr><td>' + (i + 1) + '.</td><td>' + esc(r.name) +
-      '</td><td>' + r.correct + '</td><td style="text-align:right"><strong>' +
-      r.score + '</strong></td></tr>').join('') + '</table></div>';
+  from = from || 1;
+  return '<div class="tablewrap"><table><tr><th>#</th><th></th><th>Student</th>' +
+    '<th></th><th>Right</th><th style="text-align:right">Points</th></tr>' +
+    rows.map((r, i) => {{
+      const d = r.delta > 0 ? '<span class="gup">&uarr;' + r.delta + '</span>'
+              : r.delta < 0 ? '<span class="gdown">&darr;' + (-r.delta) + '</span>' : '';
+      return '<tr><td>' + (i + from) + '.</td><td class="gcell">' + r.who +
+        '</td><td>' + esc(r.name) + (r.run >= 2 ?
+          ' <span class="grunmini">' + r.run + '🔥</span>' : '') +
+        '</td><td>' + d + '</td><td>' + r.correct +
+        '</td><td style="text-align:right"><strong>' + r.score + '</strong></td></tr>';
+    }}).join('') + '</table></div>';
+}}
+function podium(rows) {{
+  if (!rows.length) return '';
+  const top = rows.slice(0, 3);
+  const order = [1, 0, 2];   // second, first, third - the way a podium stands
+  return '<div class="podium">' + order.filter(i => top[i]).map(i =>
+    '<div class="pstep p' + (i + 1) + '"><div class="pface">' + top[i].who +
+    '</div><div class="pname">' + esc(top[i].name) + '</div>' +
+    '<div class="pscore">' + top[i].score + '</div>' +
+    '<div class="pblock">' + (i + 1) + '</div></div>').join('') + '</div>';
 }}
 async function step() {{
   await fetch('/play/' + GID + '/next', {{method:'POST'}});
@@ -2159,12 +2196,14 @@ def game_state_json(req, db, game_id):
         answered = db.execute(
             "SELECT COUNT(*) c FROM game_answers WHERE game_id=? AND question_id=?",
             (g["id"], q["id"])).fetchone()["c"]
-    board = [{"name": r["name"], "score": r["score"], "correct": r["correct"]}
+    board = [{"name": r["name"], "score": r["score"], "correct": r["correct"],
+              "who": core.avatar_of(r), "delta": r["delta"], "run": r["run"]}
              for r in core.game_board(db, g["id"])]
     payload = {"state": g["state"], "q_index": g["q_index"], "q_count": g["q_count"],
                "left": core.game_seconds_left(g), "term": term,
                "answer_text": answer_text, "answered": answered,
-               "players": [{"name": b["name"]} for b in board], "board": board}
+               "players": [{"name": b["name"], "who": b["who"]} for b in board],
+               "board": board}
     return json_response(payload)
 
 
@@ -2203,9 +2242,22 @@ def view_student_game(req, db, token):
 <div id="play"></div>
 <script>
 const TOK = {json.dumps(token)};
-let shown = -1, locked = false, last = "";
+const SHAPES = ['\u25B2', '\u25C6', '\u25CF', '\u25A0'];
+let shown = -1, locked = false, last = "", ac = null, lastTick = -1, revealed = -1;
 function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
   ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
+// sound without files: two oscillators are enough for a tick and a ding
+function beep(freq, ms, type) {{
+  try {{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), gain = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    gain.gain.setValueAtTime(0.14, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + ms / 1000);
+    o.connect(gain); gain.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + ms / 1000);
+  }} catch (e) {{}}
+}}
 async function poll() {{
   try {{
     const r = await fetch('/s/' + TOK + '/game.json', {{cache:'no-store'}});
@@ -2213,43 +2265,73 @@ async function poll() {{
   }} catch (e) {{}}
   setTimeout(poll, 1000);
 }}
+let AVATARS = [];
+function chooser(s) {{
+  AVATARS = s.avatars;
+  return '<p class="sub" style="margin-bottom:6px">Pick your character</p>' +
+    '<div class="gwho">' + s.avatars.map((a, i) =>
+      '<button class="gpick' + (a === s.who ? ' on' : '') +
+      '" onclick="pickWho(' + i + ')">' + a + '</button>').join('') +
+    '</div>';
+}}
 function render(s) {{
   document.getElementById('sub').textContent = s.sub;
   let h = '';
   if (s.state === 'question') {{
     if (s.q !== shown) {{ shown = s.q; locked = s.answered; }}
-    if (s.answered || s.left <= 0) locked = true;   // time up locks it too
-    h = '<div class="gcard"><div class="gsmall">' + s.left + 's</div>' +
+    if (s.answered || s.left <= 0) locked = true;
+    if (s.left <= 5 && s.left > 0 && s.left !== lastTick) {{
+      lastTick = s.left; beep(880, 70);
+    }}
+    h = '<div class="gcard"><div class="gclock">' + s.left + '</div>' +
         '<div class="gword">' + esc(s.term) + '</div></div>' +
         '<div class="gopts">' + s.options.map((o, i) =>
           '<button class="gopt c' + i + (locked ? ' off' : '') + '" ' +
           (locked ? 'disabled' : 'onclick="pick(' + i + ')"') + '>' +
-          esc(o) + '</button>').join('') + '</div>';
+          '<span class="gshape">' + SHAPES[i] + '</span>' + esc(o) + '</button>').join('') +
+        '</div>';
     if (locked) h += '<p class="sub">' + (s.answered ? 'Answer sent.' : 'Time up.') +
       ' Waiting for the others&hellip;</p>';
   }} else if (s.state === 'reveal') {{
+    if (revealed !== s.q) {{
+      revealed = s.q;
+      if (s.was_right) {{ beep(660, 90); setTimeout(() => beep(990, 140), 100); }}
+      else beep(180, 220, 'square');
+    }}
     shown = -1; locked = false;
+    const move = s.delta > 0 ? '<span class="gup">&uarr;' + s.delta + '</span>'
+               : s.delta < 0 ? '<span class="gdown">&darr;' + (-s.delta) + '</span>' : '';
     h = '<div class="gcard ' + (s.was_right ? 'right' : 'wrong') + '">' +
         '<div class="gbig">' + (s.was_right ? 'Correct' : 'Not this time') + '</div>' +
         '<div class="gsmall">' + esc(s.term) + ' &mdash; ' + esc(s.answer_text) +
-        '</div></div><div class="gcard"><div class="gsmall">Your points</div>' +
+        '</div></div>' +
+        (s.run >= 2 ? '<div class="grun">' + s.run + ' in a row 🔥</div>' : '') +
+        '<div class="gcard"><div class="gsmall">Your points ' + move + '</div>' +
         '<div class="gbig">' + s.score + '</div></div>';
   }} else if (s.state === 'done') {{
-    h = '<div class="gcard"><div class="gsmall">Finished &mdash; you got ' +
-        s.correct + ' right</div><div class="gbig">' + s.score + ' points</div>' +
+    h = '<div class="gcard"><div class="gwhobig">' + s.who + '</div>' +
+        '<div class="gsmall">Finished &mdash; you got ' + s.correct + ' right</div>' +
+        '<div class="gbig">' + s.score + ' points</div>' +
         '<div class="gsmall">' + s.place + '</div></div>' +
         '<p><a href="/s/' + TOK + '">Back to my page</a></p>';
   }} else {{
-    h = '<div class="gcard"><div class="gbig">You are in</div>' +
-        '<div class="gsmall">Look at the screen</div></div>';
+    h = '<div class="gcard"><div class="gwhobig">' + s.who + '</div>' +
+        '<div class="gbig">You are in</div>' +
+        '<div class="gsmall">Look at the screen</div></div>' + chooser(s);
   }}
   if (h !== last) {{ document.getElementById('play').innerHTML = h; last = h; }}
 }}
 async function pick(i) {{
-  locked = true; last = "";
+  locked = true; last = ""; beep(520, 60);
   await fetch('/s/' + TOK + '/game/answer', {{method:'POST',
     headers: {{'Content-Type':'application/x-www-form-urlencoded'}},
     body: 'choice=' + i}});
+}}
+async function pickWho(i) {{
+  last = ""; beep(700, 60);
+  await fetch('/s/' + TOK + '/game/avatar', {{method:'POST',
+    headers: {{'Content-Type':'application/x-www-form-urlencoded'}},
+    body: 'who=' + encodeURIComponent(AVATARS[i])}});
 }}
 poll();
 </script>"""
@@ -2268,7 +2350,9 @@ def student_game_json(req, db, token):
     me = db.execute("SELECT * FROM game_players WHERE game_id=? AND student_id=?",
                     (g["id"], s["id"])).fetchone()
     out = {"state": g["state"], "score": me["score"] if me else 0,
-           "correct": me["correct"] if me else 0, "sub": "", "q": g["q_index"]}
+           "correct": me["correct"] if me else 0, "sub": "", "q": g["q_index"],
+           "run": me["run"] if me else 0, "delta": me["delta"] if me else 0,
+           "who": core.avatar_of(s), "avatars": core.AVATARS}
     q = core.game_question(db, g)
 
     if g["state"] == "question" and q:
@@ -2301,6 +2385,14 @@ def student_game_json(req, db, token):
     else:
         out["sub"] = "Waiting for your teacher to start…"
     return json_response(out)
+
+
+def act_student_avatar(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    core.set_avatar(db, s["id"], (req["form"].get("who", [""])[0] or ""))
+    return json_response({"ok": True})
 
 
 def act_student_answer(req, db, token):
@@ -3235,6 +3327,17 @@ class Handler(BaseHTTPRequestHandler):
                 fn = act_student_finish if m.group(2) == "finish" else act_student_discard
                 return self._send(*fn({"query": {}, "form": {}}, db,
                                       m.group(1), int(m.group(3))))
+            finally:
+                db.close()
+
+        if path.startswith("/s/") and path.endswith("/game/avatar"):
+            token = path.split("/")[2]
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_student_avatar(
+                    {"query": {}, "form": form}, db, token))
             finally:
                 db.close()
 

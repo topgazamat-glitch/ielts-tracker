@@ -286,6 +286,8 @@ def migrate(db):
         db.execute("ALTER TABLE students ADD COLUMN token TEXT")
     if "photo" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN photo TEXT")
+    if "avatar" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN avatar TEXT")
     fcols = {r["name"] for r in db.execute("PRAGMA table_info(files)")}
     if "preview" not in fcols:
         # a screen-sized copy, so grading does not pull the full page shot
@@ -369,6 +371,9 @@ def migrate(db):
         student_id INTEGER NOT NULL REFERENCES students(id),
         score INTEGER NOT NULL DEFAULT 0,
         correct INTEGER NOT NULL DEFAULT 0,
+        run INTEGER NOT NULL DEFAULT 0,        -- correct answers in a row, right now
+        prev_rank INTEGER,                     -- where they stood a question ago
+        delta INTEGER NOT NULL DEFAULT 0,      -- places gained on the last question
         joined_at TEXT NOT NULL,
         UNIQUE (game_id, student_id)
     );
@@ -419,6 +424,18 @@ def migrate(db):
         # assignments that already existed were live, so they stay live
         db.execute("ALTER TABLE assignments ADD COLUMN published INTEGER NOT NULL DEFAULT 0")
         db.execute("UPDATE assignments SET published=1")
+    # the game tables shipped before characters and rank movement did
+    gpcols = {r["name"] for r in db.execute("PRAGMA table_info(game_players)")}
+    if gpcols:
+        if "run" not in gpcols:
+            db.execute("ALTER TABLE game_players ADD COLUMN"
+                       " run INTEGER NOT NULL DEFAULT 0")
+        if "prev_rank" not in gpcols:
+            db.execute("ALTER TABLE game_players ADD COLUMN prev_rank INTEGER")
+        if "delta" not in gpcols:
+            db.execute("ALTER TABLE game_players ADD COLUMN"
+                       " delta INTEGER NOT NULL DEFAULT 0")
+
     # these tables arrived after the first release, so their indexes live here
     db.executescript("""
     CREATE INDEX IF NOT EXISTS idx_sub_queue ON submissions(status, draft, created_at);
@@ -692,6 +709,41 @@ def record_answer(db, student_id, word_id, was_correct):
 # connection, because a missed poll simply retries while a dropped socket ends
 # the game for that student.
 
+# a character to be, chosen once and kept. Emoji rather than drawings: they
+# cost no bandwidth in a classroom, render on every phone in the room, and a
+# clean emoji beats homemade artwork.
+AVATARS = ["\U0001F98A", "\U0001F43C", "\U0001F981", "\U0001F42F",
+           "\U0001F989", "\U0001F438", "\U0001F419", "\U0001F984",
+           "\U0001F41D", "\U0001F42C", "\U0001F985", "\U0001F43A"]
+
+
+def set_avatar(db, student_id, emoji):
+    if emoji not in AVATARS:
+        return False
+    db.execute("UPDATE students SET avatar=? WHERE id=?", (emoji, student_id))
+    db.commit()
+    return True
+
+
+def avatar_of(row):
+    """Everyone has one, whether or not they have chosen: the fallback is
+    steady per student, so the same person is always the same animal.
+
+    Takes a student row, or any row carrying that student's avatar and id.
+    """
+    def field(name):
+        try:
+            return row[name]
+        except (IndexError, KeyError):
+            return None
+    seed = field("sid")
+    if seed is None:
+        seed = field("student_id")
+    if seed is None:
+        seed = field("id") or 0
+    return field("avatar") or AVATARS[seed % len(AVATARS)]
+
+
 GAME_BASE = 500          # points for being right at all
 GAME_SPEED = 500         # the most that answering fast can add
 GAME_CODE_CHARS = "ACDEFGHJKLMNPQRTUVWXY3479"   # no O/0, no I/1, no S/5
@@ -802,9 +854,11 @@ def answer_game(db, game, student_id, choice):
         " VALUES (?,?,?,?,?,?)",
         (game["id"], q["id"], student_id, choice, 1 if was_right else 0,
          int((game["seconds"] - left) * 1000)))
-    db.execute("UPDATE game_players SET score=score+?, correct=correct+? "
-               "WHERE game_id=? AND student_id=?",
-               (points, 1 if was_right else 0, game["id"], student_id))
+    db.execute("UPDATE game_players SET score=score+?, correct=correct+?,"
+               " run=CASE WHEN ? THEN run+1 ELSE 0 END"
+               " WHERE game_id=? AND student_id=?",
+               (points, 1 if was_right else 0, 1 if was_right else 0,
+                game["id"], student_id))
     db.commit()
     record_answer(db, student_id, q["word_id"], was_right)   # feeds the bot's revision
     return {"correct": was_right, "points": points, "answer": q["answer"]}
@@ -812,7 +866,8 @@ def answer_game(db, game, student_id, choice):
 
 def game_board(db, game_id, limit=None):
     rows = db.execute(
-        "SELECT p.*, s.name FROM game_players p JOIN students s ON s.id=p.student_id"
+        "SELECT p.*, s.name, s.avatar FROM game_players p"
+        " JOIN students s ON s.id=p.student_id"
         " WHERE p.game_id=? ORDER BY p.score DESC, s.name", (game_id,)).fetchall()
     return rows[:limit] if limit else rows
 
@@ -831,6 +886,16 @@ def advance_game(db, game_id):
                        " WHERE id=?", (nxt, iso(now()), game_id))
     else:
         db.execute("UPDATE games SET state='reveal' WHERE id=?", (game_id,))
+        _snapshot_ranks(db, game_id)
+    db.commit()
+
+
+def _snapshot_ranks(db, game_id):
+    """Who moved, and by how much, on the question just finished."""
+    for place, row in enumerate(game_board(db, game_id), 1):
+        was = row["prev_rank"]
+        db.execute("UPDATE game_players SET delta=?, prev_rank=? WHERE id=?",
+                   (0 if was is None else was - place, place, row["id"]))
     db.commit()
 
 

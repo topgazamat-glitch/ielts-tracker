@@ -848,3 +848,45 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 .gopt.off { opacity: .45; }
 .gopt:active { transform: scale(.98); }
 @media (max-width: 380px) { .gopts { grid-template-columns: 1fr; } }
+
+/* --------------------------------------------------- game: who you are */
+
+.gwho { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-4); }
+.gpick {
+  width: 54px; height: 54px; font-size: 27px; line-height: 1; padding: 0;
+  border-radius: 14px; background: var(--surface); border: 2px solid var(--line);
+  cursor: pointer;
+}
+.gpick.on { border-color: var(--brand); background: var(--accent-soft); }
+.gwhobig { font-size: 56px; line-height: 1.1; }
+.groom { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: center;
+  margin-top: 14px; }
+.gface { display: flex; align-items: center; gap: 6px; font-size: 16px;
+  color: var(--ink-2); }
+.gface b { font-size: 26px; font-weight: 400; }
+.gcell { font-size: 22px; width: 34px; }
+
+.gclock { font-size: 34px; font-weight: 700; color: var(--brand);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.gshape { display: block; font-size: 20px; opacity: .85; margin-bottom: 3px; }
+.grun { text-align: center; font-weight: 700; font-size: 19px; color: #8a6400;
+  background: var(--gold-soft); border-radius: 12px; padding: 10px;
+  margin-bottom: var(--sp-3); }
+.grunmini { font-size: 12px; color: #8a6400; font-weight: 700; }
+.gup { color: #06713f; font-weight: 700; font-size: 13px; }
+.gdown { color: var(--warn); font-weight: 700; font-size: 13px; }
+
+/* the podium: second, first, third - the way they stand on a real one */
+.podium { display: flex; align-items: flex-end; justify-content: center;
+  gap: 14px; margin: var(--sp-4) 0 var(--sp-5); }
+.pstep { text-align: center; width: min(30%, 210px); }
+.pface { font-size: clamp(34px, 6vw, 60px); line-height: 1.1; }
+.pname { font-weight: 700; font-size: clamp(14px, 2vw, 19px); margin-top: 2px;
+  overflow-wrap: anywhere; }
+.pscore { font-size: 13px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+.pblock { border-radius: 12px 12px 0 0; color: #fff; font-weight: 700;
+  font-size: 26px; display: grid; place-items: center; }
+.p1 .pblock { height: 130px; background: linear-gradient(180deg, #e3b341, #b9871d); }
+.p2 .pblock { height: 96px;  background: linear-gradient(180deg, #b9bec7, #8d939c); }
+.p3 .pblock { height: 72px;  background: linear-gradient(180deg, #cd8f52, #a06a34); }
