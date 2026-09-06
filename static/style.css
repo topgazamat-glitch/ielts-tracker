@@ -890,3 +890,10 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 .p1 .pblock { height: 130px; background: linear-gradient(180deg, #e3b341, #b9871d); }
 .p2 .pblock { height: 96px;  background: linear-gradient(180deg, #b9bec7, #8d939c); }
 .p3 .pblock { height: 72px;  background: linear-gradient(180deg, #cd8f52, #a06a34); }
+
+label.check {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--ink-2); white-space: nowrap;
+  padding: 9px 0;
+}
+label.check input { width: 17px; height: 17px; accent-color: var(--brand); }

@@ -2035,6 +2035,8 @@ revision in the bot, so a game on Tuesday changes what they are asked on Thursda
   <label class="f">Seconds each<select name="seconds">
     <option>10</option><option>15</option><option selected>20</option>
     <option>30</option></select></label>
+  <label class="check"><input type="checkbox" name="tell" value="1" checked>
+    <span>Message the class on Telegram</span></label>
   <button>Start a game</button>
 </form></div>"""
     return html_response(page("Live game", body, "Play"))
@@ -2052,7 +2054,10 @@ def act_new_game(req, db):
     game_id = core.make_game(db, int(gid), int(lid), num("q_count", 10), num("seconds", 20))
     if not game_id:
         return redirect("/play")
-    invite_to_game(db, game_id)
+    # unticking the box sets a game up without telling anybody, which is how you
+    # try one out before using it in front of a class
+    if f.get("tell", [""])[0] == "1":
+        invite_to_game(db, game_id)
     return redirect(f"/play/{game_id}")
 
 
@@ -2081,7 +2086,9 @@ def view_game_board(req, db, game_id):
     if not g:
         return not_found()
     body = f"""<h1 style="margin-bottom:4px">{E(group_name(db, g["group_id"]))}</h1>
-<p class="sub">Open your own page and tap <strong>Join the game</strong> &mdash; or use the link the bot just sent. Code <span class="kbd">{E(g["code"])}</span></p>
+<p class="sub">Students join at <strong>your site address + /s/ their own link + /game</strong>,
+or straight from the message the bot sent them.
+Code <span class="kbd">{E(g["code"])}</span></p>
 <div id="board"></div>
 <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
   <button onclick="step()" id="go">Start</button>
