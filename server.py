@@ -51,8 +51,11 @@ def page(title, body, active=""):
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
-<span class="right"><a href="/logout">Sign out</a></span></header>
-<main>{body}</main></body></html>"""
+<span class="right"><button type="button" id="musicbtn" class="musicbtn"
+  onclick="Music.toggle()" title="Music"></button>
+<a href="/logout">Sign out</a></span></header>
+<main>{body}</main>
+<script src="/static/music.js" defer></script></body></html>"""
 
 
 def stat(k, v, sub=""):
@@ -1140,8 +1143,11 @@ def student_page(title, body):
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head>
-<body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span></header>
-<main style="max-width:600px">{body}</main></body></html>"""
+<body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span>
+<span class="right"><button type="button" id="musicbtn" class="musicbtn"
+  onclick="Music.toggle()" title="Music"></button></span></header>
+<main style="max-width:600px">{body}</main>
+<script src="/static/music.js" defer></script></body></html>"""
 
 
 def student_shell(s, db, token, tab, body):
@@ -2092,12 +2098,9 @@ Code <span class="kbd">{E(g["code"])}</span></p>
 <div id="board"></div>
 <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
   <button onclick="step()" id="go">Start</button>
-  <button class="ghost" id="mus" onclick="GameMusic.toggle(this)">Music on</button>
   <button class="ghost" onclick="if(confirm('End this game?'))location.href='/play/{g["id"]}/end'">End game</button>
 </div>
-<script src="/static/gamemusic.js"></script>
 <script>
-GameMusic.label(document.getElementById('mus'));
 const GID = {g["id"]};
 let last = "", ac = null, lastTick = -1, lastState = "";
 // the projector is the thing with speakers, so the room hears the clock here
@@ -2130,7 +2133,6 @@ function render(s) {{
     if (s.state === 'reveal') beep(520, 120);
     if (s.state === 'done') {{ beep(660, 140);
       setTimeout(() => beep(880, 180), 150); setTimeout(() => beep(1100, 260), 320); }}
-    if (s.state === 'done') GameMusic.stop(); else GameMusic.play(s.state);
     lastState = s.state;
   }}
   document.getElementById('go').textContent =
@@ -2185,7 +2187,7 @@ function podium(rows) {{
     '<div class="pblock">' + (i + 1) + '</div></div>').join('') + '</div>';
 }}
 async function step() {{
-  GameMusic.play('lobby');          // the gesture browsers require for audio
+  Music.nudge();                    // the gesture browsers require for audio
   await fetch('/play/' + GID + '/next', {{method:'POST'}});
   last = "";
 }}
