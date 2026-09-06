@@ -36,7 +36,9 @@ E = html.escape
 
 # ------------------------------------------------------------------ layout
 
-def page(title, body, active=""):
+def page(title, body, active="", music=False):
+    """The teacher's shell. Silent unless a page asks otherwise: marking
+    for three hours should not come with a soundtrack."""
     def nav(href, label):
         cls = ' class="on"' if active == label else ""
         return f'<a href="{href}"{cls}>{label}</a>'
@@ -51,11 +53,12 @@ def page(title, body, active=""):
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
-<span class="right"><button type="button" id="musicbtn" class="musicbtn"
-  onclick="Music.toggle()" title="Music"></button>
+<span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
+  ' onclick="Music.toggle()" title="Music"></button>' if music else ''}
 <a href="/logout">Sign out</a></span></header>
 <main>{body}</main>
-<script src="/static/music.js" defer></script></body></html>"""
+{'<script src="/static/music.js" defer></script>' if music else ''}
+</body></html>"""
 
 
 def stat(k, v, sub=""):
@@ -2242,7 +2245,7 @@ async function step() {{
 }}
 poll();
 </script>"""
-    return html_response(page("Game", body, "Play"))
+    return html_response(page("Game", body, "Play", music=True))
 
 
 def game_state_json(req, db, game_id):
