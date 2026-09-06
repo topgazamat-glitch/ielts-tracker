@@ -87,7 +87,7 @@
 
   var PIECES = [CHOPIN, MOZART, ELISE];
 
-  function ensure() {
+  function ensure(again) {
     if (!ac) {
       var Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return false;
@@ -98,8 +98,16 @@
       soft.type = "lowpass"; soft.frequency.value = 2600;
       master.connect(soft); soft.connect(ac.destination);
     }
-    if (ac.state === "suspended") ac.resume();     // always, not just on create
-    return ac.state !== "suspended";
+    if (ac.state === "suspended") {
+      // resume() is a promise: the state is still "suspended" on the very next
+      // line, so the caller has to be told to come back rather than be told no
+      ac.resume().then(function () {
+        nextAt = ac.currentTime + 0.08;
+        if (again) { again(); }
+      });
+      return false;
+    }
+    return true;
   }
 
   // one struck string: two detuned voices, quick on, long off
@@ -159,7 +167,7 @@
 
   function start() {
     if (!on) return;
-    if (!ensure()) return;
+    if (!ensure(start)) return;      // called back once the context is awake
     if (!piece) pick();
     if (!timer) {
       nextAt = ac.currentTime + 0.08;
@@ -189,7 +197,11 @@
       if (on) { pick(); start(); } else stop();
       paint();
     },
-    nudge: function () { if (on) start(); }       // called on the first click
+    nudge: function () { if (on) start(); },      // called on the first click
+    state: function () {
+      return {on: on, audio: ac ? ac.state : "none",
+              piece: piece ? piece.name : "none", playing: !!timer};
+    }
   };
 
   document.addEventListener("DOMContentLoaded", paint);
