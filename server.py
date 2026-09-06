@@ -1065,6 +1065,14 @@ group answers correctly less than 60% of the time — worth reteaching.</p>
 <label class="f" style="flex:1">Add more words (one per line, <code>word = meaning</code>)
 <textarea name="words" rows="3" style="width:100%"></textarea></label>
 <button>Add</button></form></div>
+<details class="adder"><summary>Replace every word in this list</summary>
+<div class="card"><form method="post" action="/vocab/{wid}/replace">
+<label class="f">One per line, <code>word = meaning</code>, or
+<code>word = meaning | example sentence</code>. What students already know
+about a word is kept as long as the word itself stays on the list.
+<textarea name="words" rows="6" style="width:100%"></textarea></label>
+<div style="margin-top:10px"><button>Replace the list</button></div>
+</form></div></details>
 <div class="tablewrap"><table><tr><th>Word</th><th>Meaning</th><th>Gap mode</th>
 <th>Students who know it</th><th>Group accuracy</th><th></th></tr>
 {rows or '<tr><td colspan=5 class="sub">Empty list.</td></tr>'}</table></div>"""
@@ -1119,6 +1127,47 @@ def act_new_word_list(req, db):
     for i, (term, meaning, example) in enumerate(pairs):
         db.execute("INSERT INTO words (list_id, term, translation, example, ord)"
                    " VALUES (?,?,?,?,?)", (wid, term, meaning, example, i))
+    db.commit()
+    return redirect(f"/vocab/{wid}")
+
+
+def act_replace_words(req, db, wid):
+    """Put a whole new set of meanings on an existing list.
+
+    Retranslating a list used to mean deleting it and starting again, which
+    threw away whatever practice students had already done against those
+    words. This keeps the list and swaps its contents, carrying each
+    student's progress across to the word of the same name.
+    """
+    pairs = parse_words(req["form"].get("words", [""])[0])
+    if not pairs:
+        return redirect(f"/vocab/{wid}")
+    was = {r["term"].lower(): r["id"]
+           for r in db.execute("SELECT id, term FROM words WHERE list_id=?", (wid,))}
+    # the new words have to exist before progress can be moved onto them, and
+    # the old ones cannot be deleted until nothing points at them any more
+    for i, (term, meaning, example) in enumerate(pairs):
+        new_id = db.execute(
+            "INSERT INTO words (list_id, term, translation, example, ord)"
+            " VALUES (?,?,?,?,?)", (wid, term, meaning, example, i)).lastrowid
+        old_id = was.pop(term.lower(), None)
+        if old_id is not None:
+            db.execute("UPDATE word_progress SET word_id=? WHERE word_id=?",
+                       (new_id, old_id))
+            db.execute("UPDATE game_questions SET word_id=? WHERE word_id=?",
+                       (new_id, old_id))
+    keep = [r["id"] for r in db.execute(
+        "SELECT id FROM words WHERE list_id=? ORDER BY id DESC LIMIT ?",
+        (wid, len(pairs)))]
+    marks = ",".join("?" * len(keep))
+    db.execute("DELETE FROM word_progress WHERE word_id IN"
+               " (SELECT id FROM words WHERE list_id=? AND id NOT IN (%s))" % marks,
+               [wid] + keep)
+    db.execute("DELETE FROM game_questions WHERE word_id IN"
+               " (SELECT id FROM words WHERE list_id=? AND id NOT IN (%s))" % marks,
+               [wid] + keep)
+    db.execute("DELETE FROM words WHERE list_id=? AND id NOT IN (%s)" % marks,
+               [wid] + keep)
     db.commit()
     return redirect(f"/vocab/{wid}")
 
@@ -3125,6 +3174,7 @@ ROUTES = [
     ("POST", r"^/students/(\d+)/delete$", act_delete_student),
     ("POST", r"^/vocab/new$", act_new_word_list),
     ("POST", r"^/vocab/(\d+)/add$", act_add_words),
+    ("POST", r"^/vocab/(\d+)/replace$", act_replace_words),
 ]
 
 
