@@ -46,7 +46,10 @@ class Stream:
         out = self.raw
         for f in filters:
             if f == "FlateDecode":
-                out = zlib.decompress(out)
+                try:
+                    out = zlib.decompress(out)
+                except zlib.error:                     # trailing bytes, or clipped
+                    out = zlib.decompressobj().decompress(out)
                 params = self.dict.get("DecodeParms") or {}
                 if isinstance(params, list):
                     params = params[0] if params else {}
@@ -93,6 +96,33 @@ def undo_predictor(data, params):
         out += row
         prev = row
     return bytes(out)
+
+
+def _find_end(data, start, dictionary):
+    """Where a stream really ends when its /Length could not be trusted.
+
+    The word "endstream" can occur inside compressed bytes, so the first match
+    is not necessarily the right one. For a Flate stream the honest test is
+    whether the candidate decompresses; the first one that does is the answer.
+    """
+    filters = dictionary.get("Filter")
+    if isinstance(filters, Name):
+        filters = [filters]
+    flate = bool(filters) and "FlateDecode" in [str(f) for f in filters]
+    at = data.find(b"endstream", start)
+    last = None
+    while at != -1:
+        last = at
+        if not flate:
+            return at
+        try:
+            zlib.decompressobj().decompress(data[start:at].rstrip(b"\r\n"))
+            return at
+        except zlib.error:
+            at = data.find(b"endstream", at + 1)
+    if last is None:
+        raise ValueError("stream never ends")
+    return last
 
 
 class Lexer:
@@ -218,13 +248,13 @@ class Parser:
                 if isinstance(length, Ref) and self.doc:
                     length = self.doc.get(length)
                 if not isinstance(length, int):
-                    end = d.index(b"endstream", p)
+                    end = _find_end(d, p, out)
                     length = end - p
                 raw = d[p:p + length]
                 self.lex.pos = p + length
                 tail = self.lex.token()
                 if tail != "endstream":                # length was wrong: recover
-                    end = d.index(b"endstream", p)
+                    end = _find_end(d, p, out)
                     raw = d[p:end].rstrip(b"\r\n")
                     self.lex.pos = end + len(b"endstream")
                 return Stream(out, raw)
