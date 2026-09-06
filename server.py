@@ -2083,11 +2083,14 @@ def view_game_board(req, db, game_id):
     body = f"""<h1 style="margin-bottom:4px">{E(group_name(db, g["group_id"]))}</h1>
 <p class="sub">Open your own page and tap <strong>Join the game</strong> &mdash; or use the link the bot just sent. Code <span class="kbd">{E(g["code"])}</span></p>
 <div id="board"></div>
-<div style="display:flex;gap:8px;margin-top:18px">
+<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
   <button onclick="step()" id="go">Start</button>
+  <button class="ghost" id="mus" onclick="GameMusic.toggle(this)">Music on</button>
   <button class="ghost" onclick="if(confirm('End this game?'))location.href='/play/{g["id"]}/end'">End game</button>
 </div>
+<script src="/static/gamemusic.js"></script>
 <script>
+GameMusic.label(document.getElementById('mus'));
 const GID = {g["id"]};
 let last = "", ac = null, lastTick = -1, lastState = "";
 // the projector is the thing with speakers, so the room hears the clock here
@@ -2120,6 +2123,7 @@ function render(s) {{
     if (s.state === 'reveal') beep(520, 120);
     if (s.state === 'done') {{ beep(660, 140);
       setTimeout(() => beep(880, 180), 150); setTimeout(() => beep(1100, 260), 320); }}
+    if (s.state === 'done') GameMusic.stop(); else GameMusic.play(s.state);
     lastState = s.state;
   }}
   document.getElementById('go').textContent =
@@ -2144,7 +2148,7 @@ function render(s) {{
         '<div class="gword">' + esc(s.answer_text) + '</div>' +
         '<div class="gsmall">' + esc(s.term) + '</div></div>' + board(s.board);
   }} else {{
-    h = podium(s.board) + board(s.board.slice(3));
+    h = podium(s.board) + board(s.board.slice(3), 4);
   }}
   if (h !== last) {{ document.getElementById('board').innerHTML = h; last = h; }}
 }}
@@ -2174,8 +2178,9 @@ function podium(rows) {{
     '<div class="pblock">' + (i + 1) + '</div></div>').join('') + '</div>';
 }}
 async function step() {{
+  GameMusic.play('lobby');          // the gesture browsers require for audio
   await fetch('/play/' + GID + '/next', {{method:'POST'}});
-  last = ""; 
+  last = "";
 }}
 poll();
 </script>"""
@@ -3133,7 +3138,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*not_found())
         with open(full, "rb") as fh:
             data = fh.read()
-        ctype = "text/css" if name.endswith(".css") else "application/octet-stream"
+        ctype = ("text/css" if name.endswith(".css")
+                 else "application/javascript" if name.endswith(".js")
+                 else "audio/mpeg" if name.endswith(".mp3")
+                 else "application/octet-stream")
         self._send(200, [("Content-Type", ctype), ("Content-Length", str(len(data))),
                          ("Cache-Control", "max-age=300")], data)
 
