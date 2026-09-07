@@ -946,3 +946,7 @@ header.top .right { display: flex; align-items: center; gap: 4px; }
   border-top: 1px solid var(--line-soft); }
 .pf-set .f { margin: 0; }
 .pf-set .sub { flex: 1; min-width: 150px; font-size: 12.5px; }
+
+.climb { display: block; width: 100%; height: auto; margin: var(--sp-4) 0 var(--sp-2);
+  border-radius: var(--r-md); }
+.pf-earned { margin: 4px 0 0; font-size: 12.5px; }

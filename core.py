@@ -307,6 +307,11 @@ def migrate(db):
         db.execute("ALTER TABLE students ADD COLUMN journey_to REAL")
     if "journey_at" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN journey_at TEXT")
+    # the climb: which camp they set out from and which one they are heading for
+    if "climb_from" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN climb_from TEXT")
+    if "climb_to" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN climb_to TEXT")
     fcols = {r["name"] for r in db.execute("PRAGMA table_info(files)")}
     if "preview" not in fcols:
         # a screen-sized copy, so grading does not pull the full page shot
@@ -1215,6 +1220,92 @@ QUOTES = [
     ("There are no shortcuts to any place worth going.", "Beverly Sills"),
     ("Be patient with yourself. Nothing in nature blooms all year.", "Unknown"),
 ]
+
+
+# The mountain. Every camp between not speaking English and the top band, in
+# the order a student actually passes them. The named levels are the ones this
+# school teaches; above them the camps are IELTS bands, because that is what a
+# student at that height is aiming at.
+CAMPS = [
+    ("beginner", "Beginner"),
+    ("elementary", "Elementary"),
+    ("pre", "Pre-Intermediate"),
+    ("inter", "Intermediate"),
+    ("upper", "Upper-Intermediate"),
+    ("b55", "IELTS 5.5"),
+    ("b60", "IELTS 6.0"),
+    ("b65", "IELTS 6.5"),
+    ("b70", "IELTS 7.0"),
+    ("b75", "IELTS 7.5"),
+    ("b80", "IELTS 8.0"),
+    ("b85", "IELTS 8.5"),
+    ("b90", "IELTS 9.0"),
+]
+CAMP_INDEX = {key: i for i, (key, _label) in enumerate(CAMPS)}
+CAMP_LABEL = dict(CAMPS)
+
+# What one camp costs. A piece of homework marked ten out of ten is worth one
+# point, a five is worth half, and twenty known words are worth one more. A term
+# of steady work is roughly one camp - which is honest: nobody climbs from
+# Beginner to band eight in a term, and pretending otherwise helps no one.
+CLIMB_PER_CAMP = 25.0
+
+
+def camp_for_level(name):
+    """The camp a class's level corresponds to, for a sensible default."""
+    return {"Beginner": "beginner", "Elementary": "elementary",
+            "Pre-Intermediate": "pre", "Intermediate": "inter",
+            "IELTS Novice": "upper", "IELTS Standard": "b60"}.get(name or "")
+
+
+def climb_points(db, student_id):
+    """Everything they have actually earned towards the next camp."""
+    row = db.execute(
+        "SELECT COALESCE(SUM(score), 0) / 10.0 pts, COUNT(*) n FROM submissions"
+        " WHERE student_id=? AND status='graded' AND score IS NOT NULL",
+        (student_id,)).fetchone()
+    words = vocab_stats(db, student_id)["known"]
+    return round(row["pts"] + words * 0.05, 2), row["n"], words
+
+
+def climb(db, student_id):
+    """Where they are on the mountain, and how they got there.
+
+    The height is earned, never claimed: it comes from marked homework and
+    words they have actually held on to. Choosing a distant goal makes the
+    climb longer, not the progress smaller.
+    """
+    s = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if not s:
+        return None
+    try:
+        frm, to = s["climb_from"], s["climb_to"]
+    except (IndexError, KeyError):
+        return None
+    if frm not in CAMP_INDEX or to not in CAMP_INDEX:
+        return None
+    start, goal = CAMP_INDEX[frm], CAMP_INDEX[to]
+    if goal <= start:
+        return None
+
+    points, graded, words = climb_points(db, student_id)
+    camps = goal - start
+    climbed = min(points / CLIMB_PER_CAMP, camps)          # never past the summit
+    here = start + climbed
+    reached = start + int(climbed)
+    nxt = min(reached + 1, goal)
+    into = (climbed - int(climbed)) if climbed < camps else 1.0
+    return {
+        "from": frm, "to": to, "start": start, "goal": goal,
+        "camps": camps, "climbed": round(climbed, 2), "here": here,
+        "percent": round(climbed / camps * 100, 1) if camps else 0,
+        "at_label": CAMP_LABEL[CAMPS[reached][0]],
+        "next_label": CAMP_LABEL[CAMPS[nxt][0]],
+        "into_next": int(round(into * 100)),
+        "points": points, "graded": graded, "words": words,
+        "to_next": round(max(0.0, (int(climbed) + 1) * CLIMB_PER_CAMP - points), 1),
+        "labels": [CAMP_LABEL[CAMPS[i][0]] for i in range(start, goal + 1)],
+    }
 
 
 def mark_score(raw):

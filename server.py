@@ -1463,13 +1463,9 @@ def standing_line(db, s):
 
 
 def portal_profile(db, s, token, flash=""):
-    """Who they are, how far along they are, and a line worth reading.
-
-    Ordered by what a student came for: themselves, then their progress, then
-    - folded away - the form for changing their details.
-    """
+    """Who they are, how far up the mountain they are, and a line worth reading."""
     quote, who = core.quote_of_the_day()
-    j = core.journey(db, s["id"])
+    c = core.climb(db, s["id"])
 
     def field(key):
         return (s[key] if key in s.keys() else None) or ""
@@ -1478,33 +1474,39 @@ def portal_profile(db, s, token, flash=""):
              if s["photo"] else
              f'<div class="pf-photo empty">{core.avatar_of(s)}</div>')
 
-    def scores(name, current):
+    here = field("climb_from") or core.camp_for_level(
+        core.level_name(db, core.level_of(db, s["group_id"])))
+
+    def camps(name, current):
         opts = ['<option value="">&mdash;</option>']
-        n = 10.0
-        while n >= 1:
-            sel = " selected" if current is not None and abs(current - n) < 0.01 else ""
-            opts.append(f'<option value="{n:g}"{sel}>{n:g}</option>')
-            n -= 0.5
+        for key, label in core.CAMPS:
+            sel = " selected" if key == current else ""
+            opts.append(f'<option value="{key}"{sel}>{E(label)}</option>')
         return f'<select name="{name}">{"".join(opts)}</select>'
 
-    if j:
-        left = round(j["goal"] - j["now"], 2)
-        tail = ("You have arrived &mdash; set a higher goal when you are ready."
-                if left <= 0 else f"{left:g} to go")
-        hero = (
+    if c:
+        if c["climbed"] >= c["camps"]:
+            line = "You are standing on the summit. Choose a higher one."
+        else:
+            line = (f'{c["to_next"]:g} more points and you reach '
+                    f'<strong>{E(c["next_label"])}</strong>')
+        body = (
             '<div class="pf-figure">'
-            f'<span class="pf-pct">{j["percent"]}<small>%</small></span>'
-            f'<span class="pf-of">of the way from {j["start"]:g} to {j["goal"]:g}</span>'
-            '</div>'
-            f'<div class="pf-bar"><i style="width:{j["percent"]}%"></i></div>'
-            f'<p class="sub pf-now">Averaging <strong>{j["now"]:g}</strong> '
-            f'right now &middot; {tail}</p>'
-            + charts.journey_chart(j))
+            f'<span class="pf-pct">{c["percent"]:g}<small>%</small></span>'
+            f'<span class="pf-of">of the way from {E(c["labels"][0])} '
+            f'to {E(c["labels"][-1])}</span></div>'
+            f'<div class="pf-bar"><i style="width:{c["percent"]:g}%"></i></div>'
+            f'<p class="sub pf-now">Camp reached: <strong>{E(c["at_label"])}</strong>'
+            f' &middot; {line}</p>'
+            + charts.mountain(c)
+            + '<p class="sub pf-earned">Earned by '
+              f'{c["graded"]} marked piece{"" if c["graded"] == 1 else "s"} of homework'
+              f' and {c["words"]} word{"" if c["words"] == 1 else "s"} you have kept.'
+              ' Nothing you type moves the climber &mdash; only work does.</p>')
     else:
-        hero = ('<p class="sub" style="margin:0 0 4px">Say where you started and where '
-                'you are heading, and your progress gets drawn here from your marked '
-                'work. Nothing you type moves the line &mdash; only the homework you '
-                'hand in.</p>')
+        body = ('<p class="sub" style="margin:0 0 4px">Choose the camp you set out '
+                'from and the one you are climbing towards. Your homework and the '
+                'words you learn carry the climber up &mdash; nothing you type does.</p>')
 
     return f"""{flash}
 <div class="pf-head">{photo}
@@ -1514,16 +1516,13 @@ def portal_profile(db, s, token, flash=""):
 </div>
 
 <div class="card pf-card">
-  <h3 class="pf-title">Your journey</h3>
-  {hero}
+  <h3 class="pf-title">Your climb</h3>
+  {body}
   <form method="post" action="/s/{E(token)}/profile" enctype="multipart/form-data"
         class="pf-set">
-    <label class="f">Started at{scores("journey_from",
-        s["journey_from"] if "journey_from" in s.keys() else None)}</label>
-    <label class="f">Aiming for{scores("journey_to",
-        s["journey_to"] if "journey_to" in s.keys() else None)}</label>
+    <label class="f">I started at{camps("climb_from", here)}</label>
+    <label class="f">I am climbing to{camps("climb_to", field("climb_to"))}</label>
     <button>Save</button>
-    <span class="sub">out of ten, as your homework is marked</span>
   </form>
 </div>
 
@@ -1792,12 +1791,14 @@ def act_student_profile(req, db, token):
             sets.append(key + "=?")
             args.append(value)
 
-    if "journey_from" in fields or "journey_to" in fields:
-        frm = core.mark_score((fields.get("journey_from", [""])[0] or "").strip())
-        to = core.mark_score((fields.get("journey_to", [""])[0] or "").strip())
-        if frm is not None and to is not None and to <= frm:
-            to = None                       # a goal behind you is not a goal
-        sets += ["journey_from=?", "journey_to=?", "journey_at=COALESCE(journey_at, ?)"]
+    if "climb_from" in fields or "climb_to" in fields:
+        def camp(key):
+            v = (fields.get(key, [""])[0] or "").strip()
+            return v if v in core.CAMP_INDEX else None
+        frm, to = camp("climb_from"), camp("climb_to")
+        if frm and to and core.CAMP_INDEX[to] <= core.CAMP_INDEX[frm]:
+            to = None                       # a summit below you is not a summit
+        sets += ["climb_from=?", "climb_to=?", "journey_at=COALESCE(journey_at, ?)"]
         args += [frm, to, core.iso(core.now())]
 
     if sets:
