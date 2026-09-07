@@ -927,3 +927,22 @@ header.top .right { display: flex; align-items: center; gap: 4px; }
   color: var(--ink); }
 .quote span { display: block; margin-top: 8px; font-size: 13px; color: var(--ink-3);
   letter-spacing: .04em; }
+
+.pf-card { padding: var(--sp-5); }
+.pf-title { margin: 0 0 14px; font-size: 13px; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--ink-3); font-weight: 600; }
+.pf-figure { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pf-pct { font-size: 54px; font-weight: 700; line-height: 1;
+  letter-spacing: -.04em; color: var(--brand); font-variant-numeric: tabular-nums; }
+.pf-pct small { font-size: 24px; font-weight: 600; margin-left: 1px; }
+.pf-of { font-size: 15px; color: var(--ink-2); }
+.pf-bar { height: 10px; border-radius: 999px; background: var(--surface-2);
+  margin: 14px 0 0; overflow: hidden; }
+.pf-bar i { display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand-deep), var(--brand)); }
+.pf-now { margin: 8px 0 4px; }
+.pf-set { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  margin-top: var(--sp-4); padding-top: var(--sp-4);
+  border-top: 1px solid var(--line-soft); }
+.pf-set .f { margin: 0; }
+.pf-set .sub { flex: 1; min-width: 150px; font-size: 12.5px; }
