@@ -1314,9 +1314,10 @@ def offer_groups(db, token, tid, lang, level_id):
         set_state(db, tid, "name", with_lang(db, tid, {"group_id": groups[0]["id"]}))
         return send(token, tid, t(lang, "ask_name"))
     if not groups:
-        # say so and offer a way back, rather than silently re-listing levels
-        return send(token, tid, t(lang, "no_groups"),
-                    keyboard=[[{"text": t(lang, "back"), "callback_data": "lv:back"}]])
+        # should not happen - a level is only offered when a class sits under
+        # it - but if the two ever disagree, joining must still work, so fall
+        # back to every class rather than dead-ending on "ask your teacher"
+        return offer_all_groups(db, token, tid, lang)
     kb = [[{"text": g["name"], "callback_data": f"gr:{g['id']}"}] for g in groups]
     kb.append([{"text": t(lang, "back"), "callback_data": "lv:back"}])
     head = (lvl + " \u2014 " if lvl else "") + t(lang, "pick_group")
@@ -2053,7 +2054,15 @@ def main():
     set_commands(token)
     print(f"Bot @{username} polling. Ctrl-C to stop.")
 
-    offset = None
+    # Where we got to, kept in the database rather than in memory. Telegram
+    # replays anything it has not seen confirmed, so a restart with no offset -
+    # a deploy, a crash, a dropped container - makes it deliver the last batch
+    # all over again, and the student is asked to choose their level twice.
+    db = core.connect()
+    offset = core.meta_get(db, "bot_offset")
+    db.close()
+    offset = int(offset) if offset and str(offset).isdigit() else None
+
     while True:
         res = call(token, "getUpdates", offset=offset, timeout=50,
                    allowed_updates=["message", "callback_query"])
@@ -2064,6 +2073,7 @@ def main():
         try:
             for upd in res["result"]:
                 offset = upd["update_id"] + 1
+                core.meta_set(db, "bot_offset", str(offset))
                 try:
                     if "callback_query" in upd:
                         handle_callback(db, token, upd["callback_query"])
