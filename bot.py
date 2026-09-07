@@ -613,6 +613,45 @@ def set_state(db, tid, step, payload=None):
     db.commit()
 
 
+def remember_lang(db, tid, lang):
+    """Hold a language choice made before there is a student row to put it on."""
+    step, payload = get_state(db, tid)
+    payload["lang"] = lang
+    set_state(db, tid, step, payload)
+
+
+def with_lang(db, tid, payload):
+    """Carry a pending language choice into the next step of signing up.
+
+    set_state replaces the payload wholesale, so anything already waiting there
+    - the language they picked two taps ago - has to be copied across, or the
+    student ends up registered in English however they answered.
+    """
+    _step, old = get_state(db, tid)
+    if old.get("lang") and "lang" not in payload:
+        payload = dict(payload, lang=old["lang"])
+    return payload
+
+
+def lang_of(db, tid, student=None):
+    """Their language, whether or not they have joined yet.
+
+    Someone choosing Uzbek on their first message has no student row to store
+    it against, so it waits in the pending state until they join. Without this
+    the whole sign-up ran in English however they answered.
+    """
+    if student is None:
+        student = student_of(db, tid)
+    if student:
+        try:
+            if student["lang"]:
+                return student["lang"]
+        except (IndexError, KeyError):
+            pass
+    _step, payload = get_state(db, tid)
+    return payload.get("lang") or "en"
+
+
 def student_of(db, tid):
     return db.execute("SELECT * FROM students WHERE telegram_id=?", (tid,)).fetchone()
 
@@ -1272,7 +1311,7 @@ def offer_groups(db, token, tid, lang, level_id):
     lvl = core.level_name(db, level_id) or ""
     if len(groups) == 1:
         # nothing to choose between - go straight to the name
-        set_state(db, tid, "name", {"group_id": groups[0]["id"]})
+        set_state(db, tid, "name", with_lang(db, tid, {"group_id": groups[0]["id"]}))
         return send(token, tid, t(lang, "ask_name"))
     if not groups:
         # say so and offer a way back, rather than silently re-listing levels
@@ -1295,10 +1334,14 @@ def join_group_row(db, token, tid, name, g, lang):
             "INSERT INTO students (telegram_id, name, group_id, created_at) VALUES (?,?,?,?)",
             (tid, name, g["id"], core.iso(core.now())))
     db.commit()
+    if lang and lang != "en":
+        db.execute("UPDATE students SET lang=? WHERE telegram_id=?", (lang, tid))
+        db.commit()
     set_state(db, tid, None)
     send(token, tid, t(lang, "joined", group=g["name"]), markup=main_keyboard(lang))
-    send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
     student = student_of(db, tid)
+    if not (student and student["lang"]):
+        send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
     send(token, tid, t(lang, "welcome2"))
     if student:
         send_my_page(db, token, student)
@@ -1342,7 +1385,7 @@ def handle_text(db, token, msg):
     text = (msg.get("text") or "").strip()
     text = BUTTON_COMMANDS.get(text, text)
     student = student_of(db, tid)
-    lang = student["lang"] if student else "en"
+    lang = lang_of(db, tid, student)
     if student and not student["active"] and not text.startswith("/start"):
         return send(token, tid, t(lang, "paused"))
     step, payload = get_state(db, tid)
@@ -1405,9 +1448,12 @@ def handle_text(db, token, msg):
             if g:
                 carried["code"] = g["join_code"]
         if carried.get("code"):
-            set_state(db, tid, "name", carried)
+            set_state(db, tid, "name", with_lang(db, tid, carried))
             return send(token, tid, t(lang, "ask_name"))
         set_state(db, tid, None)
+        if not student:
+            # first contact: settle the language before anything is said in it
+            return send(token, tid, t(lang, "lang_ask"), keyboard=lang_keyboard())
         return offer_levels(db, token, tid, lang)
 
     if text.startswith("/language"):
@@ -1681,9 +1727,15 @@ def handle_callback(db, token, cq):
 
     if data.startswith("lang:"):
         lang = data.split(":", 1)[1]
-        db.execute("UPDATE students SET lang=? WHERE telegram_id=?", (lang, tid))
-        db.commit()
-        return send(token, tid, t(lang, "lang_set"), markup=main_keyboard(lang))
+        student = student_of(db, tid)
+        if student:
+            db.execute("UPDATE students SET lang=? WHERE telegram_id=?", (lang, tid))
+            db.commit()
+            return send(token, tid, t(lang, "lang_set"), markup=main_keyboard(lang))
+        # not joined yet: keep the choice and carry straight on with signing up
+        remember_lang(db, tid, lang)
+        send(token, tid, t(lang, "lang_set"))
+        return offer_levels(db, token, tid, lang)
 
     if data.startswith("g:") and is_teacher(db, tid):
         _, sub_id, score = data.split(":")
@@ -1704,7 +1756,7 @@ def handle_callback(db, token, cq):
 
     if data.startswith("lv:"):
         student = student_of(db, tid)
-        lang = student["lang"] if student else "en"
+        lang = lang_of(db, tid, student)
         arg = data.split(":")[1]
         if arg == "back":
             return offer_levels(db, token, tid, lang)
@@ -1714,9 +1766,9 @@ def handle_callback(db, token, cq):
 
     if data.startswith("gr:"):
         student = student_of(db, tid)
-        lang = student["lang"] if student else "en"
+        lang = lang_of(db, tid, student)
         gid = int(data.split(":")[1])
-        set_state(db, tid, "name", {"group_id": gid})
+        set_state(db, tid, "name", with_lang(db, tid, {"group_id": gid}))
         return send(token, tid, t(lang, "ask_name"))
 
     if data.startswith("hk:"):
