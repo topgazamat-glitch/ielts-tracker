@@ -85,8 +85,16 @@ def load_config():
 
         "timezone_offset_hours": 5,  # Tashkent
     }
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH) as fh:
+    # config.json lives beside the source, but a run pointed at its own data
+    # directory is a copy - a test, a spare checkout - and must not inherit the
+    # real bot token from it. Two programs polling one Telegram account both
+    # receive every message and both answer it, which is how a bot ends up
+    # saying everything twice. A hosted deploy passes its token in the
+    # environment below, so it is unaffected.
+    own_data = os.environ.get("DATA_DIR")
+    path = os.path.join(own_data, "config.json") if own_data else CONFIG_PATH
+    if os.path.exists(path):
+        with open(path) as fh:
             cfg.update(json.load(fh))
     # environment always wins, so a hosted deploy never needs the file
     def env(name, key, cast=str):
