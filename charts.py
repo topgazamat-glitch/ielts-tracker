@@ -232,3 +232,63 @@ def bars_h(rows, label="Standings"):
             parts.append(f'<text class="ax" x="{left + width + 8}" y="{y + 11}">{value}</text>')
     return (f'<svg class="chart" viewBox="0 0 {W} {height}" role="img" '
             f'aria-label="{escape(label)}">{"".join(parts)}</svg>')
+
+
+def journey_chart(j, w=560, h=220):
+    """Their own road: where they started, where they are going, and the real
+    marked work in between.
+
+    The two horizontal lines are the promises they made themselves. The line
+    that wanders between them is their actual average, week by week, so the
+    picture cannot flatter them.
+    """
+    pad_l, pad_r, pad_t, pad_b = 44, 16, 22, 30
+    lo = min(j["start"], min(p["score"] for p in j["points"])) - 0.6
+    hi = max(j["goal"], max(p["score"] for p in j["points"])) + 0.6
+    lo, hi = max(0, lo), min(10, hi)
+    if hi - lo < 1:
+        hi = lo + 1
+
+    def y(v):
+        return pad_t + (hi - v) / (hi - lo) * (h - pad_t - pad_b)
+
+    pts = j["points"]
+    def x(i):
+        if len(pts) == 1:
+            return pad_l + (w - pad_l - pad_r) / 2
+        return pad_l + i * (w - pad_l - pad_r) / (len(pts) - 1)
+
+    out = [f'<svg class="chart" viewBox="0 0 {w} {h}" width="100%" '
+           f'preserveAspectRatio="xMidYMid meet" role="img" '
+           f'aria-label="Your progress from {j["start"]:g} towards {j["goal"]:g}">']
+
+    # the band between start and goal - the ground they mean to cover
+    out.append(f'<rect x="{pad_l}" y="{y(j["goal"]):.1f}" width="{w-pad_l-pad_r}" '
+               f'height="{max(0, y(j["start"]) - y(j["goal"])):.1f}" '
+               f'fill="var(--accent-soft)" opacity=".55"/>')
+    for value, label, colour, dash in (
+            (j["goal"], "goal %g" % j["goal"], "var(--ok)", "5 4"),
+            (j["start"], "start %g" % j["start"], "var(--ink-3)", "3 4")):
+        out.append(f'<line x1="{pad_l}" y1="{y(value):.1f}" x2="{w-pad_r}" '
+                   f'y2="{y(value):.1f}" stroke="{colour}" stroke-width="1.5" '
+                   f'stroke-dasharray="{dash}"/>')
+        out.append(f'<text x="{pad_l-8}" y="{y(value)+4:.1f}" text-anchor="end" '
+                   f'font-size="11" fill="{colour}">{label}</text>')
+
+    line = " ".join("%.1f,%.1f" % (x(i), y(p["score"])) for i, p in enumerate(pts))
+    if len(pts) > 1:
+        out.append(f'<polyline points="{line}" fill="none" stroke="var(--accent)" '
+                   f'stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>')
+    ring = ' stroke="var(--surface)" stroke-width="2"'
+    for i, p in enumerate(pts):
+        last = i == len(pts) - 1
+        out.append('<circle cx="%.1f" cy="%.1f" r="%d" fill="var(--accent)"%s/>'
+                   % (x(i), y(p["score"]), 5 if last else 3, ring if last else ""))
+    here = pts[-1]
+    out.append(f'<text x="{x(len(pts)-1):.1f}" y="{y(here["score"])-12:.1f}" '
+               f'text-anchor="middle" font-size="12" font-weight="700" '
+               f'fill="var(--accent)">{here["score"]:g}</text>')
+    out.append(f'<text x="{pad_l}" y="{h-8}" font-size="11" fill="var(--ink-3)">'
+               f'{len(pts)} week{"" if len(pts) == 1 else "s"} of marked work</text>')
+    out.append("</svg>")
+    return "".join(out)

@@ -1213,7 +1213,8 @@ def student_shell(s, db, token, tab, body):
     """One page, four tabs, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
     tabs = [("home", "Homework"), ("materials", "Materials"),
-            ("progress", "Progress"), ("class", "Class"), ("goal", "My goal")]
+            ("progress", "Progress"), ("class", "Class"), ("goal", "My goal"),
+            ("profile", "Profile")]
     nav = "".join(
         f'<a class="tab{" on" if tab == key else ""}" '
         f'href="/s/{E(token)}?tab={key}">{label}</a>' for key, label in tabs)
@@ -1461,6 +1462,87 @@ def standing_line(db, s):
     return (f'<div class="standing"><strong>You are {place}.</strong> {tail}</div>')
 
 
+def portal_profile(db, s, token, flash=""):
+    """Who they are, a line worth reading, and how far along they are."""
+    quote, who = core.quote_of_the_day()
+    j = core.journey(db, s["id"])
+
+    photo = (f'<img class="pf-photo" src="/s/{E(token)}/photo" alt="">'
+             if s["photo"] else
+             f'<div class="pf-photo empty">{core.avatar_of(s)}</div>')
+
+    def field(name, label, value, hint="", kind="text"):
+        return (f'<label class="f">{label}'
+                f'<input name="{name}" type="{kind}" value="{E(value or "")}"'
+                f'{f" placeholder={hint!r}" if hint else ""}></label>')
+
+    if j:
+        left = round(j["goal"] - j["now"], 2)
+        if left <= 0:
+            standing = ("You have reached what you set out for. "
+                        "Set a higher goal when you are ready.")
+        else:
+            standing = (f'{j["percent"]}% of the way from {j["start"]:g} to '
+                        f'{j["goal"]:g}. {left:g} to go.')
+        chart = (f'<div class="card"><h3 style="margin:0 0 4px">Your journey</h3>'
+                 f'<p class="sub" style="margin:0 0 10px">{standing}</p>'
+                 f'{charts.journey_chart(j)}</div>')
+    else:
+        chart = ('<div class="card"><p class="sub" style="margin:0">Set where you are '
+                 'starting from and where you want to get to, and your progress will '
+                 'be drawn here from your marked work. It needs at least one graded '
+                 'piece of homework to show anything.</p></div>')
+
+    def scores(name, current):
+        opts = ['<option value="">&mdash;</option>']
+        n = 10.0
+        while n >= 1:
+            sel = " selected" if current is not None and abs(current - n) < 0.01 else ""
+            opts.append(f'<option value="{n:g}"{sel}>{n:g}</option>')
+            n -= 0.5
+        return f'<select name="{name}" class="mark">{"".join(opts)}</select>'
+
+    return f"""{flash}
+<div class="pf-head">{photo}
+  <div><h2 style="margin:0">{E(s["name"])}</h2>
+    <p class="sub" style="margin:2px 0 0">{E(group_name(db, s["group_id"]))}
+      &middot; {E(core.level_name(db, core.level_of(db, s["group_id"])) or "")}</p></div>
+</div>
+
+<div class="quote">
+  <p>&ldquo;{E(quote)}&rdquo;</p>
+  <span>{E(who)}</span>
+</div>
+
+{chart}
+
+<div class="card"><form method="post" action="/s/{E(token)}/profile"
+      enctype="multipart/form-data">
+  <h3 style="margin:0 0 12px">Your details</h3>
+  <div class="inline">
+    {field("name", "Name", s["name"])}
+    {field("phone", "Phone (optional)", s["phone"] if "phone" in s.keys() else "",
+           "+998 ..", "tel")}
+  </div>
+  <label class="f" style="margin-top:10px">About you (optional)
+    <input name="about" value="{E((s["about"] if "about" in s.keys() else "") or "")}"
+           placeholder="Why you are learning English"></label>
+  <label class="f" style="margin-top:10px">Your photo (optional)
+    <input type="file" name="photo" accept="image/*"></label>
+
+  <h3 style="margin:22px 0 6px">Your journey</h3>
+  <p class="sub" style="margin:0 0 10px">Out of ten, the same scale your homework is
+  marked on. Be honest about the start &mdash; the line only means something if it is.</p>
+  <div class="inline">
+    <label class="f">Starting from{scores("journey_from",
+        s["journey_from"] if "journey_from" in s.keys() else None)}</label>
+    <label class="f">Aiming for{scores("journey_to",
+        s["journey_to"] if "journey_to" in s.keys() else None)}</label>
+  </div>
+  <div style="margin-top:14px"><button>Save</button></div>
+</form></div>"""
+
+
 def portal_class(db, s, token):
     rows = core.rating_rows(db, s["group_id"])
     medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
@@ -1675,6 +1757,44 @@ works it out: a quarter rounds up to the next half band.</p>
 </form></div>"""
 
 
+def act_student_profile(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return redirect(f"/s/{token}")
+    fields, files = req["files"]
+
+    def one(key, limit):
+        return (fields.get(key, [""])[0] or "").strip()[:limit] or None
+
+    name = one("name", 60) or s["name"]        # never let them erase themselves
+    frm = core.mark_score(one("journey_from", 8))
+    to = core.mark_score(one("journey_to", 8))
+    if frm is not None and to is not None and to <= frm:
+        to = None                              # a goal behind you is not a goal
+    db.execute(
+        "UPDATE students SET name=?, phone=?, about=?, journey_from=?, journey_to=?,"
+        " journey_at=COALESCE(journey_at, ?) WHERE id=?",
+        (name, one("phone", 30), one("about", 160), frm, to,
+         core.iso(core.now()), s["id"]))
+    db.commit()
+
+    for filename, blob in files[:1]:
+        w, h, kind = uploads.image_size(blob)
+        if kind:
+            fname = f"photo_{s['id']}_{int(core.now().timestamp())}." + \
+                    ("png" if kind == "png" else "jpg")
+            with open(os.path.join(core.UPLOAD_DIR, fname), "wb") as fh:
+                fh.write(blob)
+            old = s["photo"]
+            db.execute("UPDATE students SET photo=? WHERE id=?", (fname, s["id"]))
+            db.commit()
+            if old and old != fname:
+                path = os.path.join(core.UPLOAD_DIR, old)
+                if os.path.exists(path):
+                    os.remove(path)
+    return redirect(f"/s/{token}?tab=profile&saved=1")
+
+
 def act_student_goal(req, db, token):
     s = core.student_by_token(db, token)
     if not s:
@@ -1716,6 +1836,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_class(db, s, token)
     elif tab == "goal":
         body = portal_goal(db, s, token, flash)
+    elif tab == "profile":
+        body = portal_profile(db, s, token, flash)
     else:
         tab = "home"
         body = portal_home(db, s, token, flash)
@@ -3279,6 +3401,8 @@ class Handler(BaseHTTPRequestHandler):
                      if pages and pages != n else "")
             flash = (f'<div class="flash">Sent {E(n)} page(s) to your teacher.'
                      f'{E(total)}{E(extra)}</div>')
+        elif query.get("saved"):
+            flash = '<div class="flash">Saved.</div>'
         elif query.get("e") == ["small"]:
             flash = ('<div class="flash err">Those photos are too small or blurry to read. '
                      'Retake them: page flat, camera directly above, good light.</div>')
@@ -3452,6 +3576,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_answer(
                     {"query": {}, "form": form}, db, token))
+            finally:
+                db.close()
+
+        if path.startswith("/s/") and path.endswith("/profile"):
+            token = path.split("/")[2]
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_student_profile(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db, token))
             finally:
                 db.close()
 

@@ -296,6 +296,17 @@ def migrate(db):
         db.execute("ALTER TABLE students ADD COLUMN photo TEXT")
     if "avatar" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN avatar TEXT")
+    if "phone" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN phone TEXT")
+    if "about" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN about TEXT")
+    # where they say they started and where they are heading, out of ten
+    if "journey_from" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN journey_from REAL")
+    if "journey_to" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN journey_to REAL")
+    if "journey_at" not in cols:
+        db.execute("ALTER TABLE students ADD COLUMN journey_at TEXT")
     fcols = {r["name"] for r in db.execute("PRAGMA table_info(files)")}
     if "preview" not in fcols:
         # a screen-sized copy, so grading does not pull the full page shot
@@ -1161,6 +1172,101 @@ def rating_rows(db, group_id=None):
     for i, r in enumerate(rows, 1):
         r["rank"] = i
     return rows
+
+
+# Quotes for the student page. One a day, the same one for everybody, so a
+# class can talk about it. Kept short and about work rather than destiny.
+QUOTES = [
+    ("It always seems impossible until it is done.", "Nelson Mandela"),
+    ("The expert in anything was once a beginner.", "Helen Hayes"),
+    ("Little by little, a little becomes a lot.", "Tanzanian proverb"),
+    ("I have not failed. I have found ten thousand ways that will not work.",
+     "Thomas Edison"),
+    ("Practice is the hardest part of learning.", "Zeami"),
+    ("A river cuts through rock not because of its power, but its persistence.",
+     "Jim Watkins"),
+    ("The beautiful thing about learning is that nobody can take it from you.",
+     "B. B. King"),
+    ("Fall seven times, stand up eight.", "Japanese proverb"),
+    ("You do not have to be great to start, but you have to start to be great.",
+     "Zig Ziglar"),
+    ("Knowledge is a treasure, but practice is the key to it.", "Lao Tzu"),
+    ("The secret of getting ahead is getting started.", "Mark Twain"),
+    ("A year from now you will wish you had started today.", "Karen Lamb"),
+    ("Learning another language is like becoming another person.", "Haruki Murakami"),
+    ("Small daily improvements are the key to staggering long-term results.",
+     "Robin Sharma"),
+    ("If you are working on something you care about, you do not have to be pushed.",
+     "Steve Jobs"),
+    ("Doing your best matters more than being the best.", "Unknown"),
+    ("Language is the road map of a culture.", "Rita Mae Brown"),
+    ("Mistakes are proof that you are trying.", "Unknown"),
+    ("The more you read, the more things you will know.", "Dr. Seuss"),
+    ("Slow progress is still progress.", "Unknown"),
+    ("Do not wish it were easier; wish you were better.", "Jim Rohn"),
+    ("One language sets you in a corridor for life. Two open every door along the way.",
+     "Frank Smith"),
+    ("Effort only fully releases its reward after a person refuses to quit.",
+     "Napoleon Hill"),
+    ("Study without desire spoils the memory.", "Leonardo da Vinci"),
+    ("What we learn with pleasure we never forget.", "Alfred Mercier"),
+    ("Courage is not having the strength to go on; it is going on when you have none.",
+     "Theodore Roosevelt"),
+    ("There are no shortcuts to any place worth going.", "Beverly Sills"),
+    ("Be patient with yourself. Nothing in nature blooms all year.", "Unknown"),
+]
+
+
+def mark_score(raw):
+    """A mark out of ten, in halves, or None. Anything else is refused."""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= v <= 10 or abs(v * 2 - round(v * 2)) > 1e-9:
+        return None
+    return round(v, 1)
+
+
+def quote_of_the_day(cfg=None):
+    """The same quote for everyone today, a different one tomorrow."""
+    cfg = cfg or load_config()
+    day = local_day(now(), cfg)
+    ordinal = datetime.strptime(day, "%Y-%m-%d").toordinal()
+    return QUOTES[ordinal % len(QUOTES)]
+
+
+def journey(db, student_id):
+    """How far along their own road they are.
+
+    They say where they started and where they are going; the middle is their
+    real marked work, so the line cannot be talked up. Returns None until they
+    have set it and have something graded to show.
+    """
+    s = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if not s:
+        return None
+    try:
+        start, goal = s["journey_from"], s["journey_to"]
+    except (IndexError, KeyError):
+        return None
+    if start is None or goal is None or goal <= start:
+        return None
+
+    weeks = db.execute(
+        "SELECT strftime('%Y-%W', created_at) wk, AVG(score) avg, COUNT(*) n"
+        " FROM submissions WHERE student_id=? AND status='graded' AND score IS NOT NULL"
+        " GROUP BY wk ORDER BY wk", (student_id,)).fetchall()
+    points = [{"week": r["wk"], "score": round(r["avg"], 2), "count": r["n"]}
+              for r in weeks]
+    if not points:
+        return None
+    now_score = points[-1]["score"]
+    span = goal - start
+    done = max(0.0, min(1.0, (now_score - start) / span)) if span else 0.0
+    return {"start": start, "goal": goal, "now": now_score,
+            "percent": int(round(done * 100)), "points": points,
+            "set_at": s["journey_at"]}
 
 
 def next_step(db, student_id):
