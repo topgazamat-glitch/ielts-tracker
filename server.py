@@ -8,6 +8,7 @@ import time
 import os
 import re
 import secrets
+import traceback
 import urllib.parse
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -366,13 +367,19 @@ def restore_photo(name):
         return False
     db = core.connect()
     row = db.execute(
-        "SELECT telegram_file_id FROM files WHERE (filename=? OR preview=?)"
-        " AND telegram_file_id IS NOT NULL LIMIT 1", (name, name)).fetchone()
+        "SELECT filename, telegram_file_id, preview, preview_id FROM files"
+        " WHERE filename=? OR preview=? LIMIT 1", (name, name)).fetchone()
     if not row:
+        return False
+    # a screen-sized copy has its own id; asking for the full page instead would
+    # pull megabytes to show a thumbnail
+    wanted = (row["preview_id"] if row["preview"] == name
+              else row["telegram_file_id"])
+    if not wanted:
         return False
     try:
         import bot
-        if not bot.download_photo(token, row["telegram_file_id"], name):
+        if not bot.download_photo(token, wanted, name):
             return False
     except Exception:
         return False
@@ -2127,15 +2134,18 @@ def invite_to_game(db, game_id):
         return
     try:
         import bot
-        for st in db.execute(
-            "SELECT * FROM students WHERE group_id=? AND active=1"
-            " AND telegram_id IS NOT NULL", (g["group_id"],)).fetchall():
-            base = core.meta_get(db, "site_url") or ""
+    except Exception:
+        return
+    base = core.meta_get(db, "site_url") or ""
+    for st in db.execute(
+        "SELECT * FROM students WHERE group_id=? AND active=1"
+        " AND telegram_id IS NOT NULL", (g["group_id"],)).fetchall():
+        try:
             url = base + "/s/" + core.student_token(db, st["id"]) + "/game"
             bot.send(token, st["telegram_id"],
                      bot.t(st["lang"] or "en", "game_invite", url=url))
-    except Exception:
-        pass
+        except Exception:
+            continue          # a blocked bot is one student, not the class
 
 
 def view_game_board(req, db, game_id):
@@ -2820,7 +2830,12 @@ def act_grade(req, db):
             (sid, int(t)),
         )
     db.commit()
-    notify_graded(db, sid)
+    try:
+        notify_graded(db, sid)
+    except Exception:
+        # the score is saved either way; telling the student is best effort and
+        # must never put an error page in front of the person marking
+        traceback.print_exc()
     return redirect("/queue")
 
 

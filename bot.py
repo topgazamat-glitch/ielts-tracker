@@ -53,6 +53,7 @@ T = {
         "new_assignment": "New assignment: {title}{due}\nSend a photo when it is ready.",
         "homework_list": "Homework{due}:",
         'hw_none': 'Nothing to do right now.',
+        'hw_closed': 'Nothing open right now. The last homework was due {due} and has closed. Ask your teacher if you still need to send it.',
         'hw_head': 'Homework{due} — {done}/{total} done',
         'hw_left': 'Still to send: {items}',
         'hw_all': 'All done. Nicely finished.',
@@ -161,6 +162,7 @@ T = {
         "new_assignment": "Новое задание: {title}{due}\nОтправьте фото, когда будет готово.",
         "homework_list": "Домашнее задание{due}:",
         'hw_none': 'Сейчас заданий нет.',
+        'hw_closed': 'Сейчас ничего не открыто. Последнее задание было до {due} и уже закрыто. Спросите преподавателя, если всё ещё нужно сдать.',
         'hw_head': 'Домашнее задание{due} — сделано {done}/{total}',
         'hw_left': 'Осталось отправить: {items}',
         'hw_all': 'Всё сделано. Отлично.',
@@ -269,6 +271,7 @@ T = {
         "new_assignment": "Yangi topshiriq: {title}{due}\nTayyor bo'lganda rasmini yuboring.",
         "homework_list": "Uy vazifasi{due}:",
         'hw_none': "Hozircha topshiriq yo'q.",
+        'hw_closed': "Hozir ochiq vazifa yo'q. Oxirgi vazifa {due} gacha edi va yopildi. Hali topshirish kerak bo'lsa, o'qituvchidan so'rang.",
         'hw_head': 'Uy vazifasi{due} — {done}/{total} bajarildi',
         'hw_left': 'Yuborish kerak: {items}',
         'hw_all': 'Hammasi bajarildi. Barakalla.',
@@ -497,14 +500,15 @@ def grade_submission(db, token, sub_id, score):
     )
     db.commit()
     row = db.execute(
-        "SELECT s.score, s.note, st.telegram_id, st.lang, a.title FROM submissions s"
-        " JOIN students st ON st.id=s.student_id"
+        "SELECT s.score, s.note, s.student_id, st.telegram_id, st.lang, a.title"
+        " FROM submissions s JOIN students st ON st.id=s.student_id"
         " LEFT JOIN assignments a ON a.id=s.assignment_id WHERE s.id=?",
         (sub_id,),
     ).fetchone()
     if row and row["telegram_id"]:
         send_score(token, row["telegram_id"], row["lang"], row["title"],
-                   row["score"], [], row["note"], sub_id)
+                   row["score"], [], row["note"], sub_id,
+                   student_id=row["student_id"])
     return row
 
 
@@ -1213,6 +1217,9 @@ def checklist_text(db, student, lang):
     """Every open set, with a tick or an empty box per item."""
     sets = core.open_sets(db, student["group_id"], for_student=True)
     if not sets:
+        closed = core.last_closed_set(db, student["group_id"])
+        if closed:
+            return t(lang, "hw_closed", due=closed[:10])
         return t(lang, "hw_none")
     blocks = []
     for due_at, items in sets:
@@ -1574,20 +1581,22 @@ def handle_photo(db, token, msg):
     if not download_photo(token, photo["file_id"], fname):
         return send(token, tid, "Could not download that photo, please resend.")
 
-    # Telegram hands us the same page at several sizes for free. Keep a screen
-    # sized one as well, so grading loads a few hundred KB instead of megabytes.
-    preview = None
+    # Telegram hands us the same page at several sizes for free, but fetching
+    # the small one here would double the work done in the polling loop - and
+    # that loop is the whole bot. A class sending ten pages each would leave it
+    # unable to answer anybody for a minute. Remember which copy to use and let
+    # the dashboard pull it the first time a page is actually looked at.
+    preview = preview_id = None
     small = preview_size(msg["photo"], photo)
     if small:
-        pname = f"{sub_id}_{ord_}_{stamp}_s.jpg"
-        if download_photo(token, small["file_id"], pname):
-            preview = pname
+        preview = f"{sub_id}_{ord_}_{stamp}_s.jpg"
+        preview_id = small["file_id"]
 
     db.execute(
         "INSERT INTO files (submission_id, filename, telegram_file_id, width, height,"
-        " ord, preview) VALUES (?,?,?,?,?,?,?)",
+        " ord, preview, preview_id) VALUES (?,?,?,?,?,?,?,?)",
         (sub_id, fname, photo["file_id"], photo.get("width"), photo.get("height"),
-         ord_, preview),
+         ord_, preview, preview_id),
     )
     db.commit()
 

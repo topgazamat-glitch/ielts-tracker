@@ -292,6 +292,9 @@ def migrate(db):
     if "preview" not in fcols:
         # a screen-sized copy, so grading does not pull the full page shot
         db.execute("ALTER TABLE files ADD COLUMN preview TEXT")
+    if "preview_id" not in fcols:
+        # Telegram's id for the screen-sized copy; fetched when first needed
+        db.execute("ALTER TABLE files ADD COLUMN preview_id TEXT")
     if "offloaded" not in fcols:
         # 1 = the big file has been deleted from disk; Telegram still has it
         db.execute("ALTER TABLE files ADD COLUMN offloaded INTEGER NOT NULL DEFAULT 0")
@@ -993,6 +996,24 @@ def open_sets(db, group_id, for_student=False):
             continue
         out.append((r["due_at"], homework_items(db, group_id, r["due_at"])))
     return out
+
+
+def last_closed_set(db, group_id, days=10):
+    """The most recent homework whose deadline has just gone.
+
+    An empty homework list reads as a broken bot to a student who knows they
+    were set something. Being able to say "it closed on Friday" is the
+    difference between an explanation and a fault.
+    """
+    since = iso(now() - timedelta(days=days))
+    rows = db.execute(
+        "SELECT DISTINCT due_at FROM assignments WHERE group_id=? AND published=1"
+        " AND closed=0 AND due_at IS NOT NULL AND due_at >= ?"
+        " ORDER BY due_at DESC", (group_id, since)).fetchall()
+    for r in rows:
+        if not still_open(r["due_at"]):
+            return r["due_at"]
+    return None
 
 
 def set_progress(db, student_id, items):
