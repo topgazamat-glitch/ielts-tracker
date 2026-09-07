@@ -2201,7 +2201,7 @@ function render(s) {{
     s.state === 'lobby' ? 'Start' :
     s.state === 'question' ? 'Show the answer' :
     s.state === 'reveal' ? 'Next question' : 'Finished';
-  document.getElementById('go').disabled = (s.state === 'done');
+  document.getElementById('go').disabled = busy || (s.state === 'done');
   let h = '';
   if (s.state === 'lobby') {{
     h = '<div class="gcard"><div class="gbig">' + s.players.length +
@@ -2248,10 +2248,22 @@ function podium(rows) {{
     '<div class="pscore">' + top[i].score + '</div>' +
     '<div class="pblock">' + (i + 1) + '</div></div>').join('') + '</div>';
 }}
+let busy = false;
 async function step() {{
+  if (busy) return;                 // one press is one move, however hard it is hit
+  busy = true;
+  const btn = document.getElementById('go');
+  btn.disabled = true;
+  btn.textContent = '\u2026';
   Music.nudge();                    // the gesture browsers require for audio
-  await fetch('/play/' + GID + '/next', {{method:'POST'}});
-  last = "";
+  try {{
+    const r = await fetch('/play/' + GID + '/next', {{method:'POST'}});
+    last = "";
+    render(await r.json());         // straight from the reply, not the next poll
+  }} catch (e) {{
+    btn.disabled = false;
+  }}
+  busy = false;
 }}
 poll();
 </script>"""
@@ -2284,8 +2296,14 @@ def game_state_json(req, db, game_id):
 
 
 def act_game_next(req, db, game_id):
+    """Advance, and answer with the state it just moved to.
+
+    The board used to learn what happened from its next poll, which meant up
+    to two seconds of nothing after a click - long enough that the teacher
+    presses again, and the second press advances it a second time.
+    """
     core.advance_game(db, game_id)
-    return json_response({"ok": True})
+    return game_state_json(req, db, game_id)
 
 
 def act_game_end(req, db, game_id):
