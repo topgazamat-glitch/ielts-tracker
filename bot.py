@@ -1211,6 +1211,29 @@ def homework_keyboard(lang):
             [{"text": t(lang, "mypage"), "callback_data": "hk:page"}]]
 
 
+def clear_menu_button(db, token, student):
+    """Take back the app button from anyone who was given one.
+
+    The mini app was tried and dropped, but a menu button lives on Telegram's
+    side: deleting the code that set it does not remove it from the chat. Each
+    student who got one has a row here, so the next time they use the bot the
+    button goes back to normal and the row is dropped. No message is sent, and
+    once the rows are gone this costs nothing.
+    """
+    if not student or not student["telegram_id"]:
+        return
+    key = "menu:%s" % student["telegram_id"]
+    if not core.meta_get(db, key):
+        return
+    try:
+        call(token, "setChatMenuButton", chat_id=student["telegram_id"],
+             menu_button={"type": "default"})
+    except Exception:
+        pass
+    db.execute("DELETE FROM meta WHERE k=?", (key,))
+    db.commit()
+
+
 def send_my_page(db, token, student):
     """Their private link to the web page - the bot is the only place it lives."""
     lang = student["lang"]
@@ -1387,6 +1410,7 @@ def handle_text(db, token, msg):
     text = BUTTON_COMMANDS.get(text, text)
     student = student_of(db, tid)
     lang = lang_of(db, tid, student)
+    clear_menu_button(db, token, student)
     if student and not student["active"] and not text.startswith("/start"):
         return send(token, tid, t(lang, "paused"))
     step, payload = get_state(db, tid)
