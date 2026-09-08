@@ -1251,10 +1251,8 @@ def student_page(title, body):
   onclick="Music.toggle()" title="Music"></button></span></header>
 <main style="max-width:600px">{body}</main>
 {song_tag()}
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="/static/music.js" defer></script>
-<script src="/static/nav.js" defer></script>
-<script src="/static/telegram.js" defer></script></body></html>"""
+<script src="/static/nav.js" defer></script></body></html>"""
 
 
 def student_shell(s, db, token, tab, body):
@@ -3920,19 +3918,6 @@ class Handler(BaseHTTPRequestHandler):
         ("Strict-Transport-Security", "max-age=31536000"),
     ]
 
-    # Telegram Desktop and Telegram Web open a mini app inside an iframe, so the
-    # student pages have to allow those origins - and only those. Everything the
-    # teacher sees keeps the flat refusal.
-    TELEGRAM_FRAMES = ("frame-ancestors https://web.telegram.org "
-                       "https://webk.telegram.org https://webz.telegram.org "
-                       "https://telegram.org")
-
-    def _frame_headers(self):
-        path = getattr(self, "path", "") or ""
-        if path.startswith("/s/") or path.startswith("/song") or path.startswith("/static/"):
-            return [("Content-Security-Policy", self.TELEGRAM_FRAMES)]
-        return [("X-Frame-Options", "DENY")]
-
     def _send(self, status, headers, body):
         """Write a response, in pieces, tolerating a client that walks away.
 
@@ -3945,10 +3930,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(status)
             for k, v in self.SECURITY_HEADERS:
-                if k == "X-Frame-Options":
-                    continue
-                self.send_header(k, v)
-            for k, v in self._frame_headers():
                 self.send_header(k, v)
             for k, v in headers:
                 self.send_header(k, v)

@@ -1017,8 +1017,3 @@ tr.me td { scroll-margin-top: 80px; }
 }
 #navbar.on { width: 80%; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { #navbar { transition: none; } }
-
-/* inside Telegram the app has its own chrome: no browser bar, no sign-out */
-.in-telegram body { background: var(--bg); }
-.in-telegram .top .brand { font-size: 15px; }
-.in-telegram main { padding-top: 4px; }
