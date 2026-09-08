@@ -1008,3 +1008,12 @@ tr.me td { scroll-margin-top: 80px; }
 }
 
 .gone { color: var(--red); font-weight: 600; font-size: 12px; }
+
+/* a thread of colour while the next page is fetched, so a click feels answered */
+#navbar {
+  position: fixed; top: 0; left: 0; height: 2px; width: 0;
+  background: var(--brand); z-index: 99; opacity: 0;
+  transition: width .5s ease-out, opacity .2s;
+}
+#navbar.on { width: 80%; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { #navbar { transition: none; } }

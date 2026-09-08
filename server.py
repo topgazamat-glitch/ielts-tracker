@@ -61,6 +61,8 @@ def page(title, body, active="", music=False):
 <a href="/logout">Sign out</a></span></header>
 <main>{body}</main>
 {tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
+<script src="/static/nav.js" defer></script>
+<script src="/static/materials.js" defer></script>
 </body></html>"""
 
 
@@ -1249,7 +1251,8 @@ def student_page(title, body):
   onclick="Music.toggle()" title="Music"></button></span></header>
 <main style="max-width:600px">{body}</main>
 {song_tag()}
-<script src="/static/music.js" defer></script></body></html>"""
+<script src="/static/music.js" defer></script>
+<script src="/static/nav.js" defer></script></body></html>"""
 
 
 def student_shell(s, db, token, tab, body):
@@ -3143,7 +3146,8 @@ walk through in the bot.</p>
 <div class="inline" style="margin-bottom:12px">
 <label class="f">Title<input name="title" placeholder="Unit 5 handout" required></label>
 <label class="f">Level<select name="level_id">{lopts}</select></label>
-<label class="f">Collection<select name="collection" id="coll">{kopts}</select></label>
+<label class="f">Collection<select name="collection" id="coll"
+  data-sections="{E(sections_json)}">{kopts}</select></label>
 <label class="f">Section<select name="category" id="sect"></select></label>
 <label class="f">Class<select name="group_id">{gopts}</select></label>
 <label class="f">Unit<select name="unit">{uopts}</select></label>
@@ -3160,20 +3164,6 @@ walk through in the bot.</p>
   Telegram's limit for what a bot can send.</span>
 </label>
 <div style="margin-top:12px"><button>Upload</button></div></form></div>
-<script>
-const SECTIONS = {sections_json};
-function fillSections() {{
-  const coll = document.getElementById('coll').value;
-  const sect = document.getElementById('sect');
-  sect.innerHTML = '';
-  (SECTIONS[coll] || []).forEach(function (name) {{
-    const o = document.createElement('option');
-    o.value = name; o.textContent = name; sect.appendChild(o);
-  }});
-}}
-document.getElementById('coll').addEventListener('change', fillSections);
-fillSections();
-</script>
 </details>"""
     return html_response(page("Materials", body, "Materials"))
 
