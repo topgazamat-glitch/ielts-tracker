@@ -112,7 +112,9 @@ T = {
         'pack_done_plain': 'Unit {n} sent: {n_files} file(s).',
         'pack_empty': 'There is nothing in Unit {n} yet.',
         'mypage': '📱 My page',
-        'mypage_text': 'Your own page — homework, materials, progress and class standings, all in one place:\n\n{url}\n\nIt is only yours. Tip: open it and add it to your home screen.',
+        'mypage_text': 'Your own page — homework, materials, progress and class standings, all in one place. Tap the button below, or the menu button beside the message box — it opens right here in Telegram.\n\n{url}',
+        'app_open': '\U0001F4D8 Open my page',
+        'app_button': 'My page',
         'mypage_none': 'Your page is not ready yet. Ask your teacher.',
         'page_added': 'Page {n} added to “{title}”. Send more, or move on.',
         'pages_now': '{n} page(s) for “{title}”.',
@@ -221,7 +223,9 @@ T = {
         'pack_done_plain': 'Юнит {n} отправлен: {n_files} файл(ов).',
         'pack_empty': 'В юните {n} пока ничего нет.',
         'mypage': '📱 Моя страница',
-        'mypage_text': 'Ваша страница — задания, материалы, прогресс и рейтинг в одном месте:\n\n{url}\n\nОна только ваша. Совет: откройте и добавьте на главный экран.',
+        'mypage_text': 'Ваша страница — задания, материалы, прогресс и рейтинг в одном месте. Нажмите кнопку ниже или кнопку меню рядом с полем ввода — откроется прямо в Telegram.\n\n{url}',
+        'app_open': '\U0001F4D8 Открыть мою страницу',
+        'app_button': 'Моя страница',
         'mypage_none': 'Страница пока не готова. Спросите преподавателя.',
         'page_added': 'Страница {n} добавлена к «{title}». Можно отправить ещё.',
         'pages_now': 'Страниц: {n} для «{title}».',
@@ -330,7 +334,9 @@ T = {
         'pack_done_plain': "{n}-bo'lim yuborildi: {n_files} ta fayl.",
         'pack_empty': "{n}-bo'limda hozircha hech narsa yo'q.",
         'mypage': '📱 Mening sahifam',
-        'mypage_text': "Sizning sahifangiz — vazifalar, materiallar, natijalar va reyting bir joyda:\n\n{url}\n\nU faqat sizniki. Maslahat: ochib, asosiy ekranga qo'shing.",
+        'mypage_text': "Sizning sahifangiz — vazifalar, materiallar, natijalar va reyting bir joyda. Pastdagi tugmani yoki xabar yonidagi menyu tugmasini bosing — Telegramning o'zida ochiladi.\n\n{url}",
+        'app_open': '\U0001F4D8 Sahifamni ochish',
+        'app_button': "Mening sahifam",
         'mypage_none': "Sahifa hali tayyor emas. O'qituvchidan so'rang.",
         'page_added': "“{title}” ga {n}-sahifa qo'shildi. Yana yuborishingiz mumkin.",
         'pages_now': '“{title}” uchun {n} ta sahifa.',
@@ -1211,15 +1217,60 @@ def homework_keyboard(lang):
             [{"text": t(lang, "mypage"), "callback_data": "hk:page"}]]
 
 
-def send_my_page(db, token, student):
-    """Their private link to the web page - the bot is the only place it lives."""
-    lang = student["lang"]
-    tid = student["telegram_id"]
+def portal_url(db, student):
+    """The student's own page, or None before the site knows its address."""
     site = core.meta_get(db, "site_url")
     if not site:
+        return None
+    return "%s/s/%s" % (site.rstrip("/"), core.student_token(db, student["id"]))
+
+
+def set_menu_button(db, token, student):
+    """Put the student's page behind the button beside the message box.
+
+    This is what makes it feel like an app rather than a link: it is always
+    there, it opens inside Telegram, and there is nothing to install. The url
+    is set per chat, so each student's button opens their own page.
+    """
+    url = portal_url(db, student)
+    if not url or not student["telegram_id"]:
+        return None
+    return call(token, "setChatMenuButton", chat_id=student["telegram_id"],
+                menu_button={"type": "web_app",
+                             "text": t(student["lang"], "app_button"),
+                             "web_app": {"url": url}})
+
+
+def ensure_menu_button(db, token, student):
+    """Give a student the app button once, the next time they use the bot.
+
+    Everyone who registered before the button existed gets it this way, one
+    quiet api call each, with no message sent to anybody.
+    """
+    if not student or not student["telegram_id"]:
+        return
+    key = "menu:%s" % student["telegram_id"]
+    if core.meta_get(db, key):
+        return
+    try:
+        r = set_menu_button(db, token, student)
+        if r and r.get("ok"):
+            core.meta_set(db, key, core.iso(core.now()))
+    except Exception:
+        pass          # a button is never worth failing someone's message over
+
+
+def send_my_page(db, token, student):
+    """Their private page, opened inside Telegram rather than in a browser."""
+    lang = student["lang"]
+    tid = student["telegram_id"]
+    url = portal_url(db, student)
+    if not url:
         return send(token, tid, t(lang, "mypage_none"))
-    url = "%s/s/%s" % (site.rstrip("/"), core.student_token(db, student["id"]))
-    return send(token, tid, t(lang, "mypage_text", url=url))
+    set_menu_button(db, token, student)
+    return send(token, tid, t(lang, "mypage_text", url=url),
+                keyboard=[[{"text": t(lang, "app_open"),
+                            "web_app": {"url": url}}]])
 
 
 def rating_text(db, student):
@@ -1387,6 +1438,7 @@ def handle_text(db, token, msg):
     text = BUTTON_COMMANDS.get(text, text)
     student = student_of(db, tid)
     lang = lang_of(db, tid, student)
+    ensure_menu_button(db, token, student)
     if student and not student["active"] and not text.startswith("/start"):
         return send(token, tid, t(lang, "paused"))
     step, payload = get_state(db, tid)
