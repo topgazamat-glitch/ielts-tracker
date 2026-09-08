@@ -13,6 +13,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(ROOT, "data")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 MATERIAL_DIR = os.path.join(DATA_DIR, "materials")
+MUSIC_DIR = os.path.join(DATA_DIR, "music")
 DB_PATH = os.path.join(DATA_DIR, "app.db")
 CONFIG_PATH = os.path.join(ROOT, "config.json")
 
@@ -144,6 +145,7 @@ def local_day(dt, cfg):
 def connect():
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(MATERIAL_DIR, exist_ok=True)
+    os.makedirs(MUSIC_DIR, exist_ok=True)
     db = sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
@@ -413,6 +415,17 @@ def migrate(db):
         correct INTEGER NOT NULL DEFAULT 0,
         ms INTEGER,
         UNIQUE (game_id, question_id, student_id)
+    );
+    CREATE TABLE IF NOT EXISTS daily_music (
+        id INTEGER PRIMARY KEY,
+        day TEXT NOT NULL UNIQUE,          -- YYYY-MM-DD in the teacher's timezone
+        title TEXT,
+        artist TEXT,
+        filename TEXT NOT NULL,
+        original_name TEXT,
+        mime TEXT NOT NULL,
+        bytes INTEGER NOT NULL,
+        created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS seasons (
         id INTEGER PRIMARY KEY,
@@ -1642,6 +1655,85 @@ def mark_score(raw):
     if not 1 <= v <= 10 or abs(v * 2 - round(v * 2)) > 1e-9:
         return None
     return round(v, 1)
+
+
+AUDIO_TYPES = {
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
+    ".wav": "audio/wav", ".flac": "audio/flac", ".weba": "audio/webm",
+}
+MAX_SONG_BYTES = 20 * 1024 * 1024
+
+
+def audio_type(filename):
+    """The content type for an uploaded song, or None if it is not audio."""
+    return AUDIO_TYPES.get(os.path.splitext(filename or "")[1].lower())
+
+
+def song_for(db, day):
+    return db.execute("SELECT * FROM daily_music WHERE day=?", (day,)).fetchone()
+
+
+def song_today(db, cfg=None):
+    return song_for(db, local_day(now(), cfg or load_config()))
+
+
+def recent_songs(db, limit=60):
+    return db.execute("SELECT * FROM daily_music ORDER BY day DESC LIMIT ?",
+                      (limit,)).fetchall()
+
+
+def save_song(db, day, filename, blob, title=None, artist=None):
+    """Put one song on one day, replacing whatever was there.
+
+    The file is named after the day rather than the upload, so re-uploading
+    cannot leave the previous day's audio orphaned on the volume.
+    """
+    mime = audio_type(filename)
+    if not mime:
+        raise ValueError("not an audio file")
+    if len(blob) > MAX_SONG_BYTES:
+        raise ValueError("too large")
+    ext = os.path.splitext(filename)[1].lower()
+    stored = "%s%s" % (day, ext)
+    old = song_for(db, day)
+    with open(os.path.join(MUSIC_DIR, stored), "wb") as fh:
+        fh.write(blob)
+    if old and old["filename"] != stored:
+        drop_song_file(old["filename"])
+    db.execute(
+        "INSERT INTO daily_music (day, title, artist, filename, original_name,"
+        " mime, bytes, created_at) VALUES (?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(day) DO UPDATE SET title=excluded.title,"
+        " artist=excluded.artist, filename=excluded.filename,"
+        " original_name=excluded.original_name, mime=excluded.mime,"
+        " bytes=excluded.bytes, created_at=excluded.created_at",
+        (day, (title or "").strip() or None, (artist or "").strip() or None,
+         stored, filename, mime, len(blob), iso(now())),
+    )
+    db.commit()
+    return song_for(db, day)
+
+
+def drop_song_file(filename):
+    try:
+        os.remove(os.path.join(MUSIC_DIR, filename))
+    except OSError:
+        pass
+
+
+def delete_song(db, day):
+    row = song_for(db, day)
+    if not row:
+        return
+    drop_song_file(row["filename"])
+    db.execute("DELETE FROM daily_music WHERE day=?", (day,))
+    db.commit()
+
+
+def music_bytes(db):
+    r = db.execute("SELECT COALESCE(SUM(bytes),0) b, COUNT(*) n FROM daily_music").fetchone()
+    return r["b"], r["n"]
 
 
 def quote_of_the_day(cfg=None):

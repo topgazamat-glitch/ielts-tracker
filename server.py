@@ -39,7 +39,9 @@ E = html.escape
 
 def page(title, body, active="", music=False):
     """The teacher's shell. Silent unless a page asks otherwise: marking
-    for three hours should not come with a soundtrack."""
+    for three hours should not come with a soundtrack - but the song of the
+    day is the teacher's own choice, so that one plays here too."""
+    tune = song_tag()
     def nav(href, label):
         cls = ' class="on"' if active == label else ""
         return f'<a href="{href}"{cls}>{label}</a>'
@@ -53,12 +55,12 @@ def page(title, body, active="", music=False):
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Ratings')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
-{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
+{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
-  ' onclick="Music.toggle()" title="Music"></button>' if music else ''}
+  ' onclick="Music.toggle()" title="Music"></button>' if (music or tune) else ''}
 <a href="/logout">Sign out</a></span></header>
 <main>{body}</main>
-{'<script src="/static/music.js" defer></script>' if music else ''}
+{tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
 </body></html>"""
 
 
@@ -1201,6 +1203,39 @@ def act_add_words(req, db, wid):
 
 # ------------------------------------------------------- student-facing page
 
+_song_cache = {"day": None, "tag": ""}
+
+
+def song_tag():
+    """A <script> naming today's song, or "" on a day nobody set one.
+
+    Looked up once a day rather than once a page: every rendered page carries
+    this, and the answer only changes at midnight or when a song is uploaded.
+    """
+    day = core.local_day(core.now(), core.load_config())
+    if _song_cache["day"] == day:
+        return _song_cache["tag"]
+    db = core.connect()
+    try:
+        row = core.song_for(db, day)
+    finally:
+        db.close()
+    tag = ""
+    if row:
+        name = row["title"] or row["original_name"] or "Song of the day"
+        if row["artist"]:
+            name += " — " + row["artist"]
+        stamp = re.sub(r"\D", "", row["created_at"] or "")[-8:]
+        tag = ("<script>window.SONG=%s;</script>"
+               % json.dumps({"url": "/song?v=" + stamp, "name": name}))
+    _song_cache["day"], _song_cache["tag"] = day, tag
+    return tag
+
+
+def forget_song():
+    _song_cache["day"] = None
+
+
 def student_page(title, body):
     """Standalone layout - no teacher navigation, no sign-in."""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -1209,9 +1244,11 @@ def student_page(title, body):
 <title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head>
 <body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span>
-<span class="right"><button type="button" id="musicbtn" class="musicbtn"
+<span class="right"><span id="songname" class="songname" hidden></span>
+<button type="button" id="musicbtn" class="musicbtn"
   onclick="Music.toggle()" title="Music"></button></span></header>
 <main style="max-width:600px">{body}</main>
+{song_tag()}
 <script src="/static/music.js" defer></script></body></html>"""
 
 
@@ -3215,6 +3252,160 @@ def serve_material(db, mid, student=None):
                  ("Content-Length", str(len(blob)))], blob
 
 
+def view_music(req, db):
+    """One song a day, chosen by hand.
+
+    Deliberately manual: the point is that the teacher picks it, so students
+    arrive to something a person chose rather than a playlist.
+    """
+    cfg = core.load_config()
+    today = core.local_day(core.now(), cfg)
+    day = (req["query"].get("day", [""])[0] or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        day = today
+    note = (req["query"].get("note", [""])[0] or "").strip()
+    song = core.song_for(db, day)
+    used, count = core.music_bytes(db)
+
+    notes = {"big": "That file is over 20 MB. Save it smaller, or pick a shorter track.",
+             "type": "That is not an audio file. Use mp3, m4a, ogg, wav or flac.",
+             "none": "No file was chosen.",
+             "saved": "Saved. Everyone will hear it today.",
+             "gone": "Removed."}
+    banner = (f'<div class="card {"paused" if note != "saved" else "good"}">'
+              f'{E(notes[note])}</div>' if note in notes else "")
+
+    if song:
+        name = E(song["title"] or song["original_name"] or "Today's song")
+        by = f' <span class="sub">&mdash; {E(song["artist"])}</span>' if song["artist"] else ""
+        current = f"""<div class="card">
+<div class="sub">Playing on {E(day)}{" (today)" if day == today else ""}</div>
+<h2 style="margin:4px 0 10px">{name}{by}</h2>
+<audio controls preload="none" style="width:100%" src="/song/{E(day)}"></audio>
+<p class="sub" style="margin:10px 0 0">{song["bytes"] / 1024.0 / 1024.0:.1f} MB
+&middot; uploaded {E(song["created_at"][:16].replace("T", " "))}</p>
+<form method="post" action="/music/delete" style="margin-top:10px"
+ onsubmit="return confirm('Remove the song for {E(day)}?')">
+<input type="hidden" name="day" value="{E(day)}">
+<button class="ghost danger">Remove this song</button></form></div>"""
+    else:
+        current = (f'<div class="card"><div class="sub">Nothing set for {E(day)}'
+                   f'{" (today)" if day == today else ""}.</div></div>')
+
+    rows = ""
+    for r in core.recent_songs(db, 30):
+        here = ' class="me"' if r["day"] == today else ''
+        rows += (f'<tr{here}>'
+                 f'<td><a href="/music?day={r["day"]}">{r["day"]}</a></td>'
+                 f'<td>{E(r["title"] or r["original_name"] or "&mdash;")}</td>'
+                 f'<td class="sub">{E(r["artist"] or "")}</td>'
+                 f'<td class="sub">{r["bytes"] / 1024.0 / 1024.0:.1f} MB</td></tr>')
+
+    body = f"""<h1>Song of the day</h1>
+<p class="sub">One track a day for the whole school. Students hear it on their pages,
+and so do you &mdash; the &#9834; button in the corner turns it on and off, and it is
+remembered per person, so anyone who wants silence keeps silence.</p>
+{banner}
+{current}
+<div class="card"><h2 style="margin-top:0">Set a song</h2>
+<form method="post" action="/music/new" enctype="multipart/form-data">
+<label>Day<input type="date" name="day" value="{E(day)}"></label>
+<label>Song file
+<input type="file" name="song" accept="audio/*,.mp3,.m4a,.ogg,.wav,.flac" required></label>
+<label>Title <span class="sub">(optional)</span>
+<input name="title" maxlength="120" placeholder="Shown to the students"></label>
+<label>Artist <span class="sub">(optional)</span>
+<input name="artist" maxlength="120"></label>
+<div style="margin-top:12px"><button>Set the song</button></div>
+</form>
+<p class="sub" style="margin:12px 0 0">mp3, m4a, ogg, wav or flac, up to 20 MB. Setting a
+song for a day that already has one replaces it. Works from a phone: the file picker
+opens your music or your downloads.</p></div>
+<h2>Recent days</h2>
+<p class="sub">{count} songs stored, {used / 1024.0 / 1024.0:.0f} MB in all.</p>
+<div class="tablewrap"><table><tr><th>Day</th><th>Title</th><th>Artist</th>
+<th>Size</th></tr>{rows or '<tr><td colspan=4 class="sub">Nothing yet.</td></tr>'}
+</table></div>"""
+    return html_response(page("Song of the day", body, "Music"))
+
+
+def act_new_song(req, db):
+    fields, files = req["files"]
+    cfg = core.load_config()
+    day = (fields.get("day", [""])[0] or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        day = core.local_day(core.now(), cfg)
+    if not files:
+        return redirect(f"/music?day={day}&note=none")
+    filename, blob = files[0]
+    try:
+        core.save_song(db, day, filename, blob,
+                       fields.get("title", [""])[0], fields.get("artist", [""])[0])
+    except ValueError as exc:
+        return redirect(f"/music?day={day}&note="
+                        + ("big" if "large" in str(exc) else "type"))
+    forget_song()
+    return redirect(f"/music?day={day}&note=saved")
+
+
+def act_delete_song(req, db):
+    day = (req["form"].get("day", [""])[0] or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        core.delete_song(db, day)
+    forget_song()
+    return redirect(f"/music?day={day}&note=gone")
+
+
+def serve_song(req, db, day=None):
+    """The day's song, with byte ranges.
+
+    Mobile Safari will not start an <audio> element at all unless the server
+    answers a Range request, so this is not an optimisation.
+    """
+    cfg = core.load_config()
+    row = core.song_for(db, day) if day else core.song_today(db, cfg)
+    if not row:
+        return not_found()
+    path = os.path.join(core.MUSIC_DIR, row["filename"])
+    if not os.path.isfile(path):
+        return not_found()
+    size = os.path.getsize(path)
+    rng = (req.get("headers") or {}).get("Range") or ""
+    m = re.match(r"bytes=(\d*)-(\d*)$", rng.strip())
+    start, end = 0, size - 1
+    partial = False
+    if m and (m.group(1) or m.group(2)):
+        if m.group(1):
+            start = int(m.group(1))
+            if m.group(2):
+                end = min(int(m.group(2)), size - 1)
+        else:                                   # bytes=-N, the last N bytes
+            start = max(0, size - int(m.group(2)))
+        if start >= size or start > end:
+            return (416, [("Content-Range", "bytes */%d" % size),
+                          ("Content-Length", "0")], b"")
+        partial = True
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        blob = fh.read(end - start + 1)
+    headers = [("Content-Type", row["mime"]),
+               ("Accept-Ranges", "bytes"),
+               ("Content-Length", str(len(blob))),
+               ("Cache-Control", "public, max-age=3600")]
+    if partial:
+        headers.append(("Content-Range", "bytes %d-%d/%d" % (start, end, size)))
+        return 206, headers, blob
+    return 200, headers, blob
+
+
+def view_song_today(req, db):
+    return serve_song(req, db)
+
+
+def view_song_day(req, db, day):
+    return serve_song(req, db, day)
+
+
 def view_material_file(req, db, mid):
     return serve_material(db, mid)
 
@@ -3572,6 +3763,10 @@ ROUTES = [
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/materials$", view_materials),
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
+    ("GET",  r"^/music$", view_music),
+    ("POST", r"^/music/delete$", act_delete_song),
+    ("GET", r"^/song$", view_song_today),
+    ("GET", r"^/song/(\d{4}-\d{2}-\d{2})$", view_song_day),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
@@ -3775,7 +3970,8 @@ class Handler(BaseHTTPRequestHandler):
         self._remember_site_url()
         if path.startswith("/media/"):
             return self._serve_media(path)
-        return self._dispatch("GET", path, {"query": query, "form": {}})
+        return self._dispatch("GET", path, {"query": query, "form": {},
+                                            "headers": self.headers})
 
     def do_POST(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -3795,6 +3991,18 @@ class Handler(BaseHTTPRequestHandler):
             db = core.connect()
             try:
                 return self._send(*act_new_material(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        if path == "/music/new":
+            if not self._session():
+                return self._send(*redirect("/login"))
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_new_song(
                     {"query": {}, "form": {}, "files": (fields, files)}, db))
             finally:
                 db.close()

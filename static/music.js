@@ -165,8 +165,32 @@
     beat = Math.floor(Math.random() * (piece.span * 2)) * 0.5;
   }
 
+  // ---- the song of the day, when the teacher has set one.
+  //
+  // A real file beats the synthesiser whenever there is one, so the whole
+  // school hears the same track that day. The synth stays as the fallback for
+  // days nobody has chosen anything.
+  var song = null;
+
+  function songEl() {
+    if (song || !window.SONG || !window.SONG.url) return song;
+    song = new Audio(window.SONG.url);
+    song.loop = true;
+    song.preload = "none";
+    song.volume = 0.55;
+    return song;
+  }
+
   function start() {
     if (!on) return;
+    var el = songEl();
+    if (el) {
+      // play() rejects until the visitor has interacted with the page; the
+      // first pointerdown below calls straight back in, so this is not an error
+      var p = el.play();
+      if (p && p.catch) { p.catch(function () {}); }
+      return;
+    }
     if (!ensure(start)) return;      // called back once the context is awake
     if (!piece) pick();
     if (!timer) {
@@ -177,6 +201,7 @@
   }
 
   function stop() {
+    if (song) { song.pause(); }
     if (timer) { clearInterval(timer); timer = null; }
     piece = null;
   }
@@ -184,9 +209,18 @@
   function paint() {
     var b = document.getElementById("musicbtn");
     if (b) {
+      var name = window.SONG && window.SONG.name;
       b.textContent = on ? "♪" : "♪̸";
-      b.title = on ? "Music on — click to silence" : "Music off";
+      b.title = (name ? name + " — " : "") +
+                (on ? "playing, click to silence" : "click to play");
       b.className = "musicbtn" + (on ? " on" : "");
+    }
+    var t = document.getElementById("songname");
+    if (t) {
+      var n = window.SONG && window.SONG.name;
+      t.textContent = n || "";
+      t.hidden = !n;
+      t.className = "songname" + (on ? " on" : "");
     }
   }
 
@@ -194,13 +228,15 @@
     toggle: function () {
       on = !on;
       try { localStorage.setItem("music", on ? "on" : "off"); } catch (e) {}
-      if (on) { pick(); start(); } else stop();
+        if (on) { if (!songEl()) { pick(); } start(); } else stop();
       paint();
     },
     nudge: function () { if (on) start(); },      // called on the first click
     state: function () {
       return {on: on, audio: ac ? ac.state : "none",
-              piece: piece ? piece.name : "none", playing: !!timer};
+              song: window.SONG ? window.SONG.name : null,
+              piece: piece ? piece.name : "none",
+              playing: song ? !song.paused : !!timer};
     }
   };
 
