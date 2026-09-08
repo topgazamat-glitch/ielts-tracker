@@ -3359,27 +3359,27 @@ def act_delete_song(req, db):
     return redirect(f"/music?day={day}&note=gone")
 
 
-SONG_CHUNK = 2 * 1024 * 1024
+SONG_READ = 64 * 1024
 
 
-def serve_song(req, db, day=None):
-    """The day's song, with byte ranges.
+def song_range(db, day, rng):
+    """Work out what to send for a song request, without reading the file.
 
-    Mobile Safari will not start an <audio> element at all unless the server
-    answers a Range request, so this is not an optimisation.
+    Returns (status, headers, path, start, length). The body is streamed from
+    disk afterwards, so a whole-file response costs 64 KB of memory rather than
+    the size of the track - which is why nothing here caps the range. Handing
+    back a slice would mean the player coming back for more mid-song, and that
+    round trip is audible.
     """
-    cfg = core.load_config()
-    row = core.song_for(db, day) if day else core.song_today(db, cfg)
+    row = core.song_for(db, day) if day else core.song_today(db)
     if not row:
-        return not_found()
+        return None
     path = os.path.join(core.MUSIC_DIR, row["filename"])
     if not os.path.isfile(path):
-        return not_found()
+        return None
     size = os.path.getsize(path)
-    rng = (req.get("headers") or {}).get("Range") or ""
-    m = re.match(r"bytes=(\d*)-(\d*)$", rng.strip())
-    start, end = 0, size - 1
-    partial = False
+    m = re.match(r"bytes=(\d*)-(\d*)$", (rng or "").strip())
+    start, end, partial = 0, size - 1, False
     if m and (m.group(1) or m.group(2)):
         if m.group(1):
             start = int(m.group(1))
@@ -3389,35 +3389,18 @@ def serve_song(req, db, day=None):
             start = max(0, size - int(m.group(2)))
         if start >= size or start > end:
             return (416, [("Content-Range", "bytes */%d" % size),
-                          ("Content-Length", "0")], b"")
+                          ("Content-Length", "0")], None, 0, 0)
         partial = True
-    # an open-ended range would put the whole file in memory once per listener,
-    # so hand back a couple of megabytes and let the player ask for the rest.
-    # only ever to a client that asked for a range: a plain link must still
-    # get the whole file, not a truncated one.
-    if partial:
-        end = min(end, start + SONG_CHUNK - 1)
-    with open(path, "rb") as fh:
-        fh.seek(start)
-        blob = fh.read(end - start + 1)
+    length = end - start + 1
     headers = [("Content-Type", row["mime"]),
                ("Accept-Ranges", "bytes"),
-               ("Content-Length", str(len(blob))),
+               ("Content-Length", str(length)),
                # the url carries the upload stamp, so a cached copy is never
                # stale: this is what stops every page click refetching the song
                ("Cache-Control", "public, max-age=31536000, immutable")]
     if partial:
         headers.append(("Content-Range", "bytes %d-%d/%d" % (start, end, size)))
-        return 206, headers, blob
-    return 200, headers, blob
-
-
-def view_song_today(req, db):
-    return serve_song(req, db)
-
-
-def view_song_day(req, db, day):
-    return serve_song(req, db, day)
+    return (206 if partial else 200, headers, path, start, length)
 
 
 def view_material_file(req, db, mid):
@@ -3941,6 +3924,34 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True
 
+    def _send_file(self, status, headers, path, start, length):
+        """Stream a file from disk, in pieces, tolerating a client hanging up.
+
+        Memory stays at one buffer no matter how big the track is, so a song
+        can be answered whole and the player never has to come back for the
+        next piece while it is playing.
+        """
+        try:
+            self.send_response(status)
+            for k, v in self.SECURITY_HEADERS:
+                self.send_header(k, v)
+            for k, v in headers:
+                self.send_header(k, v)
+            self.end_headers()
+            if self.command == "HEAD" or not length:
+                return
+            with open(path, "rb") as fh:
+                fh.seek(start)
+                left = length
+                while left > 0:
+                    chunk = fh.read(min(SONG_READ, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     def do_HEAD(self):
         # players ask before they fetch; a 501 here reads as a broken file
         self.do_GET()
@@ -3996,9 +4007,13 @@ class Handler(BaseHTTPRequestHandler):
             # open: an <audio> element cannot carry a student's token
             db = core.connect()
             try:
-                return self._send(*serve_song(
-                    {"query": query, "form": {}, "headers": self.headers},
-                    db, m.group(1)))
+                plan = song_range(db, m.group(1), self.headers.get("Range"))
+                if not plan:
+                    return self._send(*not_found())
+                status, headers, path, start, length = plan
+                if path is None:                       # 416, no body to stream
+                    return self._send(status, headers, b"")
+                return self._send_file(status, headers, path, start, length)
             finally:
                 db.close()
         if path == "/login":

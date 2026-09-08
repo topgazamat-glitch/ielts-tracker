@@ -192,38 +192,31 @@
         try { song.currentTime = at; } catch (e) {}
       }
     });
+    var wrote = 0;
     song.addEventListener("timeupdate", function () {
-      try { sessionStorage.setItem(key, song.currentTime); } catch (e) {}
+      // timeupdate fires several times a second; remembering the place that
+      // often is pointless work on the thread that also runs the page
+      var t = song.currentTime;
+      if (Math.abs(t - wrote) < 5) return;
+      wrote = t;
+      try { sessionStorage.setItem(key, t); } catch (e) {}
     });
 
-    // if the network drops a chunk the element can sit in a stalled state for
-    // a long time; poke it rather than leave a silent page
+    // A stall is the network being slow, and the cure is to wait. Calling
+    // load() here tears the element down and starts it again from nothing,
+    // which turns a pause into a restart - much worse than the stall.
     ["stalled", "waiting"].forEach(function (ev) {
       song.addEventListener(ev, function () {
         if (!on || song.paused) return;
         clearTimeout(song._poke);
         song._poke = setTimeout(function () {
-          if (on && !song.paused) { song.load(); resume(); }
-        }, 4000);
+          if (!on || song.paused) return;
+          var p = song.play();
+          if (p && p.catch) { p.catch(function () {}); }
+        }, 6000);
       });
     });
-    song.load();
     return song;
-  }
-
-  function resume() {
-    if (!song) return;
-    var at = 0;
-    try { at = parseFloat(sessionStorage.getItem("songat:" + window.SONG.url)) || 0; }
-    catch (e) {}
-    song.addEventListener("loadedmetadata", function once() {
-      song.removeEventListener("loadedmetadata", once);
-      if (at > 0 && at < song.duration - 1) {
-        try { song.currentTime = at; } catch (e) {}
-      }
-      var p = song.play();
-      if (p && p.catch) { p.catch(function () {}); }
-    }, {once: true});
   }
 
   function start() {
