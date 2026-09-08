@@ -52,7 +52,7 @@ def page(title, body, active="", music=False):
 <header class="top">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
-{nav('/ratings', 'Ratings')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
+{nav('/ratings', 'Ratings')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
   ' onclick="Music.toggle()" title="Music"></button>' if music else ''}
@@ -1561,7 +1561,39 @@ def portal_class(db, s, token):
                 f'<td><strong>{fmt(r["index"])}</strong></td>'
                 f'<td>{comp}%</td>'
                 f'<td style="text-align:right">{score_pill(r["average"])}</td></tr>')
-    return f"""<h2>Class standings</h2>
+    champ = core.championship(db, core.month_key())
+    mine = next((r for r in champ["rows"] if r["student"]["id"] == s["id"]), None)
+    top = [r for r in champ["rows"] if r["eligible"]][:5]
+    league = ""
+    if mine:
+        if mine["eligible"]:
+            standing = (f'You are <strong>{mine["rank"]}'
+                        f'{"st" if mine["rank"] == 1 else "nd" if mine["rank"] == 2 else "rd" if mine["rank"] == 3 else "th"}'
+                        f'</strong> in the school with '
+                        f'<strong>{mine["total"]:g}</strong> points')
+        else:
+            standing = (f'You need {core.MIN_GRADED} marked pieces of homework this '
+                        f'month to enter. You have {mine["graded"]}')
+        parts = "".join(
+            f'<div class="cp"><span>{E(label)}</span>'
+            f'<span class="cbar"><i style="width:'
+            f'{min(100, (mine["points"].get(key, 0) / float(weight) * 100)):.0f}%"></i></span>'
+            f'<b>{mine["points"].get(key, 0):g}</b></div>'
+            for key, label, weight in core.CHAMPIONSHIP if key in mine["points"])
+        rows = "".join(
+            f'<tr class="{"me" if r["student"]["id"] == s["id"] else ""}">'
+            f'<td>{i}.</td><td>{E(r["student"]["name"])}</td>'
+            f'<td style="text-align:right"><strong>{r["total"]:g}</strong></td></tr>'
+            for i, r in enumerate(top, 1))
+        league = f"""<h2>Championship &mdash; {E(champ["month"])}</h2>
+<p class="sub">Every student in the school, starting again on the first of the month.</p>
+<div class="card"><p style="margin:0 0 12px">{standing}.</p>
+<div class="cparts">{parts}</div></div>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th>
+<th style="text-align:right">Points</th></tr>{rows}</table></div>
+"""
+
+    return f"""{league}<h2>Class standings</h2>
 <p class="sub">Half of the score is homework handed in, a quarter your marks, and a
 quarter punctuality, behaviour and taking part in the lesson.</p>
 {standing_line(db, s)}
@@ -2662,6 +2694,93 @@ def act_student_answer(req, db, token):
     return json_response({"ok": bool(result)})
 
 
+def champ_row(db, r, show_group=True, me=None):
+    st = r["student"]
+    medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
+    place = (medals.get(r["rank"], str(r["rank"]) + ".") if r["rank"]
+             else '<span class="sub">&mdash;</span>')
+    bars = ""
+    for key, label, weight in core.CHAMPIONSHIP:
+        got = r["points"].get(key)
+        if got is None:
+            bars += f'<td class="sub cnone" title="{E(label)}: nothing recorded">&mdash;</td>'
+            continue
+        share = got / (weight * 100.0 / 100.0) if weight else 0
+        bars += (f'<td class="cpt"><span class="cbar"><i style="width:'
+                 f'{min(100, share):.0f}%"></i></span>{got:g}</td>')
+    group = f'<td>{E(group_name(db, st["group_id"]))}</td>' if show_group else ""
+    mine = ' class="me"' if me == st["id"] else ""
+    return (f'<tr{mine}><td>{place}</td>'
+            f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>{group}'
+            f'<td><strong>{r["total"]:g}</strong></td>{bars}'
+            f'<td class="sub">{E(r["handed"])}</td></tr>')
+
+
+def view_championship(req, db):
+    """The monthly table, with every student's five parts on show.
+
+    The breakdown is the point: a prize decided by numbers nobody can see is a
+    prize people argue about.
+    """
+    month = (req["query"].get("month", [""])[0] or "").strip()
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        month = core.month_key()
+    standing = core.championship(db, month)
+    champs = core.class_champions(standing, db)
+
+    head = "".join(f'<th title="{w} points">{E(l)}</th>'
+                   for _k, l, w in core.CHAMPIONSHIP)
+    body = "".join(champ_row(db, r) for r in standing["rows"])
+
+    winner = next((r for r in standing["rows"] if r["rank"] == 1), None)
+    top = ""
+    if winner:
+        top = (f'<div class="champ-hero"><div class="sub">Leading this month</div>'
+               f'<div class="champ-name">{E(winner["student"]["name"])}</div>'
+               f'<div class="sub">{E(group_name(db, winner["student"]["group_id"]))}'
+               f' &middot; {winner["total"]:g} points</div></div>')
+
+    classes = ""
+    for gid, r in sorted(champs.items(), key=lambda kv: group_name(db, kv[0])):
+        classes += (f'<div class="quick"><div class="sub">{E(group_name(db, gid))}</div>'
+                    f'<strong>{E(r["student"]["name"])}</strong>'
+                    f'<div class="sub">{r["total"]:g} points</div></div>')
+
+    prev, nxt = core.previous_month(month), None
+    y, m = int(month[:4]), int(month[5:])
+    nxt = "%04d-%02d" % (y + (m == 12), 1 if m == 12 else m + 1)
+    switch = (f'<div class="tabs"><a class="tab" href="/championship?month={prev}">'
+              f'&larr; {prev}</a><a class="tab on" href="/championship?month={month}">'
+              f'{month}</a><a class="tab" href="/championship?month={nxt}">{nxt} &rarr;</a>'
+              f'</div>')
+
+    rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; {w} points</li>'
+                    for _k, l, w in core.CHAMPIONSHIP)
+    body_html = f"""<h1>Championship</h1>
+<p class="sub">One month, one hundred points, everyone in the school. Every part is
+a share of what was available to that student, so classes set different amounts of
+work still stand in the same table.</p>
+{switch}
+{top}
+{"<h2>Class champions</h2><div class='quicklinks'>" + classes + "</div>" if classes else ""}
+<h2>The table</h2>
+<p class="sub">{standing["eligible"]} of {len(standing["rows"])} students have the
+{core.MIN_GRADED} marked pieces needed to be eligible. The rest are listed below the
+line and cannot win this month.</p>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Group</th>
+<th>Total</th>{head}<th>Handed in</th></tr>
+{body or '<tr><td colspan=10 class="sub">Nobody yet.</td></tr>'}</table></div>
+<h2>How the points work</h2>
+<div class="card"><ul class="rules">{rules}</ul>
+<p class="sub" style="margin:10px 0 0">A student needs {core.MIN_GRADED} marked pieces
+to be eligible. Words learned count up to {core.VOCAB_TARGET}. Improvement is measured
+against their own previous month, and a full {[w for k,_l,w in core.CHAMPIONSHIP if k=='improvement'][0]}
+points needs {core.IMPROVE_FULL:g} marks better. Anything you have not recorded &mdash;
+lesson marks, say &mdash; is dropped and its weight shared by the rest, so nobody is
+punished for a gap in your records.</p></div>"""
+    return html_response(page("Championship", body_html, "League"))
+
+
 def view_export(req, db):
     gid = req["query"].get("group", [None])[0]
     gid = int(gid) if gid and gid.isdigit() else None
@@ -3339,6 +3458,7 @@ ROUTES = [
     ("POST", r"^/groups/new$", act_new_group),
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
     ("POST", r"^/groups/(\d+)/repeat$", act_repeat_homework),
+    ("GET",  r"^/championship$", view_championship),
     ("GET",  r"^/play$", view_play),
     ("GET",  r"^/play/(\d+)$", view_game_board),
     ("GET",  r"^/play/(\d+)/state\.json$", game_state_json),

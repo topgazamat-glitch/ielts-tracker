@@ -1308,6 +1308,144 @@ def climb(db, student_id):
     }
 
 
+# --------------------------------------------------------------- championship
+#
+# A month-long contest across the whole school, with a real prize at the end of
+# it. Two rules shape everything here. Every measure is a share of what was
+# available to that student, never a raw count, so a class set twelve tasks and
+# a class set six can stand in the same table. And most of the weight sits on
+# what a student decides to do rather than on how good their English already
+# is, because a table that rewards ability hands the prize to the same three
+# people every month and everybody else stops reading it.
+
+CHAMPIONSHIP = [
+    ("homework", "Homework in", 40),
+    ("score", "Marks", 20),
+    ("improvement", "Improvement", 15),
+    ("vocab", "Words learned", 15),
+    ("conduct", "In the lesson", 10),
+]
+MIN_GRADED = 3          # fewer than this and one lucky mark decides the month
+VOCAB_TARGET = 60       # words for full marks; beyond this it is worth nothing
+IMPROVE_FULL = 2.0      # a whole two points better than last month is full marks
+
+
+def month_key(dt=None, cfg=None):
+    return local_day(dt or now(), cfg or load_config())[:7]
+
+
+def month_bounds(month, cfg=None):
+    """The UTC instants a local month begins and ends.
+
+    Worth doing properly rather than comparing text: the prize turns on it, and
+    an evening submission in Tashkent is already the next day in UTC.
+    """
+    cfg = cfg or load_config()
+    offset = timedelta(hours=cfg["timezone_offset_hours"])
+    first = datetime.strptime(month + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    nxt = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return iso(first - offset), iso(nxt - offset)
+
+
+def previous_month(month):
+    first = datetime.strptime(month + "-01", "%Y-%m-%d")
+    return (first - timedelta(days=1)).strftime("%Y-%m")
+
+
+def _avg_between(db, student_id, lo, hi):
+    r = db.execute(
+        "SELECT AVG(score) a, COUNT(*) n FROM submissions WHERE student_id=?"
+        " AND status='graded' AND score IS NOT NULL AND created_at >= ?"
+        " AND created_at < ?", (student_id, lo, hi)).fetchone()
+    return r["a"], r["n"]
+
+
+def championship(db, month=None, cfg=None):
+    """Everyone's standing for one month, best first."""
+    cfg = cfg or load_config()
+    month = month or month_key(cfg=cfg)
+    lo, hi = month_bounds(month, cfg)
+    plo, phi = month_bounds(previous_month(month), cfg)
+
+    rows = []
+    for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
+        parts = {}
+
+        set_for_them = db.execute(
+            "SELECT id FROM assignments WHERE group_id=? AND published=1"
+            " AND COALESCE(due_at, created_at) >= ? AND COALESCE(due_at, created_at) < ?",
+            (st["group_id"], lo, hi)).fetchall()
+        if set_for_them:
+            ids = [a["id"] for a in set_for_them]
+            done = db.execute(
+                "SELECT COUNT(DISTINCT assignment_id) c FROM submissions"
+                " WHERE student_id=? AND draft=0 AND assignment_id IN (%s)"
+                % ",".join("?" * len(ids)), [st["id"]] + ids).fetchone()["c"]
+            parts["homework"] = min(1.0, done / float(len(ids)))
+            handed = "%d of %d" % (done, len(ids))
+        else:
+            handed = "none set"
+
+        avg, graded = _avg_between(db, st["id"], lo, hi)
+        if graded:
+            parts["score"] = min(1.0, (avg or 0) / 10.0)
+
+        was, was_n = _avg_between(db, st["id"], plo, phi)
+        if graded >= 2 and was_n >= 2:
+            parts["improvement"] = max(0.0, min(1.0, ((avg or 0) - was) / IMPROVE_FULL))
+
+        words = db.execute(
+            "SELECT COUNT(*) c FROM word_progress WHERE student_id=? AND streak >= 3"
+            " AND last_seen >= ? AND last_seen < ?", (st["id"], lo, hi)).fetchone()["c"]
+        parts["vocab"] = min(1.0, words / float(VOCAB_TARGET))
+
+        marks = db.execute(
+            "SELECT AVG((COALESCE(punctuality,0)+COALESCE(behaviour,0)"
+            "+COALESCE(participation,0)) / 3.0) a, COUNT(*) n FROM lesson_marks"
+            " WHERE student_id=? AND day >= ? AND day < ?",
+            (st["id"], lo[:10], hi[:10])).fetchone()
+        if marks["n"]:
+            parts["conduct"] = min(1.0, (marks["a"] or 0) / float(MARK_MAX))
+
+        # a measure nobody could score on is dropped, and the rest share its
+        # weight, so a student is never punished for something not recorded
+        live = [(k, w) for k, _l, w in CHAMPIONSHIP if k in parts]
+        total_weight = sum(w for _k, w in live) or 1
+        points = {k: parts[k] * w * 100.0 / total_weight for k, w in live}
+        rows.append({
+            "student": st, "points": {k: round(v, 1) for k, v in points.items()},
+            "total": round(sum(points.values()), 1),
+            "graded": graded, "words": words, "handed": handed,
+            "lessons": marks["n"],
+            "eligible": graded >= MIN_GRADED,
+            "missing": [l for k, l, _w in CHAMPIONSHIP if k not in parts],
+        })
+
+    rows.sort(key=lambda r: (r["eligible"], r["total"],
+                             r["points"].get("homework", 0)), reverse=True)
+    place = 0
+    for r in rows:
+        if r["eligible"]:
+            place += 1
+            r["rank"] = place
+        else:
+            r["rank"] = None
+    return {"month": month, "rows": rows,
+            "eligible": sum(1 for r in rows if r["eligible"])}
+
+
+def class_champions(standing, db):
+    """The best eligible student in each class - six winners, not one."""
+    best = {}
+    for r in standing["rows"]:
+        if not r["eligible"]:
+            continue
+        gid = r["student"]["group_id"]
+        if gid and (gid not in best or r["total"] > best[gid]["total"]):
+            best[gid] = r
+    return best
+
+
 def mark_score(raw):
     """A mark out of ten, in halves, or None. Anything else is refused."""
     try:
