@@ -1620,6 +1620,11 @@ def portal_class(db, s, token):
         below = (f'<p class="sub">The last {waiting} have not yet handed in '
                  f'{core.MIN_GRADED} marked pieces, so they are below the line and '
                  f'cannot win this season.</p>' if waiting else "")
+        frozen = ('<div class="card paused"><strong>The league is paused.</strong>'
+                  '<p class="sub" style="margin:6px 0 0">Your teacher has stopped the '
+                  'table for now. Nothing counts towards the championship until it '
+                  'starts again &mdash; keep working, it will be back.</p></div>'
+                  if champ["paused"] else "")
         left = core.SEASON_LESSONS - mine["lessons"]
         pace = ("Your season is finished &mdash; this score is finalised."
                 if mine["done"] else
@@ -1629,6 +1634,7 @@ def portal_class(db, s, token):
 <p class="sub">Every student in the school. A season lasts
 {core.SEASON_LESSONS} lessons, not a month, so everyone is judged over the same
 amount of teaching. {pace}</p>
+{frozen}
 <div class="card"><p style="margin:0 0 12px">{standing}.
 <a href="#me" class="findme">Find me in the table &darr;</a></p>
 <div class="cparts">{parts}</div></div>
@@ -2822,6 +2828,20 @@ long the rest of the school takes to catch up.</p>
 
     total = len(standing["rows"])
     done = standing["finished"]
+    if standing["paused"]:
+        control = (f'<form method="post" action="/championship/resume">'
+                   f'<button>Resume season {standing["season"]}</button></form>')
+        paused = (f'<div class="card paused"><strong>The league is paused.</strong>'
+                  f'<p class="sub" style="margin:6px 0 0">Paused since '
+                  f'{E(standing["paused_at"][:10])}. Nothing counts while it is off: '
+                  f'homework marked now, lessons taught now and words learnt now all '
+                  f'stay out of the season, and nobody\'s lesson count moves. The table '
+                  f'below is frozen exactly as it stood.</p>'
+                  f'<div style="margin-top:12px">{control}</div></div>')
+    else:
+        paused = ""
+        control = (f'<form method="post" action="/championship/pause">'
+                   f'<button class="ghost">Pause the league</button></form>')
     rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; up to {w:g} points</li>'
                     for _k, l, w in core.CHAMPIONSHIP)
     body_html = f"""<h1>Championship</h1>
@@ -2831,15 +2851,18 @@ Homework is the average of the marks you give &mdash; not how many pieces &mdash
 classes set different amounts of work still stand in the same table. Anything handed in
 after its deadline counts as a nought in that average.</p>
 {top}
+{paused}
 <div class="card"><strong>{done} of {total}</strong> students have finished their
 {core.SEASON_LESSONS} lessons.
 <p class="sub" style="margin:6px 0 0">A student's lesson count only moves when you record
 their marks for that day, so the season advances at the speed you record it. Close the
 season when enough of them have finished: the table is written into the record book with
 the winner's name, and the next season starts clear from that moment.</p>
-<form method="post" action="/championship/close" style="margin-top:12px"
+<div class="seasonbtns">
+<form method="post" action="/championship/close"
  onsubmit="return confirm('Close season {standing["season"]} and start the next one? The table is kept in the record book.')">
-<button class="danger">Close season {standing["season"]}</button></form></div>
+<button class="danger">Close season {standing["season"]}</button></form>
+{"" if standing["paused"] else control}</div></div>
 {"<h2>Class champions</h2><div class='quicklinks'>" + classes + "</div>" if classes else ""}
 <h2>The table</h2>
 <p class="sub">{standing["eligible"]} of {total} students have the
@@ -2868,6 +2891,16 @@ def act_start_season(req, db):
 
 def act_close_season(req, db):
     core.close_season(db)
+    return redirect("/championship")
+
+
+def act_pause_season(req, db):
+    core.pause_season(db)
+    return redirect("/championship")
+
+
+def act_resume_season(req, db):
+    core.resume_season(db)
     return redirect("/championship")
 
 
@@ -3551,6 +3584,8 @@ ROUTES = [
     ("GET",  r"^/championship$", view_championship),
     ("POST", r"^/championship/start$", act_start_season),
     ("POST", r"^/championship/close$", act_close_season),
+    ("POST", r"^/championship/pause$", act_pause_season),
+    ("POST", r"^/championship/resume$", act_resume_season),
     ("GET",  r"^/play$", view_play),
     ("GET",  r"^/play/(\d+)$", view_game_board),
     ("GET",  r"^/play/(\d+)/state\.json$", game_state_json),

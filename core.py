@@ -1419,6 +1419,62 @@ def season_no(db):
 def start_season(db, when=None):
     meta_set(db, "season_start", iso(when or now()))
     meta_set(db, "season_no", str(season_no(db)))
+    clear_pauses(db)
+
+
+def pause_windows(db):
+    """The stretches the league was switched off, as (from, to) instants.
+
+    A pause has to be subtracted rather than simply ignored: homework marked
+    during a holiday, lessons taught during it and words learnt during it must
+    all stay out of the season, or pausing would quietly reward whoever kept
+    working while the table was frozen.
+    """
+    raw = meta_get(db, "season_pauses")
+    out = [tuple(w) for w in json.loads(raw)] if raw else []
+    at = meta_get(db, "season_paused_at")
+    if at:
+        out.append((at, SEASON_OPEN))
+    return out
+
+
+def is_paused(db):
+    return bool(meta_get(db, "season_paused_at"))
+
+
+def pause_season(db, when=None):
+    if not is_paused(db):
+        meta_set(db, "season_paused_at", iso(when or now()))
+
+
+def resume_season(db, when=None):
+    at = meta_get(db, "season_paused_at")
+    if not at:
+        return
+    raw = meta_get(db, "season_pauses")
+    done = json.loads(raw) if raw else []
+    done.append([at, iso(when or now())])
+    meta_set(db, "season_pauses", json.dumps(done))
+    meta_set(db, "season_paused_at", "")
+
+
+def clear_pauses(db):
+    meta_set(db, "season_pauses", "[]")
+    meta_set(db, "season_paused_at", "")
+
+
+def paused_at(stamp, windows):
+    """Was this instant inside a pause?"""
+    return any(lo <= stamp < hi for lo, hi in windows)
+
+
+def paused_day(day, windows, cfg):
+    """Was this whole teaching day inside a pause?"""
+    for lo, hi in windows:
+        end = "9999-12-31" if hi == SEASON_OPEN else local_day(parse(hi), cfg)
+        if local_day(parse(lo), cfg) <= day < end:
+            return True
+    return False
 
 
 def day_start(day, cfg):
@@ -1437,9 +1493,11 @@ def season_window(db, student_id, lo, cfg):
     takes everybody else.
     """
     lo_day = local_day(parse(lo), cfg)
+    windows = pause_windows(db)
     days = [r["day"] for r in db.execute(
         "SELECT day FROM lesson_marks WHERE student_id=? AND day >= ?"
-        " ORDER BY day", (student_id, lo_day))]
+        " ORDER BY day", (student_id, lo_day))
+        if not paused_day(r["day"], windows, cfg)]
     if len(days) >= SEASON_LESSONS:
         closed = days[SEASON_LESSONS - 1]
         after = (datetime.strptime(closed, "%Y-%m-%d")
@@ -1454,8 +1512,10 @@ def championship(db, cfg=None):
     lo = season_start(db)
     if not lo:
         return {"started": False, "season": season_no(db), "start": None,
-                "rows": [], "eligible": 0, "finished": 0}
+                "rows": [], "eligible": 0, "finished": 0,
+                "paused": False, "paused_at": None}
 
+    windows = pause_windows(db)
     rows = []
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
         hi, lessons, closed = season_window(db, st["id"], lo, cfg)
@@ -1470,6 +1530,8 @@ def championship(db, cfg=None):
             " AND s.created_at >= ? AND s.created_at < ?", (st["id"], lo, hi)).fetchall()
         counted, late = [], 0
         for r in marked:
+            if paused_at(r["sent"], windows):
+                continue
             if r["due"] and r["sent"] > r["due"]:
                 counted.append(0.0)
                 late += 1
@@ -1480,19 +1542,21 @@ def championship(db, cfg=None):
         if graded:
             parts["homework"] = sum(counted) / graded / 10.0
 
-        words = db.execute(
-            "SELECT COUNT(*) c FROM word_progress WHERE student_id=? AND streak >= 3"
-            " AND last_seen >= ? AND last_seen < ?", (st["id"], lo, hi)).fetchone()["c"]
+        words = sum(1 for r in db.execute(
+            "SELECT last_seen FROM word_progress WHERE student_id=? AND streak >= 3"
+            " AND last_seen >= ? AND last_seen < ?", (st["id"], lo, hi))
+            if not paused_at(r["last_seen"], windows))
         parts["vocab"] = min(1.0, words / float(VOCAB_TARGET))
 
-        marks = db.execute(
-            "SELECT AVG((COALESCE(punctuality,0)+COALESCE(behaviour,0)"
-            "+COALESCE(participation,0)) / 3.0) a, COUNT(*) n FROM lesson_marks"
+        scored = [(r["punctuality"] or 0) + (r["behaviour"] or 0)
+                  + (r["participation"] or 0) for r in db.execute(
+            "SELECT day, punctuality, behaviour, participation FROM lesson_marks"
             " WHERE student_id=? AND day >= ? AND day < ?",
-            (st["id"], local_day(parse(lo), cfg), local_day(parse(hi), cfg)),
-        ).fetchone()
-        parts["conduct"] = (min(1.0, (marks["a"] or 0) / float(MARK_MAX))
-                            if marks["n"] else 0.0)
+            (st["id"], local_day(parse(lo), cfg), local_day(parse(hi), cfg)))
+            if not paused_day(r["day"], windows, cfg)]
+        parts["conduct"] = (min(1.0, (sum(scored) / len(scored) / 3.0) / float(MARK_MAX))
+                            if scored else 0.0)
+        lesson_n = len(scored)
 
         # no rescaling: the scale is small and fixed, so what is missing shows
         # as a nought rather than quietly inflating everything else
@@ -1504,6 +1568,7 @@ def championship(db, cfg=None):
             "handed": ("%d marked%s" % (graded, ", %d late" % late if late else "")
                        if graded else "nothing marked"),
             "lessons": lessons, "closed": closed, "done": closed is not None,
+            "marked_lessons": lesson_n,
             "average": round(sum(counted) / graded, 2) if graded else None,
             "eligible": graded >= MIN_GRADED,
             "missing": [l for k, l, _w in CHAMPIONSHIP if not parts.get(k)],
@@ -1519,6 +1584,7 @@ def championship(db, cfg=None):
         else:
             r["rank"] = None
     return {"started": True, "season": season_no(db), "start": lo, "rows": rows,
+            "paused": is_paused(db), "paused_at": meta_get(db, "season_paused_at"),
             "eligible": sum(1 for r in rows if r["eligible"]),
             "finished": sum(1 for r in rows if r["done"])}
 

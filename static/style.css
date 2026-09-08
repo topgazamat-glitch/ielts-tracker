@@ -985,3 +985,11 @@ ul.rules li { margin-bottom: 4px; }
 }
 .findme:hover { text-decoration: underline; }
 tr.me td { scroll-margin-top: 80px; }
+
+/* the league switched off: amber, because it is a held state, not a failure */
+.card.paused {
+  border-left: 4px solid var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface));
+}
+.seasonbtns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.seasonbtns form { margin: 0; }
