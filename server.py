@@ -3765,8 +3765,6 @@ ROUTES = [
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
-    ("GET", r"^/song$", view_song_today),
-    ("GET", r"^/song/(\d{4}-\d{2}-\d{2})$", view_song_day),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
@@ -3959,6 +3957,17 @@ class Handler(BaseHTTPRequestHandler):
                     if not student:
                         return self._send(*redirect("/login"))
                 return self._send(*serve_material(db, int(path.split("/")[2]), student))
+            finally:
+                db.close()
+        m = re.match(r"^/song(?:/(\d{4}-\d{2}-\d{2}))?$", path)
+        if m:
+            # the whole school shares one track a day, so this is deliberately
+            # open: an <audio> element cannot carry a student's token
+            db = core.connect()
+            try:
+                return self._send(*serve_song(
+                    {"query": query, "form": {}, "headers": self.headers},
+                    db, m.group(1)))
             finally:
                 db.close()
         if path == "/login":
