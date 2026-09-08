@@ -1319,12 +1319,16 @@ def climb(db, student_id):
 # people every month and everybody else stops reading it.
 
 CHAMPIONSHIP = [
-    ("homework", "Homework in", 40),
+    ("homework", "Homework in", 35),
     ("score", "Marks", 20),
+    ("early", "Handed in early", 10),
     ("improvement", "Improvement", 15),
-    ("vocab", "Words learned", 15),
+    ("vocab", "Words learned", 10),
     ("conduct", "In the lesson", 10),
 ]
+# A deadline shorter than this is treated as having no window worth measuring,
+# so homework set on the morning it is due never decides who was prompt.
+MIN_WINDOW_HOURS = 6
 MIN_GRADED = 3          # fewer than this and one lucky mark decides the month
 VOCAB_TARGET = 60       # words for full marks; beyond this it is worth nothing
 IMPROVE_FULL = 2.0      # a whole two points better than last month is full marks
@@ -1360,6 +1364,33 @@ def _avg_between(db, student_id, lo, hi):
     return r["a"], r["n"]
 
 
+def earliness(db, student_id, lo, hi):
+    """How early they hand work in, as a share of the time they were given.
+
+    One means it arrived the moment it was set, zero means it arrived on the
+    deadline or after it. Measured against each task's own window, so a week's
+    notice and a day's notice are judged on the same scale rather than the
+    student with the longer deadline always looking better.
+    """
+    rows = db.execute(
+        "SELECT s.created_at sent, a.created_at opened, a.due_at due"
+        " FROM submissions s JOIN assignments a ON a.id=s.assignment_id"
+        " WHERE s.student_id=? AND s.draft=0 AND a.due_at IS NOT NULL"
+        " AND s.created_at >= ? AND s.created_at < ?", (student_id, lo, hi)).fetchall()
+    shares = []
+    for r in rows:
+        due, opened, sent = parse(r["due"]), parse(r["opened"]), parse(r["sent"])
+        if not (due and opened and sent):
+            continue
+        window = (due - opened).total_seconds()
+        if window < MIN_WINDOW_HOURS * 3600:
+            continue
+        shares.append(max(0.0, min(1.0, (due - sent).total_seconds() / window)))
+    if not shares:
+        return None, 0
+    return sum(shares) / len(shares), len(shares)
+
+
 def championship(db, month=None, cfg=None):
     """Everyone's standing for one month, best first."""
     cfg = cfg or load_config()
@@ -1390,6 +1421,10 @@ def championship(db, month=None, cfg=None):
         if graded:
             parts["score"] = min(1.0, (avg or 0) / 10.0)
 
+        share, timed = earliness(db, st["id"], lo, hi)
+        if share is not None:
+            parts["early"] = share
+
         was, was_n = _avg_between(db, st["id"], plo, phi)
         if graded >= 2 and was_n >= 2:
             parts["improvement"] = max(0.0, min(1.0, ((avg or 0) - was) / IMPROVE_FULL))
@@ -1416,6 +1451,7 @@ def championship(db, month=None, cfg=None):
             "student": st, "points": {k: round(v, 1) for k, v in points.items()},
             "total": round(sum(points.values()), 1),
             "graded": graded, "words": words, "handed": handed,
+            "early_share": share, "timed": timed,
             "lessons": marks["n"],
             "eligible": graded >= MIN_GRADED,
             "missing": [l for k, l, _w in CHAMPIONSHIP if k not in parts],
