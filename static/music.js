@@ -174,11 +174,56 @@
 
   function songEl() {
     if (song || !window.SONG || !window.SONG.url) return song;
-    song = new Audio(window.SONG.url);
+    song = new Audio();
     song.loop = true;
-    song.preload = "none";
+    // buffer ahead rather than fetching just in time: the track is small and
+    // the round trip to the server is long, so trickling it is what stutters
+    song.preload = "auto";
     song.volume = 0.55;
+    song.src = window.SONG.url;
+
+    // every page here is a full navigation, so without this the song restarted
+    // from the beginning each time a tab was clicked
+    var key = "songat:" + window.SONG.url;
+    var at = 0;
+    try { at = parseFloat(sessionStorage.getItem(key)) || 0; } catch (e) {}
+    song.addEventListener("loadedmetadata", function () {
+      if (at > 0 && at < song.duration - 1) {
+        try { song.currentTime = at; } catch (e) {}
+      }
+    });
+    song.addEventListener("timeupdate", function () {
+      try { sessionStorage.setItem(key, song.currentTime); } catch (e) {}
+    });
+
+    // if the network drops a chunk the element can sit in a stalled state for
+    // a long time; poke it rather than leave a silent page
+    ["stalled", "waiting"].forEach(function (ev) {
+      song.addEventListener(ev, function () {
+        if (!on || song.paused) return;
+        clearTimeout(song._poke);
+        song._poke = setTimeout(function () {
+          if (on && !song.paused) { song.load(); resume(); }
+        }, 4000);
+      });
+    });
+    song.load();
     return song;
+  }
+
+  function resume() {
+    if (!song) return;
+    var at = 0;
+    try { at = parseFloat(sessionStorage.getItem("songat:" + window.SONG.url)) || 0; }
+    catch (e) {}
+    song.addEventListener("loadedmetadata", function once() {
+      song.removeEventListener("loadedmetadata", once);
+      if (at > 0 && at < song.duration - 1) {
+        try { song.currentTime = at; } catch (e) {}
+      }
+      var p = song.play();
+      if (p && p.catch) { p.catch(function () {}); }
+    }, {once: true});
   }
 
   function start() {
@@ -201,7 +246,7 @@
   }
 
   function stop() {
-    if (song) { song.pause(); }
+    if (song) { song.pause(); clearTimeout(song._poke); }
     if (timer) { clearInterval(timer); timer = null; }
     piece = null;
   }

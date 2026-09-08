@@ -3356,6 +3356,9 @@ def act_delete_song(req, db):
     return redirect(f"/music?day={day}&note=gone")
 
 
+SONG_CHUNK = 2 * 1024 * 1024
+
+
 def serve_song(req, db, day=None):
     """The day's song, with byte ranges.
 
@@ -3385,13 +3388,21 @@ def serve_song(req, db, day=None):
             return (416, [("Content-Range", "bytes */%d" % size),
                           ("Content-Length", "0")], b"")
         partial = True
+    # an open-ended range would put the whole file in memory once per listener,
+    # so hand back a couple of megabytes and let the player ask for the rest.
+    # only ever to a client that asked for a range: a plain link must still
+    # get the whole file, not a truncated one.
+    if partial:
+        end = min(end, start + SONG_CHUNK - 1)
     with open(path, "rb") as fh:
         fh.seek(start)
         blob = fh.read(end - start + 1)
     headers = [("Content-Type", row["mime"]),
                ("Accept-Ranges", "bytes"),
                ("Content-Length", str(len(blob))),
-               ("Cache-Control", "public, max-age=3600")]
+               # the url carries the upload stamp, so a cached copy is never
+               # stale: this is what stops every page click refetching the song
+               ("Cache-Control", "public, max-age=31536000, immutable")]
     if partial:
         headers.append(("Content-Range", "bytes %d-%d/%d" % (start, end, size)))
         return 206, headers, blob
@@ -3905,14 +3916,31 @@ class Handler(BaseHTTPRequestHandler):
     ]
 
     def _send(self, status, headers, body):
-        self.send_response(status)
-        for k, v in self.SECURITY_HEADERS:
-            self.send_header(k, v)
-        for k, v in headers:
-            self.send_header(k, v)
-        self.end_headers()
-        if body:
-            self.wfile.write(body)
+        """Write a response, in pieces, tolerating a client that walks away.
+
+        A media element asks for a range, takes what it needs to fill its
+        buffer and hangs up mid-transfer. That is normal behaviour, not an
+        error: sending the body in one call made every one of those a broken
+        pipe, and the browser answered each dead connection by opening another
+        - which is what the stuttering was.
+        """
+        try:
+            self.send_response(status)
+            for k, v in self.SECURITY_HEADERS:
+                self.send_header(k, v)
+            for k, v in headers:
+                self.send_header(k, v)
+            self.end_headers()
+            if body and self.command != "HEAD":
+                view = memoryview(body)
+                for off in range(0, len(view), 64 * 1024):
+                    self.wfile.write(view[off:off + 64 * 1024])
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
+    def do_HEAD(self):
+        # players ask before they fetch; a 501 here reads as a broken file
+        self.do_GET()
 
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
