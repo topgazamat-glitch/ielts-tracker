@@ -752,11 +752,12 @@ def group_homework(db, g):
             state = '<span class="pill watch">deadline passed</span>'
         else:
             state = '<span class="pill">open</span>'
-        due = (a["due_at"] or "")[:10]
+        due, due_time = core.deadline_parts(a["due_at"])
         rows += f"""<tr><td>
   <form method="post" action="/assignments/{a["id"]}/edit" class="inline">
     <input name="title" value="{E(a["title"])}" style="min-width:210px">
     <input type="date" name="due" value="{E(due)}">
+    <input type="time" name="due_time" value="{E(due_time)}" step="60">
     <button class="ghost">Save</button>
   </form></td>
   <td>{state}</td><td>{got}/{total}</td>
@@ -767,7 +768,8 @@ def group_homework(db, g):
       <button class="ghost">Delete</button></form></td></tr>"""
     last = core.last_homework_batch(db, g["id"])
     if last:
-        when = (last[0]["due_at"] or last[0]["created_at"] or "")[:10]
+        when, last_time = core.deadline_parts(
+            last[0]["due_at"] or last[0]["created_at"])
         titles = ", ".join(a["title"] for a in last[:3])
         if len(last) > 3:
             titles += " and %d more" % (len(last) - 3)
@@ -779,6 +781,8 @@ def group_homework(db, g):
     </div>
     <label class="f" style="margin:0">New deadline
       <input type="date" name="due" value="{E(core.shift_days(when, 7))}" required></label>
+    <label class="f" style="margin:0">at
+      <input type="time" name="due_time" value="{E(last_time or '23:59')}" step="60"></label>
     <label class="check"><input type="checkbox" name="announce" value="1" checked>
       <span>Tell students</span></label>
     <button>Repeat {len(last)} task{"" if len(last) == 1 else "s"}</button>
@@ -952,6 +956,7 @@ def view_assignments(req, db):
 <option value="task2">Task 2</option><option value="task1">Task 1</option>
 <option value="other">Other</option></select></label>
 <label class="f">Due<input type="date" name="due"></label>
+<label class="f">at<input type="time" name="due_time" value="23:59" step="60"></label>
 <label class="f" style="justify-content:flex-end">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
 <input type="checkbox" name="publish" value="1"> open to students now</span></label>
@@ -966,6 +971,7 @@ cannot see it or submit to it until you press Publish.</p></div>
 <div class="inline" style="margin-bottom:10px">
 <label class="f">Group<select name="group_id">{opts}</select></label>
 <label class="f">Due<input type="date" name="due"></label>
+<label class="f">at<input type="time" name="due_time" value="23:59" step="60"></label>
 <label class="f" style="justify-content:flex-end">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
 <input type="checkbox" name="publish" value="1" checked> open to students now</span></label>
@@ -1570,7 +1576,8 @@ def portal_class(db, s, token):
             standing = (f'You are <strong>{mine["rank"]}'
                         f'{"st" if mine["rank"] == 1 else "nd" if mine["rank"] == 2 else "rd" if mine["rank"] == 3 else "th"}'
                         f'</strong> in the school with '
-                        f'<strong>{mine["total"]:g}</strong> points')
+                        f'<strong>{mine["total"]:g}</strong> of '
+                        f'{core.CHAMPIONSHIP_MAX:g} points')
         else:
             standing = (f'You need {core.MIN_GRADED} marked pieces of homework this '
                         f'month to enter. You have {mine["graded"]}')
@@ -1579,7 +1586,7 @@ def portal_class(db, s, token):
             f'<span class="cbar"><i style="width:'
             f'{min(100, (mine["points"].get(key, 0) / float(weight) * 100)):.0f}%"></i></span>'
             f'<b>{mine["points"].get(key, 0):g}</b></div>'
-            for key, label, weight in core.CHAMPIONSHIP if key in mine["points"])
+            for key, label, weight in core.CHAMPIONSHIP)
         rows = "".join(
             f'<tr class="{"me" if r["student"]["id"] == s["id"] else ""}">'
             f'<td>{i}.</td><td>{E(r["student"]["name"])}</td>'
@@ -2705,7 +2712,7 @@ def champ_row(db, r, show_group=True, me=None):
         if got is None:
             bars += f'<td class="sub cnone" title="{E(label)}: nothing recorded">&mdash;</td>'
             continue
-        share = got / (weight * 100.0 / 100.0) if weight else 0
+        share = got / weight * 100.0 if weight else 0
         bars += (f'<td class="cpt"><span class="cbar"><i style="width:'
                  f'{min(100, share):.0f}%"></i></span>{got:g}</td>')
     group = f'<td>{E(group_name(db, st["group_id"]))}</td>' if show_group else ""
@@ -2738,7 +2745,7 @@ def view_championship(req, db):
         top = (f'<div class="champ-hero"><div class="sub">Leading this month</div>'
                f'<div class="champ-name">{E(winner["student"]["name"])}</div>'
                f'<div class="sub">{E(group_name(db, winner["student"]["group_id"]))}'
-               f' &middot; {winner["total"]:g} points</div></div>')
+               f' &middot; {winner["total"]:g} of {core.CHAMPIONSHIP_MAX:g} points</div></div>')
 
     classes = ""
     for gid, r in sorted(champs.items(), key=lambda kv: group_name(db, kv[0])):
@@ -2754,12 +2761,13 @@ def view_championship(req, db):
               f'{month}</a><a class="tab" href="/championship?month={nxt}">{nxt} &rarr;</a>'
               f'</div>')
 
-    rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; {w} points</li>'
+    rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; up to {w:g} points</li>'
                     for _k, l, w in core.CHAMPIONSHIP)
     body_html = f"""<h1>Championship</h1>
-<p class="sub">One month, one hundred points, everyone in the school. Every part is
-a share of what was available to that student, so classes set different amounts of
-work still stand in the same table.</p>
+<p class="sub">One month, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
+Homework is the average of the marks you give &mdash; not how many pieces &mdash; so two
+classes set different amounts of work still stand in the same table. Anything handed in
+after its deadline counts as a nought in that average.</p>
 {switch}
 {top}
 {"<h2>Class champions</h2><div class='quicklinks'>" + classes + "</div>" if classes else ""}
@@ -2772,12 +2780,13 @@ line and cannot win this month.</p>
 {body or '<tr><td colspan=10 class="sub">Nobody yet.</td></tr>'}</table></div>
 <h2>How the points work</h2>
 <div class="card"><ul class="rules">{rules}</ul>
-<p class="sub" style="margin:10px 0 0">A student needs {core.MIN_GRADED} marked pieces
-to be eligible. Words learned count up to {core.VOCAB_TARGET}. Improvement is measured
-against their own previous month, and a full {[w for k,_l,w in core.CHAMPIONSHIP if k=='improvement'][0]}
-points needs {core.IMPROVE_FULL:g} marks better. Anything you have not recorded &mdash;
-lesson marks, say &mdash; is dropped and its weight shared by the rest, so nobody is
-punished for a gap in your records.</p></div>"""
+<p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten,
+scaled to {core.CHAMPIONSHIP_MAX and 3}; a piece handed in after its deadline is a nought in
+that average. Words count up to {core.VOCAB_TARGET}. In the lesson is the average of
+punctuality, behaviour and taking part. A student needs {core.MIN_GRADED} marked pieces to
+be eligible &mdash; otherwise one lucky ten out of ten decides the month. Nothing you have
+not recorded scores anything, so an unmarked lesson is a nought for everyone alike and the
+order of the table is unaffected.</p></div>"""
     return html_response(page("Championship", body_html, "League"))
 
 
@@ -3190,7 +3199,7 @@ def act_new_assignment(req, db):
     if not title or not gid:
         return redirect("/assignments")
     due = f.get("due", [""])[0]
-    due_iso = f"{due}T23:59:00+00:00" if due else None
+    due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
     publish_now = f.get("publish", [""])[0] == "1"
     if already_set(db, int(gid), title, due_iso):
         return redirect("/assignments")
@@ -3215,7 +3224,7 @@ def act_repeat_homework(req, db, gid):
     due = (req["form"].get("due", [""])[0] or "").strip()
     if not due:
         return redirect(f"/groups/{gid}?tab=homework")
-    due_iso = f"{due}T23:59:00+00:00"
+    due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
     made = []
     for a in core.last_homework_batch(db, gid):
         if already_set(db, gid, a["title"], due_iso):
@@ -3280,7 +3289,7 @@ def act_new_list(req, db):
     if not gid or not items:
         return redirect("/assignments")
     due = f.get("due", [""])[0]
-    due_iso = f"{due}T23:59:00+00:00" if due else None
+    due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
     publish_now = f.get("publish", [""])[0] == "1"
     created = []
     for title in items:
@@ -3348,7 +3357,7 @@ def act_edit_assignment(req, db, aid):
     if title:
         db.execute("UPDATE assignments SET title=? WHERE id=?", (title[:120], aid))
     db.execute("UPDATE assignments SET due_at=? WHERE id=?",
-               (f"{due}T23:59:00+00:00" if due else None, aid))
+               (core.deadline_iso(due, f.get("due_time", [""])[0]), aid))
     db.commit()
     return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
 

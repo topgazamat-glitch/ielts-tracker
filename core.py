@@ -1319,19 +1319,47 @@ def climb(db, student_id):
 # people every month and everybody else stops reading it.
 
 CHAMPIONSHIP = [
-    ("homework", "Homework in", 35),
-    ("score", "Marks", 20),
-    ("early", "Handed in early", 10),
-    ("improvement", "Improvement", 15),
-    ("vocab", "Words learned", 10),
-    ("conduct", "In the lesson", 10),
+    ("homework", "Homework", 3.0),
+    ("vocab", "Words learned", 2.0),
+    ("conduct", "In the lesson", 2.0),
 ]
-# A deadline shorter than this is treated as having no window worth measuring,
-# so homework set on the morning it is due never decides who was prompt.
-MIN_WINDOW_HOURS = 6
+CHAMPIONSHIP_MAX = sum(w for _k, _l, w in CHAMPIONSHIP)
 MIN_GRADED = 3          # fewer than this and one lucky mark decides the month
 VOCAB_TARGET = 60       # words for full marks; beyond this it is worth nothing
-IMPROVE_FULL = 2.0      # a whole two points better than last month is full marks
+
+
+def deadline_iso(day, clock=None, cfg=None):
+    """A deadline typed in Tashkent time, stored as the instant it really is.
+
+    Deadlines used to be written as 23:59 UTC, which is five in the morning
+    here - so every one of them fell most of a day later than it read. The time
+    is taken as local now and converted, which is what a teacher means when
+    they write six o'clock.
+    """
+    if not day:
+        return None
+    cfg = cfg or load_config()
+    clock = (clock or "").strip() or "23:59"
+    try:
+        when = datetime.strptime("%s %s" % (day, clock), "%Y-%m-%d %H:%M")
+    except ValueError:
+        try:
+            when = datetime.strptime(day, "%Y-%m-%d").replace(hour=23, minute=59)
+        except ValueError:
+            return None
+    when = when.replace(tzinfo=timezone.utc) - timedelta(
+        hours=cfg["timezone_offset_hours"])
+    return iso(when)
+
+
+def deadline_parts(due_at, cfg=None):
+    """A stored deadline back as the date and time a teacher would type."""
+    cfg = cfg or load_config()
+    when = parse(due_at)
+    if not when:
+        return "", ""
+    local = when + timedelta(hours=cfg["timezone_offset_hours"])
+    return local.strftime("%Y-%m-%d"), local.strftime("%H:%M")
 
 
 def month_key(dt=None, cfg=None):
@@ -1364,33 +1392,6 @@ def _avg_between(db, student_id, lo, hi):
     return r["a"], r["n"]
 
 
-def earliness(db, student_id, lo, hi):
-    """How early they hand work in, as a share of the time they were given.
-
-    One means it arrived the moment it was set, zero means it arrived on the
-    deadline or after it. Measured against each task's own window, so a week's
-    notice and a day's notice are judged on the same scale rather than the
-    student with the longer deadline always looking better.
-    """
-    rows = db.execute(
-        "SELECT s.created_at sent, a.created_at opened, a.due_at due"
-        " FROM submissions s JOIN assignments a ON a.id=s.assignment_id"
-        " WHERE s.student_id=? AND s.draft=0 AND a.due_at IS NOT NULL"
-        " AND s.created_at >= ? AND s.created_at < ?", (student_id, lo, hi)).fetchall()
-    shares = []
-    for r in rows:
-        due, opened, sent = parse(r["due"]), parse(r["opened"]), parse(r["sent"])
-        if not (due and opened and sent):
-            continue
-        window = (due - opened).total_seconds()
-        if window < MIN_WINDOW_HOURS * 3600:
-            continue
-        shares.append(max(0.0, min(1.0, (due - sent).total_seconds() / window)))
-    if not shares:
-        return None, 0
-    return sum(shares) / len(shares), len(shares)
-
-
 def championship(db, month=None, cfg=None):
     """Everyone's standing for one month, best first."""
     cfg = cfg or load_config()
@@ -1400,34 +1401,25 @@ def championship(db, month=None, cfg=None):
 
     rows = []
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
+        # Homework is the average of the marks given, not the number handed in,
+        # so two classes set different amounts of work still compare. Anything
+        # arriving after its deadline counts as a zero in that average.
+        marked = db.execute(
+            "SELECT s.score, s.created_at sent, a.due_at due FROM submissions s"
+            " LEFT JOIN assignments a ON a.id=s.assignment_id"
+            " WHERE s.student_id=? AND s.status='graded' AND s.score IS NOT NULL"
+            " AND s.created_at >= ? AND s.created_at < ?", (st["id"], lo, hi)).fetchall()
+        counted, late = [], 0
+        for r in marked:
+            if r["due"] and r["sent"] > r["due"]:
+                counted.append(0.0)
+                late += 1
+            else:
+                counted.append(r["score"])
+        graded = len(counted)
         parts = {}
-
-        set_for_them = db.execute(
-            "SELECT id FROM assignments WHERE group_id=? AND published=1"
-            " AND COALESCE(due_at, created_at) >= ? AND COALESCE(due_at, created_at) < ?",
-            (st["group_id"], lo, hi)).fetchall()
-        if set_for_them:
-            ids = [a["id"] for a in set_for_them]
-            done = db.execute(
-                "SELECT COUNT(DISTINCT assignment_id) c FROM submissions"
-                " WHERE student_id=? AND draft=0 AND assignment_id IN (%s)"
-                % ",".join("?" * len(ids)), [st["id"]] + ids).fetchone()["c"]
-            parts["homework"] = min(1.0, done / float(len(ids)))
-            handed = "%d of %d" % (done, len(ids))
-        else:
-            handed = "none set"
-
-        avg, graded = _avg_between(db, st["id"], lo, hi)
         if graded:
-            parts["score"] = min(1.0, (avg or 0) / 10.0)
-
-        share, timed = earliness(db, st["id"], lo, hi)
-        if share is not None:
-            parts["early"] = share
-
-        was, was_n = _avg_between(db, st["id"], plo, phi)
-        if graded >= 2 and was_n >= 2:
-            parts["improvement"] = max(0.0, min(1.0, ((avg or 0) - was) / IMPROVE_FULL))
+            parts["homework"] = sum(counted) / graded / 10.0
 
         words = db.execute(
             "SELECT COUNT(*) c FROM word_progress WHERE student_id=? AND streak >= 3"
@@ -1439,22 +1431,22 @@ def championship(db, month=None, cfg=None):
             "+COALESCE(participation,0)) / 3.0) a, COUNT(*) n FROM lesson_marks"
             " WHERE student_id=? AND day >= ? AND day < ?",
             (st["id"], lo[:10], hi[:10])).fetchone()
-        if marks["n"]:
-            parts["conduct"] = min(1.0, (marks["a"] or 0) / float(MARK_MAX))
+        parts["conduct"] = (min(1.0, (marks["a"] or 0) / float(MARK_MAX))
+                            if marks["n"] else 0.0)
 
-        # a measure nobody could score on is dropped, and the rest share its
-        # weight, so a student is never punished for something not recorded
-        live = [(k, w) for k, _l, w in CHAMPIONSHIP if k in parts]
-        total_weight = sum(w for _k, w in live) or 1
-        points = {k: parts[k] * w * 100.0 / total_weight for k, w in live}
+        # no rescaling: the scale is small and fixed, so what is missing shows
+        # as a nought rather than quietly inflating everything else
+        points = {k: parts.get(k, 0.0) * w for k, _l, w in CHAMPIONSHIP}
         rows.append({
-            "student": st, "points": {k: round(v, 1) for k, v in points.items()},
-            "total": round(sum(points.values()), 1),
-            "graded": graded, "words": words, "handed": handed,
-            "early_share": share, "timed": timed,
+            "student": st, "points": {k: round(v, 2) for k, v in points.items()},
+            "total": round(sum(points.values()), 2),
+            "graded": graded, "words": words, "late": late,
+            "handed": ("%d marked%s" % (graded, ", %d late" % late if late else "")
+                       if graded else "nothing marked"),
             "lessons": marks["n"],
+            "average": round(sum(counted) / graded, 2) if graded else None,
             "eligible": graded >= MIN_GRADED,
-            "missing": [l for k, l, _w in CHAMPIONSHIP if k not in parts],
+            "missing": [l for k, l, _w in CHAMPIONSHIP if not parts.get(k)],
         })
 
     rows.sort(key=lambda r: (r["eligible"], r["total"],
