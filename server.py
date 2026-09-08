@@ -3293,13 +3293,22 @@ def view_music(req, db):
                    f'{" (today)" if day == today else ""}.</div></div>')
 
     rows = ""
+    missing = 0
     for r in core.recent_songs(db, 30):
         here = ' class="me"' if r["day"] == today else ''
+        # a row whose file has gone would otherwise fail silently, playing
+        # nothing and looking exactly like a day nobody set a song for
+        ok = os.path.isfile(os.path.join(core.MUSIC_DIR, r["filename"]))
+        if not ok:
+            missing += 1
+        state = ('<span class="sub">on disk</span>' if ok
+                 else '<strong class="gone">file missing</strong>')
         rows += (f'<tr{here}>'
                  f'<td><a href="/music?day={r["day"]}">{r["day"]}</a></td>'
                  f'<td>{E(r["title"] or r["original_name"] or "&mdash;")}</td>'
                  f'<td class="sub">{E(r["artist"] or "")}</td>'
-                 f'<td class="sub">{r["bytes"] / 1024.0 / 1024.0:.1f} MB</td></tr>')
+                 f'<td class="sub">{r["bytes"] / 1024.0 / 1024.0:.1f} MB</td>'
+                 f'<td>{state}</td></tr>')
 
     body = f"""<h1>Song of the day</h1>
 <p class="sub">One track a day for the whole school. Students hear it on their pages,
@@ -3324,8 +3333,12 @@ opens your music or your downloads.</p></div>
 <h2>Recent days</h2>
 <p class="sub">{count} songs stored, {used / 1024.0 / 1024.0:.0f} MB in all.</p>
 <div class="tablewrap"><table><tr><th>Day</th><th>Title</th><th>Artist</th>
-<th>Size</th></tr>{rows or '<tr><td colspan=4 class="sub">Nothing yet.</td></tr>'}
-</table></div>"""
+<th>Size</th><th>File</th></tr>
+{rows or '<tr><td colspan=5 class="sub">Nothing yet.</td></tr>'}
+</table></div>
+{f'<div class="card paused">{missing} of these have lost their audio file. The day is'
+ ' still listed but nothing will play; set the song again for that day.</div>'
+ if missing else ''}"""
     return html_response(page("Song of the day", body, "Music"))
 
 

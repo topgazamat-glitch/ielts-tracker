@@ -1006,3 +1006,5 @@ tr.me td { scroll-margin-top: 80px; }
   border-left: 4px solid var(--ok);
   background: color-mix(in srgb, var(--ok) 8%, var(--surface));
 }
+
+.gone { color: var(--red); font-weight: 600; font-size: 12px; }
