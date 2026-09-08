@@ -1554,6 +1554,33 @@ def portal_profile(db, s, token, flash=""):
 </form></div></details>"""
 
 
+def portal_champ_row(db, r, me_id):
+    """One line of the league as a student sees it.
+
+    The same table the teacher sees, minus the links into the teacher's pages:
+    a league nobody can read in full is a league students argue about.
+    """
+    st = r["student"]
+    me = st["id"] == me_id
+    medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
+    place = (medals.get(r["rank"], str(r["rank"]) + ".") if r["rank"]
+             else '<span class="sub">&mdash;</span>')
+    bars = ""
+    for key, label, weight in core.CHAMPIONSHIP:
+        got = r["points"].get(key, 0)
+        share = got / weight * 100.0 if weight else 0
+        bars += (f'<td class="cpt"><span class="cbar"><i style="width:'
+                 f'{min(100, share):.0f}%"></i></span>{got:g}</td>')
+    of = core.SEASON_LESSONS
+    lessons = (f'<td class="sub">{of}/{of} &#10003;</td>' if r["done"]
+               else f'<td class="sub">{r["lessons"]}/{of}</td>')
+    mark = ' id="me" class="me"' if me else ''
+    return (f'<tr{mark}><td>{place}</td>'
+            f'<td>{E(st["name"])}{" &#9668;" if me else ""}</td>'
+            f'<td class="sub">{E(group_name(db, st["group_id"]))}</td>'
+            f'<td><strong>{r["total"]:g}</strong></td>{bars}{lessons}</tr>')
+
+
 def portal_class(db, s, token):
     rows = core.rating_rows(db, s["group_id"])
     medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
@@ -1569,7 +1596,6 @@ def portal_class(db, s, token):
                 f'<td style="text-align:right">{score_pill(r["average"])}</td></tr>')
     champ = core.championship(db)
     mine = next((r for r in champ["rows"] if r["student"]["id"] == s["id"]), None)
-    top = [r for r in champ["rows"] if r["eligible"]][:5]
     league = ""
     if mine and champ["started"]:
         if mine["eligible"]:
@@ -1587,11 +1613,13 @@ def portal_class(db, s, token):
             f'{min(100, (mine["points"].get(key, 0) / float(weight) * 100)):.0f}%"></i></span>'
             f'<b>{mine["points"].get(key, 0):g}</b></div>'
             for key, label, weight in core.CHAMPIONSHIP)
-        rows = "".join(
-            f'<tr class="{"me" if r["student"]["id"] == s["id"] else ""}">'
-            f'<td>{i}.</td><td>{E(r["student"]["name"])}</td>'
-            f'<td style="text-align:right"><strong>{r["total"]:g}</strong></td></tr>'
-            for i, r in enumerate(top, 1))
+        rows = "".join(portal_champ_row(db, r, s["id"]) for r in champ["rows"])
+        chead = "".join(f'<th title="up to {w:g} points">{E(l)}</th>'
+                        for _k, l, w in core.CHAMPIONSHIP)
+        waiting = len(champ["rows"]) - champ["eligible"]
+        below = (f'<p class="sub">The last {waiting} have not yet handed in '
+                 f'{core.MIN_GRADED} marked pieces, so they are below the line and '
+                 f'cannot win this season.</p>' if waiting else "")
         left = core.SEASON_LESSONS - mine["lessons"]
         pace = ("Your season is finished &mdash; this score is finalised."
                 if mine["done"] else
@@ -1601,10 +1629,12 @@ def portal_class(db, s, token):
 <p class="sub">Every student in the school. A season lasts
 {core.SEASON_LESSONS} lessons, not a month, so everyone is judged over the same
 amount of teaching. {pace}</p>
-<div class="card"><p style="margin:0 0 12px">{standing}.</p>
+<div class="card"><p style="margin:0 0 12px">{standing}.
+<a href="#me" class="findme">Find me in the table &darr;</a></p>
 <div class="cparts">{parts}</div></div>
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th>
-<th style="text-align:right">Points</th></tr>{rows}</table></div>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Class</th>
+<th>Points</th>{chead}<th>Lessons</th></tr>{rows}</table></div>
+{below}
 """
 
     return f"""{league}<h2>Class standings</h2>
