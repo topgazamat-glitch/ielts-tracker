@@ -1567,11 +1567,11 @@ def portal_class(db, s, token):
                 f'<td><strong>{fmt(r["index"])}</strong></td>'
                 f'<td>{comp}%</td>'
                 f'<td style="text-align:right">{score_pill(r["average"])}</td></tr>')
-    champ = core.championship(db, core.month_key())
+    champ = core.championship(db)
     mine = next((r for r in champ["rows"] if r["student"]["id"] == s["id"]), None)
     top = [r for r in champ["rows"] if r["eligible"]][:5]
     league = ""
-    if mine:
+    if mine and champ["started"]:
         if mine["eligible"]:
             standing = (f'You are <strong>{mine["rank"]}'
                         f'{"st" if mine["rank"] == 1 else "nd" if mine["rank"] == 2 else "rd" if mine["rank"] == 3 else "th"}'
@@ -1580,7 +1580,7 @@ def portal_class(db, s, token):
                         f'{core.CHAMPIONSHIP_MAX:g} points')
         else:
             standing = (f'You need {core.MIN_GRADED} marked pieces of homework this '
-                        f'month to enter. You have {mine["graded"]}')
+                        f'season to enter. You have {mine["graded"]}')
         parts = "".join(
             f'<div class="cp"><span>{E(label)}</span>'
             f'<span class="cbar"><i style="width:'
@@ -1592,8 +1592,15 @@ def portal_class(db, s, token):
             f'<td>{i}.</td><td>{E(r["student"]["name"])}</td>'
             f'<td style="text-align:right"><strong>{r["total"]:g}</strong></td></tr>'
             for i, r in enumerate(top, 1))
-        league = f"""<h2>Championship &mdash; {E(champ["month"])}</h2>
-<p class="sub">Every student in the school, starting again on the first of the month.</p>
+        left = core.SEASON_LESSONS - mine["lessons"]
+        pace = ("Your season is finished &mdash; this score is finalised."
+                if mine["done"] else
+                f'{mine["lessons"]} of {core.SEASON_LESSONS} lessons done, '
+                f'{left} to go.')
+        league = f"""<h2>Championship &mdash; season {champ["season"]}</h2>
+<p class="sub">Every student in the school. A season lasts
+{core.SEASON_LESSONS} lessons, not a month, so everyone is judged over the same
+amount of teaching. {pace}</p>
 <div class="card"><p style="margin:0 0 12px">{standing}.</p>
 <div class="cparts">{parts}</div></div>
 <div class="tablewrap"><table><tr><th>#</th><th>Student</th>
@@ -2717,23 +2724,51 @@ def champ_row(db, r, show_group=True, me=None):
                  f'{min(100, share):.0f}%"></i></span>{got:g}</td>')
     group = f'<td>{E(group_name(db, st["group_id"]))}</td>' if show_group else ""
     mine = ' class="me"' if me == st["id"] else ""
+    seen = r.get("lessons", 0)
+    of = core.SEASON_LESSONS
+    lessons = (f'<td class="sub" title="season closed on {r["closed"]}">'
+               f'{of}/{of} &#10003;</td>' if r.get("done")
+               else f'<td class="sub">{seen}/{of}</td>')
     return (f'<tr{mine}><td>{place}</td>'
             f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>{group}'
-            f'<td><strong>{r["total"]:g}</strong></td>{bars}'
+            f'<td><strong>{r["total"]:g}</strong></td>{bars}{lessons}'
             f'<td class="sub">{E(r["handed"])}</td></tr>')
 
 
 def view_championship(req, db):
-    """The monthly table, with every student's five parts on show.
+    """The season table, with every student's parts on show.
 
     The breakdown is the point: a prize decided by numbers nobody can see is a
     prize people argue about.
     """
-    month = (req["query"].get("month", [""])[0] or "").strip()
-    if not re.match(r"^\d{4}-\d{2}$", month):
-        month = core.month_key()
-    standing = core.championship(db, month)
-    champs = core.class_champions(standing, db)
+    standing = core.championship(db)
+    past = core.past_seasons(db)
+
+    history = ""
+    if past:
+        history = "<h2>Past seasons</h2><div class=\"tablewrap\"><table>" \
+                  "<tr><th>Season</th><th>Winner</th><th>Points</th><th>Closed</th></tr>"
+        for row in past:
+            history += (f'<tr><td>{row["no"]}</td>'
+                        f'<td><strong>{E(row["winner_name"] or "&mdash;")}</strong></td>'
+                        f'<td>{row["winner_points"] or 0:g}</td>'
+                        f'<td class="sub">{E(row["closed_at"][:10])}</td></tr>')
+        history += "</table></div>"
+
+    if not standing["started"]:
+        body_html = f"""<h1>Championship</h1>
+<p class="sub">The table is clear. Season {standing["season"]} begins the moment you
+start it, and nothing recorded before that counts towards it.</p>
+<div class="card"><h2 style="margin-top:0">Season {standing["season"]}</h2>
+<p class="sub">A season runs for <strong>{core.SEASON_LESSONS} lessons per student</strong>,
+not for a calendar month. A class that meets thirteen times and a class that meets twelve
+are then judged over exactly the same amount of teaching. A student's season closes on
+their {core.SEASON_LESSONS}th recorded lesson and their score is frozen there, however
+long the rest of the school takes to catch up.</p>
+<form method="post" action="/championship/start" style="margin-top:14px">
+<button>Start season {standing["season"]}</button></form></div>
+{history}"""
+        return html_response(page("Championship", body_html, "League"))
 
     head = "".join(f'<th title="{w} points">{E(l)}</th>'
                    for _k, l, w in core.CHAMPIONSHIP)
@@ -2742,52 +2777,68 @@ def view_championship(req, db):
     winner = next((r for r in standing["rows"] if r["rank"] == 1), None)
     top = ""
     if winner:
-        top = (f'<div class="champ-hero"><div class="sub">Leading this month</div>'
+        top = (f'<div class="champ-hero"><div class="sub">Leading season '
+               f'{standing["season"]}</div>'
                f'<div class="champ-name">{E(winner["student"]["name"])}</div>'
                f'<div class="sub">{E(group_name(db, winner["student"]["group_id"]))}'
                f' &middot; {winner["total"]:g} of {core.CHAMPIONSHIP_MAX:g} points</div></div>')
 
+    champs = core.class_champions(standing, db)
     classes = ""
     for gid, r in sorted(champs.items(), key=lambda kv: group_name(db, kv[0])):
         classes += (f'<div class="quick"><div class="sub">{E(group_name(db, gid))}</div>'
                     f'<strong>{E(r["student"]["name"])}</strong>'
                     f'<div class="sub">{r["total"]:g} points</div></div>')
 
-    prev, nxt = core.previous_month(month), None
-    y, m = int(month[:4]), int(month[5:])
-    nxt = "%04d-%02d" % (y + (m == 12), 1 if m == 12 else m + 1)
-    switch = (f'<div class="tabs"><a class="tab" href="/championship?month={prev}">'
-              f'&larr; {prev}</a><a class="tab on" href="/championship?month={month}">'
-              f'{month}</a><a class="tab" href="/championship?month={nxt}">{nxt} &rarr;</a>'
-              f'</div>')
-
+    total = len(standing["rows"])
+    done = standing["finished"]
     rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; up to {w:g} points</li>'
                     for _k, l, w in core.CHAMPIONSHIP)
     body_html = f"""<h1>Championship</h1>
-<p class="sub">One month, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
+<p class="sub">Season {standing["season"]}, started {E(standing["start"][:10])}.
+{core.SEASON_LESSONS} lessons each, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
 Homework is the average of the marks you give &mdash; not how many pieces &mdash; so two
 classes set different amounts of work still stand in the same table. Anything handed in
 after its deadline counts as a nought in that average.</p>
-{switch}
 {top}
+<div class="card"><strong>{done} of {total}</strong> students have finished their
+{core.SEASON_LESSONS} lessons.
+<p class="sub" style="margin:6px 0 0">A student's lesson count only moves when you record
+their marks for that day, so the season advances at the speed you record it. Close the
+season when enough of them have finished: the table is written into the record book with
+the winner's name, and the next season starts clear from that moment.</p>
+<form method="post" action="/championship/close" style="margin-top:12px"
+ onsubmit="return confirm('Close season {standing["season"]} and start the next one? The table is kept in the record book.')">
+<button class="danger">Close season {standing["season"]}</button></form></div>
 {"<h2>Class champions</h2><div class='quicklinks'>" + classes + "</div>" if classes else ""}
 <h2>The table</h2>
-<p class="sub">{standing["eligible"]} of {len(standing["rows"])} students have the
+<p class="sub">{standing["eligible"]} of {total} students have the
 {core.MIN_GRADED} marked pieces needed to be eligible. The rest are listed below the
-line and cannot win this month.</p>
+line and cannot win this season.</p>
 <div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Group</th>
-<th>Total</th>{head}<th>Handed in</th></tr>
-{body or '<tr><td colspan=10 class="sub">Nobody yet.</td></tr>'}</table></div>
+<th>Total</th>{head}<th>Lessons</th><th>Handed in</th></tr>
+{body or '<tr><td colspan=11 class="sub">Nobody yet.</td></tr>'}</table></div>
 <h2>How the points work</h2>
 <div class="card"><ul class="rules">{rules}</ul>
-<p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten,
-scaled to {core.CHAMPIONSHIP_MAX and 3}; a piece handed in after its deadline is a nought in
-that average. Words count up to {core.VOCAB_TARGET}. In the lesson is the average of
-punctuality, behaviour and taking part. A student needs {core.MIN_GRADED} marked pieces to
-be eligible &mdash; otherwise one lucky ten out of ten decides the month. Nothing you have
-not recorded scores anything, so an unmarked lesson is a nought for everyone alike and the
-order of the table is unaffected.</p></div>"""
+<p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten, scaled to
+3; a piece handed in after its deadline is a nought in that average. Words count up to
+{core.VOCAB_TARGET}. In the lesson is the average of punctuality, behaviour and taking
+part. A student needs {core.MIN_GRADED} marked pieces to be eligible &mdash; otherwise one
+lucky ten out of ten decides the season. Nothing you have not recorded scores anything, so
+an unmarked lesson is a nought for everyone alike and the order of the table is
+unaffected.</p></div>
+{history}"""
     return html_response(page("Championship", body_html, "League"))
+
+
+def act_start_season(req, db):
+    core.start_season(db)
+    return redirect("/championship")
+
+
+def act_close_season(req, db):
+    core.close_season(db)
+    return redirect("/championship")
 
 
 def view_export(req, db):
@@ -3468,6 +3519,8 @@ ROUTES = [
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
     ("POST", r"^/groups/(\d+)/repeat$", act_repeat_homework),
     ("GET",  r"^/championship$", view_championship),
+    ("POST", r"^/championship/start$", act_start_season),
+    ("POST", r"^/championship/close$", act_close_season),
     ("GET",  r"^/play$", view_play),
     ("GET",  r"^/play/(\d+)$", view_game_board),
     ("GET",  r"^/play/(\d+)/state\.json$", game_state_json),

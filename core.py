@@ -414,6 +414,16 @@ def migrate(db):
         ms INTEGER,
         UNIQUE (game_id, question_id, student_id)
     );
+    CREATE TABLE IF NOT EXISTS seasons (
+        id INTEGER PRIMARY KEY,
+        no INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        closed_at TEXT NOT NULL,
+        winner_id INTEGER REFERENCES students(id),
+        winner_name TEXT,
+        winner_points REAL,
+        standing TEXT                      -- the whole table as it stood, as json
+    );
     CREATE TABLE IF NOT EXISTS parents (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -1392,15 +1402,64 @@ def _avg_between(db, student_id, lo, hi):
     return r["a"], r["n"]
 
 
-def championship(db, month=None, cfg=None):
-    """Everyone's standing for one month, best first."""
+SEASON_LESSONS = 15
+SEASON_OPEN = "9999-12-31T00:00:00+00:00"   # a season still running has no end yet
+
+
+def season_start(db):
+    """When the running season began, or None if the league has not started."""
+    return meta_get(db, "season_start")
+
+
+def season_no(db):
+    v = meta_get(db, "season_no")
+    return int(v) if v and str(v).isdigit() else 1
+
+
+def start_season(db, when=None):
+    meta_set(db, "season_start", iso(when or now()))
+    meta_set(db, "season_no", str(season_no(db)))
+
+
+def day_start(day, cfg):
+    """The UTC instant a local day begins."""
+    first = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return iso(first - timedelta(hours=cfg["timezone_offset_hours"]))
+
+
+def season_window(db, student_id, lo, cfg):
+    """One student's slice of the season: it closes on their 15th lesson.
+
+    A season is counted in lessons, not in days, so a class that met thirteen
+    times and a class that met twelve are judged over the same amount of
+    teaching. Once a student has had their fifteenth recorded lesson their
+    season is finished and nothing after it counts, however long the calendar
+    takes everybody else.
+    """
+    lo_day = local_day(parse(lo), cfg)
+    days = [r["day"] for r in db.execute(
+        "SELECT day FROM lesson_marks WHERE student_id=? AND day >= ?"
+        " ORDER BY day", (student_id, lo_day))]
+    if len(days) >= SEASON_LESSONS:
+        closed = days[SEASON_LESSONS - 1]
+        after = (datetime.strptime(closed, "%Y-%m-%d")
+                 + timedelta(days=1)).strftime("%Y-%m-%d")
+        return day_start(after, cfg), SEASON_LESSONS, closed
+    return SEASON_OPEN, len(days), None
+
+
+def championship(db, cfg=None):
+    """Everyone's standing for the running season, best first."""
     cfg = cfg or load_config()
-    month = month or month_key(cfg=cfg)
-    lo, hi = month_bounds(month, cfg)
-    plo, phi = month_bounds(previous_month(month), cfg)
+    lo = season_start(db)
+    if not lo:
+        return {"started": False, "season": season_no(db), "start": None,
+                "rows": [], "eligible": 0, "finished": 0}
 
     rows = []
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
+        hi, lessons, closed = season_window(db, st["id"], lo, cfg)
+
         # Homework is the average of the marks given, not the number handed in,
         # so two classes set different amounts of work still compare. Anything
         # arriving after its deadline counts as a zero in that average.
@@ -1430,7 +1489,8 @@ def championship(db, month=None, cfg=None):
             "SELECT AVG((COALESCE(punctuality,0)+COALESCE(behaviour,0)"
             "+COALESCE(participation,0)) / 3.0) a, COUNT(*) n FROM lesson_marks"
             " WHERE student_id=? AND day >= ? AND day < ?",
-            (st["id"], lo[:10], hi[:10])).fetchone()
+            (st["id"], local_day(parse(lo), cfg), local_day(parse(hi), cfg)),
+        ).fetchone()
         parts["conduct"] = (min(1.0, (marks["a"] or 0) / float(MARK_MAX))
                             if marks["n"] else 0.0)
 
@@ -1443,7 +1503,7 @@ def championship(db, month=None, cfg=None):
             "graded": graded, "words": words, "late": late,
             "handed": ("%d marked%s" % (graded, ", %d late" % late if late else "")
                        if graded else "nothing marked"),
-            "lessons": marks["n"],
+            "lessons": lessons, "closed": closed, "done": closed is not None,
             "average": round(sum(counted) / graded, 2) if graded else None,
             "eligible": graded >= MIN_GRADED,
             "missing": [l for k, l, _w in CHAMPIONSHIP if not parts.get(k)],
@@ -1458,8 +1518,41 @@ def championship(db, month=None, cfg=None):
             r["rank"] = place
         else:
             r["rank"] = None
-    return {"month": month, "rows": rows,
-            "eligible": sum(1 for r in rows if r["eligible"])}
+    return {"started": True, "season": season_no(db), "start": lo, "rows": rows,
+            "eligible": sum(1 for r in rows if r["eligible"]),
+            "finished": sum(1 for r in rows if r["done"])}
+
+
+def close_season(db, cfg=None):
+    """Write the table into the record book, then start the next season.
+
+    The prize is real money, so the standing that decided it is kept rather
+    than recomputed later from data that will have moved on.
+    """
+    standing = championship(db, cfg)
+    if not standing["started"]:
+        return None
+    winner = next((r for r in standing["rows"] if r["rank"] == 1), None)
+    snapshot = [{"rank": r["rank"], "name": r["student"]["name"],
+                 "total": r["total"], "points": r["points"],
+                 "graded": r["graded"], "words": r["words"],
+                 "lessons": r["lessons"]} for r in standing["rows"]]
+    db.execute(
+        "INSERT INTO seasons (no, started_at, closed_at, winner_id, winner_name,"
+        " winner_points, standing) VALUES (?,?,?,?,?,?,?)",
+        (standing["season"], standing["start"], iso(now()),
+         winner["student"]["id"] if winner else None,
+         winner["student"]["name"] if winner else None,
+         winner["total"] if winner else None, json.dumps(snapshot)),
+    )
+    meta_set(db, "season_no", str(standing["season"] + 1))
+    meta_set(db, "season_start", iso(now()))
+    db.commit()
+    return standing
+
+
+def past_seasons(db):
+    return db.execute("SELECT * FROM seasons ORDER BY no DESC").fetchall()
 
 
 def class_champions(standing, db):
