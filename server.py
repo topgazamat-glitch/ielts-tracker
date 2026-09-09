@@ -2991,6 +2991,14 @@ Code <span class="kbd">{E(g["code"])}</span></p>
 <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;align-items:center">
   <button onclick="step()" id="go">Start</button>
   <button class="ghost" onclick="toggleAuto()" id="autobtn">Auto: on</button>
+  <label class="sub" style="margin:0">Table for
+    <select id="showfor" onchange="setShowFor(this.value)">
+      <option value="3">3s</option><option value="5" selected>5s</option>
+      <option value="8">8s</option><option value="10">10s</option>
+    </select></label>
+  <label class="sub" style="margin:0">Start at
+    <input id="minplayers" type="number" min="1" max="40" value="2"
+           style="width:56px" onchange="setMin(this.value)"> in the room</label>
   <span class="sub" id="autonote" style="margin:0"></span>
   <button class="ghost" onclick="if(confirm('End this game?'))location.href='/play/{g["id"]}/end'">End game</button>
 </div>
@@ -3001,10 +3009,27 @@ let last = "", ac = null, lastTick = -1, lastState = "";
 // seconds, then the next one comes up. Turning it off hands the pace back, for
 // when a question is worth talking about.
 let auto = true, revealAt = 0, showFor = 5;
+// the lobby starts itself once the room has stopped filling up, so nobody is
+// left outside because the teacher pressed Start a moment too early
+let minPlayers = 2, settleFor = 15, lastCount = -1, steadySince = 0;
+
+function remember(key, value) {{ try {{ localStorage.setItem(key, value); }} catch (e) {{}} }}
+function recall(key, fallback) {{
+  try {{ const v = localStorage.getItem(key); return v === null ? fallback : v; }}
+  catch (e) {{ return fallback; }}
+}}
+function setShowFor(v) {{ showFor = +v || 5; revealAt = 0; remember('gameShowFor', showFor); }}
+function setMin(v) {{ minPlayers = Math.max(1, +v || 2); remember('gameMinPlayers', minPlayers); }}
 function toggleAuto() {{
   auto = !auto;
-  revealAt = 0;
+  revealAt = 0; steadySince = 0;
   document.getElementById('autobtn').textContent = 'Auto: ' + (auto ? 'on' : 'off');
+}}
+function loadPrefs() {{
+  showFor = +recall('gameShowFor', 5) || 5;
+  minPlayers = +recall('gameMinPlayers', 2) || 2;
+  const sf = document.getElementById('showfor'); if (sf) sf.value = String(showFor);
+  const mp = document.getElementById('minplayers'); if (mp) mp.value = String(minPlayers);
 }}
 // the projector is the thing with speakers, so the room hears the clock here
 function beep(freq, ms, type) {{
@@ -3047,7 +3072,20 @@ function render(s) {{
   // ---- run the room, unless the teacher has taken the wheel
   let note = '';
   if (auto && !busy) {{
-    if (s.state === 'question') {{
+    if (s.state === 'lobby') {{
+      // wait until the count has held still: someone is always last through the door
+      if (s.players.length !== lastCount) {{
+        lastCount = s.players.length;
+        steadySince = Date.now();
+      }}
+      if (s.players.length >= minPlayers) {{
+        const left = Math.ceil((settleFor * 1000 - (Date.now() - steadySince)) / 1000);
+        if (left <= 0) {{ step(s.state, s.q_index); }}
+        else {{ note = 'starting in ' + left + 's'; }}
+      }} else {{
+        note = 'waiting for ' + (minPlayers - s.players.length) + ' more';
+      }}
+    }} else if (s.state === 'question') {{
       const everyone = s.players.length > 0 && s.answered >= s.players.length;
       if (s.left <= 0 || everyone) {{
         note = everyone ? 'everyone answered' : '';
@@ -3061,6 +3099,7 @@ function render(s) {{
     }}
   }}
   if (s.state !== 'reveal') revealAt = 0;
+  if (s.state !== 'lobby') steadySince = 0;
   const noteEl = document.getElementById('autonote');
   if (noteEl.textContent !== note) noteEl.textContent = note;
   let h = '';
@@ -3113,7 +3152,7 @@ let busy = false;
 async function step(fromState, fromIndex) {{
   if (busy) return;                 // one press is one move, however hard it is hit
   busy = true;
-  revealAt = 0;
+  revealAt = 0; steadySince = 0;
   const btn = document.getElementById('go');
   btn.disabled = true;
   btn.textContent = '\u2026';
@@ -3134,6 +3173,7 @@ async function step(fromState, fromIndex) {{
   }}
   busy = false;
 }}
+loadPrefs();
 poll();
 </script>"""
     return html_response(page("Game", body, "Play", music=True))
