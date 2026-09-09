@@ -1098,3 +1098,15 @@ ul.attn a { font-weight: 600; }
 .rowacts form { margin: 0; }
 .linky.danger { color: var(--red); }
 button.ghost.danger { color: var(--red); border-color: var(--red); }
+
+/* ------------------------------------------------- the roster */
+.movef { margin: 0; }
+.movef select { font-size: 12px; padding: 3px 6px; }
+.bulkbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 12px; border-radius: 8px;
+  background: var(--accent-soft); border: 1px solid var(--accent-line);
+  font-size: 13px;
+}
+.bulkbar form { margin: 0; }
+#roster td { vertical-align: middle; }

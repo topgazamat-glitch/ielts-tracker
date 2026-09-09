@@ -64,6 +64,7 @@ def page(title, body, active="", music=False):
 <script src="/static/nav.js" defer></script>
 <script src="/static/materials.js" defer></script>
 <script src="/static/grade.js" defer></script>
+<script src="/static/roster.js" defer></script>
 </body></html>"""
 
 
@@ -1184,27 +1185,149 @@ it. Close, move or delete the whole batch, or open it to deal with a single item
 
 
 def view_roster(req, db):
+    """Everyone, with the things you actually do to a student on the same page."""
+    q = (req["query"].get("q", [""])[0] or "").strip()
+    gid = (req["query"].get("group", [""])[0] or "").strip()
+    gid = int(gid) if gid.isdigit() else None
+    show = (req["query"].get("show", ["active"])[0] or "active")
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    opts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
+
+    where, args = [], []
+    if gid:
+        where.append("group_id=?"); args.append(gid)
+    if show == "active":
+        where.append("active=1")
+    elif show == "paused":
+        where.append("active=0")
+    if q:
+        where.append("name LIKE ?"); args.append("%" + q + "%")
+    sql = "SELECT * FROM students"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY active DESC, name"
+    people = db.execute(sql, args).fetchall()
+
     rows = ""
-    for s in db.execute("SELECT * FROM students ORDER BY active DESC, name").fetchall():
-        st = core.student_stats(db, s["id"])
+    for s_ in people:
+        st = core.student_stats(db, s_["id"])
+        seen, days = core.last_active(db, s_["id"])
+        if days is None:
+            quiet = '<span class="pill risk">never</span>'
+        elif days >= 14:
+            quiet = f'<span class="pill risk">{days}d ago</span>'
+        elif days >= 7:
+            quiet = f'<span class="pill watch">{days}d ago</span>'
+        else:
+            quiet = f'<span class="sub">{days}d ago</span>'
+        move = "".join(
+            f'<option value="{g["id"]}"{" selected" if g["id"] == s_["group_id"] else ""}>'
+            f'{E(g["name"])}</option>' for g in groups)
+        if s_["active"]:
+            hold = (f'<form method="post" action="/students/{s_["id"]}/pause">'
+                    f'<button class="linky">pause</button></form>')
+        else:
+            hold = (f'<form method="post" action="/students/{s_["id"]}/resume">'
+                    f'<button class="linky">resume</button></form>')
+        nobot = "" if s_["telegram_id"] else ' <span class="pill mute">no bot</span>'
+        warn = ("Delete %s for good? Every piece of homework, mark, lesson record and "
+                "word they have practised goes with them. This cannot be undone - "
+                "use pause instead if they may come back." % s_["name"])
         rows += (
-            f'<tr><td><a href="/students/{s["id"]}">{E(s["name"])}</a></td>'
-            f'<td>{E(group_name(db, s["group_id"]))}</td>'
+            f'<tr>'
+            f'<td><input type="checkbox" class="pick" name="id" value="{s_["id"]}"'
+            f' form="bulk"></td>'
+            f'<td><a href="/students/{s_["id"]}">{E(s_["name"])}</a>{nobot}</td>'
+            f'<td><form method="post" action="/students/{s_["id"]}/move" class="movef">'
+            f'<select name="group_id" onchange="this.form.submit()">{move}</select>'
+            f'</form></td>'
             f'<td>{score_pill(st["average"])}</td>'
             f'<td>{st["graded_count"]}</td><td>{st["missed"]}</td>'
-            f'<td>{"active" if s["active"] else "inactive"}</td></tr>'
-        )
+            f'<td>{quiet}</td>'
+            f'<td class="rowacts">{hold}'
+            f'<form method="post" action="/students/{s_["id"]}/delete"'
+            f' onsubmit="return confirm({json.dumps(warn)})">'
+            f'<button class="linky danger">delete</button></form></td></tr>')
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    base = f"?show={show}" if show != "active" else "?"
+    tabs = ('<div class="tabs">'
+            + tab(f"/roster?show={show}", "All classes", gid is None)
+            + "".join(tab(f'/roster?group={g["id"]}&show={show}', g["name"], gid == g["id"])
+                      for g in groups) + "</div>")
+    states = ('<div class="tabs">'
+              + tab(f"/roster{'?group=%d&' % gid if gid else '?'}show=active", "Active", show == "active")
+              + tab(f"/roster{'?group=%d&' % gid if gid else '?'}show=paused", "Paused", show == "paused")
+              + tab(f"/roster{'?group=%d&' % gid if gid else '?'}show=all", "Everyone", show == "all")
+              + "</div>")
+
     site = core.meta_get(db, "site_url")
-    where = (f'Student links use <code>{E(site)}</code>' if site
-             else '<span style="color:var(--warn)">The public address has not been '
-                  'detected yet — reload this page once on the real address.</span>')
+    where_note = (f'Student links use <code>{E(site)}</code>' if site
+                  else '<span style="color:var(--warn)">The public address has not been '
+                       'detected yet &mdash; reload this page once on the real address.</span>')
+
     body = f"""<h1>Students</h1>
-<p class="sub">Everyone who has joined through the bot. {where}</p>
-<div class="tablewrap"><table><tr><th>Name</th><th>Group</th><th>Average</th>
-<th>Graded</th><th>Missed</th><th>Status</th></tr>
-{rows or '<tr><td colspan=6 class="sub">Nobody yet. Share a group join code.</td></tr>'}</table></div>"""
+<p class="sub">{len(people)} shown. {where_note}</p>
+{tabs}
+{states}
+<form method="get" action="/roster" class="inline" style="margin:12px 0">
+<input type="hidden" name="group" value="{gid or ''}">
+<input type="hidden" name="show" value="{E(show)}">
+<label class="f">Find<input name="q" id="rq" value="{E(q)}" placeholder="type a name"></label>
+<label class="f" style="justify-content:flex-end">&nbsp;<button class="ghost">Search</button></label>
+</form>
+<form method="post" action="/students/bulk" id="bulk"></form>
+<div class="bulkbar" id="bulkbar" hidden>
+  <span><b id="npicked">0</b> selected</span>
+  <select name="group_id" form="bulk">{opts}</select>
+  <button form="bulk" name="do" value="move" class="ghost">Move to this class</button>
+  <button form="bulk" name="do" value="pause" class="ghost">Pause them</button>
+  <button form="bulk" name="do" value="resume" class="ghost">Resume them</button>
+</div>
+<div class="tablewrap"><table id="roster"><tr>
+<th><input type="checkbox" id="pickall"></th>
+<th>Name</th><th>Class</th><th>Average</th><th>Graded</th><th>Missed</th>
+<th>Last seen</th><th></th></tr>
+{rows or '<tr><td colspan=8 class="sub">Nobody matches.</td></tr>'}</table></div>
+<h2 style="margin-top:28px">Add a student by hand</h2>
+<div class="card"><form method="post" action="/students/new" class="inline">
+<label class="f">Name<input name="name" required placeholder="For someone not on Telegram"></label>
+<label class="f">Class<select name="group_id">{opts}</select></label>
+<label class="f" style="justify-content:flex-end">&nbsp;<button>Add</button></label>
+</form>
+<p class="sub" style="margin:10px 0 0">They get their own page link straight away. If they
+join through the bot later, that account links up on its own.</p></div>"""
     return html_response(page("Students", body, "Students"))
 
+
+def act_new_student(req, db):
+    f = req["form"]
+    core.add_student(db, f.get("name", [""])[0], f.get("group_id", [None])[0])
+    return redirect("/roster")
+
+
+def act_move_student(req, db, sid):
+    gid = (req["form"].get("group_id", [""])[0] or "").strip()
+    if gid.isdigit():
+        core.move_student(db, sid, int(gid))
+    return redirect("/roster")
+
+
+def act_bulk_students(req, db):
+    """Do one thing to several students - moving a class up a level, mostly."""
+    f = req["form"]
+    ids = [int(i) for i in f.get("id", []) if str(i).isdigit()]
+    do = (f.get("do", [""])[0] or "").strip()
+    gid = (f.get("group_id", [""])[0] or "").strip()
+    for sid in ids:
+        if do == "move" and gid.isdigit():
+            core.move_student(db, sid, int(gid))
+        elif do == "pause":
+            core.set_student_active(db, sid, False)
+        elif do == "resume":
+            core.set_student_active(db, sid, True)
+    return redirect("/roster")
 
 
 def view_vocab(req, db):
@@ -4156,6 +4279,9 @@ ROUTES = [
     ("POST", r"^/groups/(\d+)/marks$", act_save_marks),
     ("POST", r"^/assignments/(\d+)/publish$", act_publish_assignment),
     ("POST", r"^/assignments/(\d+)/unpublish$", act_unpublish_assignment),
+    ("POST", r"^/students/new$", act_new_student),
+    ("POST", r"^/students/bulk$", act_bulk_students),
+    ("POST", r"^/students/(\d+)/move$", act_move_student),
     ("POST", r"^/students/(\d+)/update$", act_update_student),
     ("POST", r"^/students/(\d+)/pause$", act_pause_student),
     ("POST", r"^/students/(\d+)/resume$", act_resume_student),

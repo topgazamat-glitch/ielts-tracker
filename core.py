@@ -2433,15 +2433,50 @@ def remove_student(db, student_id):
                " (SELECT id FROM submissions WHERE student_id=?)", (student_id,))
     db.execute("DELETE FROM submission_tags WHERE submission_id IN"
                " (SELECT id FROM submissions WHERE student_id=?)", (student_id,))
+    # read this before the row goes: the old order looked it up afterwards, by
+    # which time the subquery matched nothing and the state was left behind
+    who = db.execute("SELECT telegram_id FROM students WHERE id=?",
+                     (student_id,)).fetchone()
     for table in ("submissions", "word_progress", "quiz_sessions", "questions",
                   "parents", "lesson_marks", "students"):
         db.execute(f"DELETE FROM {table} WHERE student_id=?"
                    if table != "students" else "DELETE FROM students WHERE id=?",
                    (student_id,))
-    db.execute("DELETE FROM bot_state WHERE telegram_id="
-               " (SELECT telegram_id FROM students WHERE id=?)", (student_id,))
+    if who and who["telegram_id"]:
+        db.execute("DELETE FROM bot_state WHERE telegram_id=?", (who["telegram_id"],))
     db.commit()
     return photos
+
+
+def last_active(db, student_id):
+    """The last sign of life: work sent, or words practised."""
+    a = db.execute("SELECT MAX(created_at) t FROM submissions WHERE student_id=?",
+                   (student_id,)).fetchone()["t"]
+    b = db.execute("SELECT MAX(last_seen) t FROM word_progress WHERE student_id=?",
+                   (student_id,)).fetchone()["t"]
+    best = max([x for x in (a, b) if x], default=None)
+    if not best:
+        return None, None
+    days = (now() - parse(best)).days
+    return best, days
+
+
+def add_student(db, name, group_id):
+    """A student who cannot use Telegram still needs a place and a link."""
+    name = (name or "").strip()
+    if not name or not group_id:
+        return None
+    sid = db.execute(
+        "INSERT INTO students (name, group_id, active, created_at) VALUES (?,?,1,?)",
+        (name[:80], int(group_id), iso(now()))).lastrowid
+    db.commit()
+    student_token(db, sid)
+    return sid
+
+
+def move_student(db, student_id, group_id):
+    db.execute("UPDATE students SET group_id=? WHERE id=?", (int(group_id), student_id))
+    db.commit()
 
 
 def set_student_active(db, student_id, active):
