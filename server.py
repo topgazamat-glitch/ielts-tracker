@@ -1868,7 +1868,9 @@ def portal_tests(db, s, token, query):
             f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
             f' value="{E(o["letter"])}" required><span><b>{E(o["letter"])}</b> '
             f'{E(o["text"])}</span></label>' for o in opts)
-        rows += (f'<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
+        pic = (f'<img class="passageimg" src="/testimg/{E(q["image"])}" alt="">'
+               if q["image"] else "")
+        rows += (f'{pic}<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
                  f'{E(q["prompt"])}</div>{picks}</div>')
     return f"""<h2>{E(t["title"])}</h2>
 <p class="sub">{len(qs)} questions. It is marked as soon as you hand it in.</p>
@@ -3873,7 +3875,9 @@ def view_test(req, db, tid):
             f'<span><b>{E(o["letter"])}</b> {E(o["text"][:90])}</span></label>'
             for o in opts)
         missing = "" if q["answer"] else ' <span class="pill risk">no answer</span>'
-        rows += (f'<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
+        pic = (f'<img class="passageimg" src="/testimg/{E(q["image"])}" alt="">'
+               if q["image"] else "")
+        rows += (f'{pic}<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
                  f'{E(q["prompt"])}{missing}</div>{picks}</div>')
 
     passage = (f'<div class="card"><div class="sub">The text students read</div>'
@@ -4840,6 +4844,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*serve_material(db, int(path.split("/")[2]), student))
             finally:
                 db.close()
+        m = re.match(r"^/testimg/([A-Za-z0-9_.-]+\.png)$", path)
+        if m:
+            full = os.path.join(core.MATERIAL_DIR, m.group(1))
+            if not os.path.isfile(full):
+                return self._send(*not_found())
+            return self._send_file(200, [("Content-Type", "image/png"),
+                                         ("Content-Length", str(os.path.getsize(full))),
+                                         ("Cache-Control", "private, max-age=86400")],
+                                   full, 0, os.path.getsize(full))
+
         m = re.match(r"^/song(?:/(\d{4}-\d{2}-\d{2}))?$", path)
         if m:
             # the whole school shares one track a day, so this is deliberately

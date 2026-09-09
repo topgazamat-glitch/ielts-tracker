@@ -478,6 +478,7 @@ def migrate(db):
         kind TEXT NOT NULL,
         prompt TEXT NOT NULL,
         answer TEXT,                       -- null until the teacher sets the key
+        image TEXT,                        -- a passage that only exists as a picture
         ord INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS doptions (
@@ -1944,11 +1945,19 @@ def load_test(db, data):
          data.get("title") or "Practice test",
          (data.get("passages") or {}).get("gap") or None, iso(now()))).lastrowid
     for i, q in enumerate(data.get("questions") or []):
+        # a reading passage printed as a picture travels inside the file, and is
+        # written out here so the page can simply point at it
+        img = None
+        if q.get("image_b64"):
+            import base64
+            img = "t%s_q%s.png" % (tid, q.get("num") or i + 1)
+            with open(os.path.join(MATERIAL_DIR, img), "wb") as fh:
+                fh.write(base64.b64decode(q["image_b64"]))
         qid = db.execute(
-            "INSERT INTO dquestions (test_id, num, kind, prompt, answer, ord)"
-            " VALUES (?,?,?,?,?,?)",
+            "INSERT INTO dquestions (test_id, num, kind, prompt, answer, image, ord)"
+            " VALUES (?,?,?,?,?,?,?)",
             (tid, q.get("num") or i + 1, q.get("kind") or "mcq",
-             q.get("prompt") or "", q.get("answer"), i)).lastrowid
+             q.get("prompt") or "", q.get("answer"), img, i)).lastrowid
         for o in q.get("options") or []:
             db.execute("INSERT INTO doptions (question_id, letter, text) VALUES (?,?,?)",
                        (qid, o.get("letter") or "?", o.get("text") or ""))

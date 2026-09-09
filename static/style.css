@@ -1138,3 +1138,8 @@ button.ghost.danger { color: var(--red); border-color: var(--red); }
 .opt.right { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); font-weight: 600; }
 .opt.chosen { background: color-mix(in srgb, var(--red) 14%, var(--surface)); }
 .passage { white-space: pre-wrap; font-size: 14px; line-height: 1.65; }
+
+.passageimg {
+  display: block; width: 100%; height: auto; border-radius: 8px;
+  margin: 6px 0 14px; border: 1px solid var(--line);
+}
