@@ -553,6 +553,13 @@ def migrate(db):
     wcols = {r["name"] for r in db.execute("PRAGMA table_info(words)")}
     if "example" not in wcols:
         db.execute("ALTER TABLE words ADD COLUMN example TEXT")
+    if "options" not in wcols:
+        # a grammar question carries its own wrong answers: drawing them from
+        # other rows would offer "bigger / apple / quickly" and give the game away
+        db.execute("ALTER TABLE words ADD COLUMN options TEXT")
+    lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
+    if lcols and "kind" not in lcols:
+        db.execute("ALTER TABLE word_lists ADD COLUMN kind TEXT NOT NULL DEFAULT 'vocab'")
     lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
     if "source" not in lcols:
         db.execute("ALTER TABLE word_lists ADD COLUMN source TEXT")
@@ -918,7 +925,7 @@ def make_game(db, group_id, list_id, q_count=10, seconds=20):
     plausible rather than absurd - a student has to actually know the word.
     """
     words = db.execute(
-        "SELECT id, term, translation FROM words WHERE list_id=? ORDER BY id",
+        "SELECT id, term, translation, options FROM words WHERE list_id=? ORDER BY id",
         (list_id,)).fetchall()
     if len(words) < 4:
         return None
@@ -933,9 +940,18 @@ def make_game(db, group_id, list_id, q_count=10, seconds=20):
 
     pool = [w["translation"] for w in words]
     for i, w in enumerate(picked):
-        others = [t for t in pool if t != w["translation"]]
-        random.shuffle(others)
-        options = others[:3] + [w["translation"]]
+        own = []
+        if "options" in w.keys() and w["options"]:
+            try:
+                own = [str(x) for x in json.loads(w["options"]) if str(x).strip()]
+            except ValueError:
+                own = []
+        if own:
+            options = own[:3] + [w["translation"]]
+        else:
+            others = [t for t in pool if t != w["translation"]]
+            random.shuffle(others)
+            options = others[:3] + [w["translation"]]
         random.shuffle(options)
         db.execute(
             "INSERT INTO game_questions (game_id, ord, word_id, options, answer)"

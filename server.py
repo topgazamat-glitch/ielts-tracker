@@ -1355,9 +1355,14 @@ Words they get wrong come back the next day; words they know come back later and
 <label class="f">List title<input name="title" placeholder="Unit 15" required></label>
 <label class="f">Book<input name="source" placeholder="4000 Essential Words 1"></label>
 <label class="f">Unit<input name="unit" placeholder="15" style="width:80px"></label>
-<label class="f">Group<select name="group_id">{opts}</select></label></div>
+<label class="f">Group<select name="group_id">{opts}</select></label>
+<label class="f" style="justify-content:flex-end">&nbsp;
+<span style="font-size:13px;color:var(--ink)"
+ title="Each line carries its own wrong answers instead of borrowing them from other rows">
+<input type="checkbox" name="kind" value="grammar"> grammar questions</span></label></div>
 <label class="f">One per line: <code>word = meaning</code>, or
-<code>word = meaning | example sentence</code> to unlock fill-the-gap
+<code>word = meaning | example sentence</code> to unlock fill-the-gap.
+For a grammar list: <code>She is ____ than me. = taller | more tall | tallest</code>
 <textarea name="words" rows="8" style="width:100%"
 placeholder="abandon = tashlab ketmoq / покидать | They had to abandon the car.&#10;absolute = mutlaq / абсолютный"></textarea></label>
 <div style="margin-top:10px"><button>Create list</button></div></form></div>
@@ -1439,23 +1444,56 @@ def parse_words(text):
     return out
 
 
+def parse_questions(text):
+    """One question per line, for a grammar list:
+
+        She is ____ than her sister. = taller | more tall | tallest | most tall
+
+    The first answer after the = is the right one; the rest are the wrong
+    options, and they travel with the question rather than being borrowed from
+    other rows.
+    """
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        head, _, rest = line.partition("=")
+        parts = [p.strip() for p in rest.split("|")]
+        parts = [p for p in parts if p]
+        if not head.strip() or len(parts) < 2:
+            continue
+        out.append((head.strip()[:200], parts[0][:200], parts[1:4]))
+    return out
+
+
 def act_new_word_list(req, db):
     f = req["form"]
     title = (f.get("title", [""])[0] or "").strip()
     gid = f.get("group_id", [None])[0]
-    pairs = parse_words(f.get("words", [""])[0])
+    grammar = f.get("kind", [""])[0] == "grammar"
+    raw = f.get("words", [""])[0]
+    pairs = parse_questions(raw) if grammar else parse_words(raw)
     if not title or not pairs:
         return redirect("/vocab")
     wid = db.execute(
-        "INSERT INTO word_lists (group_id, title, created_at, source, unit)"
-        " VALUES (?,?,?,?,?)",
+        "INSERT INTO word_lists (group_id, title, created_at, source, unit, kind)"
+        " VALUES (?,?,?,?,?,?)",
         (int(gid) if gid else None, title, core.iso(core.now()),
          (f.get("source", [""])[0] or "").strip()[:80] or None,
-         (f.get("unit", [""])[0] or "").strip()[:40] or None),
+         (f.get("unit", [""])[0] or "").strip()[:40] or None,
+         "grammar" if grammar else "vocab"),
     ).lastrowid
-    for i, (term, meaning, example) in enumerate(pairs):
-        db.execute("INSERT INTO words (list_id, term, translation, example, ord)"
-                   " VALUES (?,?,?,?,?)", (wid, term, meaning, example, i))
+    for i, item in enumerate(pairs):
+        if grammar:
+            term, answer, wrong = item
+            db.execute("INSERT INTO words (list_id, term, translation, options, ord)"
+                       " VALUES (?,?,?,?,?)",
+                       (wid, term, answer, json.dumps(wrong, ensure_ascii=False), i))
+        else:
+            term, meaning, example = item
+            db.execute("INSERT INTO words (list_id, term, translation, example, ord)"
+                       " VALUES (?,?,?,?,?)", (wid, term, meaning, example, i))
     db.commit()
     return redirect(f"/vocab/{wid}")
 
