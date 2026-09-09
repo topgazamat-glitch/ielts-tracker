@@ -1082,3 +1082,19 @@ ul.attn li {
 }
 ul.attn li:last-child { border-bottom: 0; }
 ul.attn a { font-weight: 600; }
+
+/* ------------------------------------------ homework batches */
+.card.batch { padding: 14px 16px; }
+.batchhead {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 12px; flex-wrap: wrap;
+}
+.batchhead .sub { margin: 4px 0 0; }
+.batchacts { display: flex; gap: 8px; flex-wrap: wrap; }
+.batchacts form { margin: 0; }
+.card.batch details { margin-top: 10px; }
+.card.batch summary { font-size: 13px; color: var(--brand); cursor: pointer; }
+.rowacts { display: flex; gap: 12px; justify-content: flex-end; }
+.rowacts form { margin: 0; }
+.linky.danger { color: var(--red); }
+button.ghost.danger { color: var(--red); border-color: var(--red); }

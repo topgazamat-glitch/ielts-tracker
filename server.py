@@ -1048,42 +1048,101 @@ kb.value = botUser ? "https://t.me/" + botUser + "?start=P{E(core.parent_token(d
     return html_response(page(s["name"], body, "Groups"))
 
 
+def batch_block(db, r, cfg, open_only):
+    """One homework batch: what it is, how it is going, and how to manage it."""
+    gid, due = r["group_id"], r["due_at"]
+    items = core.set_items(db, gid, due)
+    if not items:
+        return ""
+    closed = r["shut"] == 1                       # every item closed
+    draft = r["pubmax"] == 0                      # nothing published yet
+    if open_only and closed:
+        return ""
+
+    day, clock = core.deadline_parts(due, cfg)
+    when = f"{day} at {clock}" if day else "no deadline"
+    got, total = core.set_received(db, gid, due)
+    graded = core.set_graded_count(db, gid, due)
+
+    state = ('<span class="pill mute">closed</span>' if closed
+             else '<span class="pill mute">draft</span>' if draft
+             else '<span class="pill">open</span>')
+    if r["shut"] != r["shutmax"] or (not draft and r["pub"] != r["pubmax"]):
+        state += ' <span class="pill mute">mixed</span>'
+
+    key = f'<input type="hidden" name="group_id" value="{gid}">' \
+          f'<input type="hidden" name="due" value="{E(due or "")}">'
+    def form(action, label, cls="ghost", confirm=None):
+        ask = f' onsubmit="return confirm({json.dumps(confirm)})"' if confirm else ""
+        return (f'<form method="post" action="/assignments/batch/{action}"{ask}>'
+                f'{key}<button class="{cls}">{label}</button></form>')
+
+    buttons = ""
+    if draft:
+        buttons += form("publish", "Publish all", "")
+    elif closed:
+        buttons += form("open", "Reopen all")
+    else:
+        buttons += form("close", "Close all")
+    warn = ("Delete all %d item(s)? %d marked piece(s) stay with the student "
+            "and keep their score - they just stop being linked to this homework."
+            % (len(items), graded)) if graded else \
+           "Delete all %d item(s)? Nothing has been handed in." % len(items)
+    buttons += form("delete", "Delete all", "ghost danger", warn)
+
+    rows = ""
+    for a in items:
+        n = db.execute("SELECT COUNT(*) c FROM submissions WHERE assignment_id=?",
+                       (a["id"],)).fetchone()["c"]
+        if a["closed"]:
+            act = (f'<form method="post" action="/assignments/{a["id"]}/open">'
+                   f'<button class="linky">reopen</button></form>')
+        elif not a["published"]:
+            act = (f'<form method="post" action="/assignments/{a["id"]}/publish">'
+                   f'<button class="linky">publish</button></form>')
+        else:
+            act = (f'<form method="post" action="/assignments/{a["id"]}/close">'
+                   f'<button class="linky">close</button></form>')
+        rows += (f'<tr><td>{E(a["title"])}</td>'
+                 f'<td class="sub">{E(a["task_type"])}'
+                 f'{" &middot; criteria" if a["rubric"] else ""}</td>'
+                 f'<td class="sub">{n} in</td>'
+                 f'<td class="rowacts">{act}'
+                 f'<form method="post" action="/assignments/{a["id"]}/delete"'
+                 f' onsubmit="return confirm({json.dumps("Delete " + a["title"] + "?")})">'
+                 f'<button class="linky danger">delete</button></form></td></tr>')
+
+    edit = f"""<details><summary>Edit this homework</summary>
+<form method="post" action="/assignments/batch/edit" class="inline" style="margin-top:10px">
+{key}
+<label class="f">New deadline<input type="date" name="new_due" value="{E(day)}"></label>
+<label class="f">at<input type="time" name="new_time" value="{E(clock or "23:59")}" step="60"></label>
+<label class="f" style="justify-content:flex-end">&nbsp;<button>Move the deadline</button></label>
+</form>
+<p class="sub" style="margin:8px 0 0">Moves every item in this batch. A piece already
+handed in after the old deadline stops counting as late.</p>
+<div class="tablewrap" style="margin-top:10px"><table>
+<tr><th>Item</th><th>Type</th><th>Sent</th><th></th></tr>{rows}</table></div>
+</details>"""
+
+    return f"""<div class="card batch">
+  <div class="batchhead">
+    <div><strong>{E(group_name(db, gid))}</strong> &mdash; {E(when)} {state}
+      <div class="sub">{len(items)} item(s) &middot; {got} of {total} students have sent
+        something{" &middot; " + str(graded) + " marked" if graded else ""}</div></div>
+    <div class="batchacts">{buttons}</div>
+  </div>
+  {edit}
+</div>"""
+
+
 def view_assignments(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
-    rows = ""
-    for a in db.execute(
-        "SELECT * FROM assignments ORDER BY closed, COALESCE(due_at, created_at) DESC, id DESC"
-    ).fetchall():
-        got = db.execute(
-            "SELECT COUNT(*) c FROM submissions WHERE assignment_id=?", (a["id"],)
-        ).fetchone()["c"]
-        total = db.execute(
-            "SELECT COUNT(*) c FROM students WHERE group_id=? AND active=1", (a["group_id"],)
-        ).fetchone()["c"]
-        if a["closed"]:
-            state = '<span class="pill mute">closed</span>'
-            close = ""
-        elif not a["published"]:
-            state = '<span class="pill mute">draft</span>'
-            close = (
-                f'<form method="post" action="/assignments/{a["id"]}/publish" class="inline">'
-                f'<label style="font-size:12px;color:var(--muted)">'
-                f'<input type="checkbox" name="announce" value="1" checked> tell students</label>'
-                f'<button>Publish</button></form>'
-            )
-        else:
-            state = '<span class="pill">open</span>'
-            close = (
-                f'<form method="post" action="/assignments/{a["id"]}/close" '
-                f'style="display:inline"><button class="ghost">Close</button></form> '
-                f'<form method="post" action="/assignments/{a["id"]}/unpublish" '
-                f'style="display:inline"><button class="ghost">Hide</button></form>'
-            )
-        rows += (
-            f'<tr><td>{E(a["title"])}</td><td>{E(group_name(db, a["group_id"]))}</td>'
-            f'<td>{E(a["task_type"])}</td><td>{E((a["due_at"] or "—")[:10])}</td>'
-            f"<td>{got}/{total}</td><td>{state}</td><td>{close}</td></tr>"
-        )
+    cfg = core.load_config()
+    show_closed = req["query"].get("closed", [""])[0] == "1"
+    sets = core.all_sets(db)
+    blocks = "".join(batch_block(db, r, cfg, not show_closed) for r in sets)
+    shut = sum(1 for r in sets if r["shut"] == 1)
     opts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
     body = f"""<h1>Assignments</h1>
 <p class="sub">Open assignments are what the bot offers students when they send a photo.</p>
@@ -1115,10 +1174,12 @@ Set the homework</button></div></form>
 make several &mdash; students pick which one they are sending and each gets its own score.
 Without &ldquo;open to students now&rdquo; it is saved as a draft: nobody sees it until you
 press Publish below.</p></div>
-<h2>All assignments</h2>
-<div class="tablewrap"><table><tr><th>Title</th><th>Group</th><th>Type</th><th>Due</th>
-<th>Received</th><th></th><th></th></tr>
-{rows or '<tr><td colspan=7 class="sub">No assignments yet.</td></tr>'}</table></div>"""
+<h2>Homework you have set</h2>
+<p class="sub">Everything posted together is one piece of homework here, the way you set
+it. Close, move or delete the whole batch, or open it to deal with a single item.
+{shut} batch(es) closed &mdash;
+<a href="/assignments?closed={0 if show_closed else 1}">{"hide" if show_closed else "show"} them</a>.</p>
+{blocks or '<div class="card"><p style="margin:0" class="sub">Nothing set yet.</p></div>'}"""
     return html_response(page("Assignments", body, "Assignments"))
 
 
@@ -3812,6 +3873,73 @@ def already_set(db, group_id, title, due_iso):
 
 
 
+def _batch_of(req, db):
+    """The (group, deadline) pair a batch form is pointing at."""
+    f = req["form"]
+    gid = (f.get("group_id", [""])[0] or "").strip()
+    if not gid.isdigit():
+        return None, None, []
+    due = (f.get("due", [""])[0] or "").strip() or None
+    return int(gid), due, core.set_items(db, int(gid), due)
+
+
+def act_batch_close(req, db):
+    gid, due, items = _batch_of(req, db)
+    for a in items:
+        db.execute("UPDATE assignments SET closed=1 WHERE id=?", (a["id"],))
+    db.commit()
+    return redirect("/assignments")
+
+
+def act_batch_open(req, db):
+    gid, due, items = _batch_of(req, db)
+    for a in items:
+        db.execute("UPDATE assignments SET closed=0 WHERE id=?", (a["id"],))
+    db.commit()
+    return redirect("/assignments")
+
+
+def act_batch_publish(req, db):
+    gid, due, items = _batch_of(req, db)
+    fresh = [a["id"] for a in items if not a["published"]]
+    for aid in fresh:
+        db.execute("UPDATE assignments SET published=1 WHERE id=?", (aid,))
+    db.commit()
+    if fresh and gid:
+        try:
+            announce_list(db, gid, fresh)
+        except Exception:
+            traceback.print_exc()
+    return redirect("/assignments")
+
+
+def act_batch_delete(req, db):
+    """Remove a whole batch, but never the students' marked work."""
+    gid, due, items = _batch_of(req, db)
+    for a in items:
+        db.execute("UPDATE submissions SET assignment_id=NULL WHERE assignment_id=?",
+                   (a["id"],))
+        db.execute("DELETE FROM assignments WHERE id=?", (a["id"],))
+    db.commit()
+    return redirect("/assignments")
+
+
+def act_batch_edit(req, db):
+    """Move the deadline for every item that was set together."""
+    gid, due, items = _batch_of(req, db)
+    f = req["form"]
+    when = core.deadline_iso(f.get("new_due", [""])[0], f.get("new_time", [""])[0])
+    for a in items:
+        db.execute("UPDATE assignments SET due_at=? WHERE id=?", (when, a["id"]))
+    # a piece handed in before the new deadline is no longer late
+    for a in items:
+        db.execute(
+            "UPDATE submissions SET late=CASE WHEN ? IS NOT NULL AND created_at > ?"
+            " THEN 1 ELSE 0 END WHERE assignment_id=?", (when, when, a["id"]))
+    db.commit()
+    return redirect("/assignments")
+
+
 def act_new_list(req, db):
     f = req["form"]
     gid = f.get("group_id", [None])[0]
@@ -4016,6 +4144,11 @@ ROUTES = [
     ("POST", r"^/play/new$", act_new_game),
     ("POST", r"^/play/(\d+)/next$", act_game_next),
     ("POST", r"^/assignments/list$", act_new_list),
+    ("POST", r"^/assignments/batch/close$", act_batch_close),
+    ("POST", r"^/assignments/batch/open$", act_batch_open),
+    ("POST", r"^/assignments/batch/publish$", act_batch_publish),
+    ("POST", r"^/assignments/batch/delete$", act_batch_delete),
+    ("POST", r"^/assignments/batch/edit$", act_batch_edit),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),
     ("POST", r"^/assignments/(\d+)/open$", act_open_assignment),
     ("POST", r"^/assignments/(\d+)/edit$", act_edit_assignment),

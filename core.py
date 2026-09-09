@@ -1043,6 +1043,59 @@ def still_open(due_at, cfg=None):
     return end is None or (end + grace) >= now()
 
 
+def all_sets(db):
+    """Every homework batch, newest first, however it was posted.
+
+    A list posted in one go shares a class and a deadline, so that pair is the
+    batch - the same grouping the Homework page already uses. One assignment
+    posted alone is simply a batch of one.
+    """
+    rows = db.execute(
+        "SELECT group_id, due_at, COUNT(*) n, MIN(published) pub, MAX(published) pubmax,"
+        " MIN(closed) shut, MAX(closed) shutmax, MAX(created_at) made"
+        " FROM assignments GROUP BY group_id, due_at"
+        " ORDER BY MAX(created_at) DESC").fetchall()
+    return rows
+
+
+def set_items(db, group_id, due_at):
+    if due_at is None:
+        return db.execute(
+            "SELECT * FROM assignments WHERE group_id=? AND due_at IS NULL"
+            " ORDER BY id", (group_id,)).fetchall()
+    return db.execute(
+        "SELECT * FROM assignments WHERE group_id=? AND due_at=? ORDER BY id",
+        (group_id, due_at)).fetchall()
+
+
+def set_received(db, group_id, due_at):
+    """How many students in the class have sent something for this batch."""
+    items = set_items(db, group_id, due_at)
+    if not items:
+        return 0, 0
+    ids = [a["id"] for a in items]
+    marks = ",".join("?" * len(ids))
+    got = db.execute(
+        "SELECT COUNT(DISTINCT student_id) c FROM submissions"
+        " WHERE assignment_id IN (%s)" % marks, ids).fetchone()["c"]
+    total = db.execute(
+        "SELECT COUNT(*) c FROM students WHERE group_id=? AND active=1",
+        (group_id,)).fetchone()["c"]
+    return got, total
+
+
+def set_graded_count(db, group_id, due_at):
+    """Marked pieces that would lose their link if the batch were deleted."""
+    items = set_items(db, group_id, due_at)
+    if not items:
+        return 0
+    ids = [a["id"] for a in items]
+    marks = ",".join("?" * len(ids))
+    return db.execute(
+        "SELECT COUNT(*) c FROM submissions WHERE assignment_id IN (%s)"
+        " AND status='graded'" % marks, ids).fetchone()["c"]
+
+
 def open_sets(db, group_id, for_student=False):
     """Open homework grouped by deadline, soonest first.
 
