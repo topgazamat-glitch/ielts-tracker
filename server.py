@@ -63,6 +63,7 @@ def page(title, body, active="", music=False):
 {tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
 <script src="/static/nav.js" defer></script>
 <script src="/static/materials.js" defer></script>
+<script src="/static/grade.js" defer></script>
 </body></html>"""
 
 
@@ -243,120 +244,266 @@ def group_name(db, gid):
     return r["name"] if r else "—"
 
 
-def view_queue(req, db):
-    sub = db.execute(
-        "SELECT * FROM submissions WHERE status='pending' AND draft=0"
-        " ORDER BY created_at LIMIT 1"
-    ).fetchone()
+AUDIO_EXT = (".oga", ".ogg", ".mp3", ".m4a", ".wav", ".opus", ".weba")
+
+
+def is_audio(name):
+    return (name or "").lower().endswith(AUDIO_EXT)
+
+
+def shot(f, i):
+    """One page of homework - or, for speaking, something you can actually play.
+
+    A voice note is a file like any other, and rendering it through an <img>
+    put a broken picture where the recording should have been.
+    """
+    small = screen_name(f)
+    if is_audio(small):
+        return (f'<audio controls preload="metadata" class="voice"'
+                f' src="/media/{E(small)}"></audio>')
+    dims = ""
+    if f["width"] and f["height"]:
+        dims = f' width="{f["width"]}" height="{f["height"]}"'
+    full = f' data-full="/media/{E(f["filename"])}"' if small != f["filename"] else ""
+    lazy = "" if i == 0 else ' loading="lazy"'
+    return (f'<img src="/media/{E(small)}" alt="page {i+1}"{dims}{full}{lazy}'
+            f' decoding="async" onclick="zoom(this)">')
+
+
+def scorepad(name="score", value=None, small=False):
+    """Whole marks on top, halves underneath - one tap either way."""
+    cls = "scorepad" + (" mini" if small else "")
+    def mark(v):
+        return ' class="sel"' if value is not None and abs(value - v) < 1e-9 else ""
+    whole = "".join(
+        f'<button type="button" data-v="{n}" data-for="{name}"{mark(n)}>{n}</button>'
+        for n in range(1, 11))
+    half = "".join(
+        f'<button type="button" class="half{" sel" if mark(n + 0.5) else ""}"'
+        f' data-v="{n + 0.5}" data-for="{name}">{n}&frac12;</button>'
+        for n in range(1, 10))
+    return (f'<div class="{cls}">{whole}</div>'
+            f'<div class="{cls} halves">{half}</div>')
+
+
+def grade_form(db, sub, student, assignment, regrade=False):
+    """The marking form, used for a fresh piece and for changing an old mark."""
+    tags = db.execute("SELECT * FROM tags ORDER BY sort, id").fetchall()
+    chosen = {r["tag_id"] for r in db.execute(
+        "SELECT tag_id FROM submission_tags WHERE submission_id=?", (sub["id"],))}
+    tagboxes = "".join(
+        f'<label><input type="checkbox" name="tag" value="{t["id"]}"'
+        f'{" checked" if t["id"] in chosen else ""}><span>{E(t["label"])}</span></label>'
+        for t in tags)
+
+    rubric = bool(assignment and assignment["rubric"])
+    marks = core.criteria_for(db, sub["id"])
+    if rubric:
+        rows = ""
+        for key, label, hint in core.CRITERIA:
+            rows += (f'<div class="crit"><div><strong>{E(label)}</strong>'
+                     f'<div class="sub">{E(hint)}</div></div>'
+                     f'<input type="hidden" name="c_{key}" id="f_c_{key}"'
+                     f' value="{marks.get(key, "")}">'
+                     f'{scorepad("c_" + key, marks.get(key), small=True)}</div>')
+        scoring = (f'<div class="criteria">{rows}</div>'
+                   f'<p class="sub" id="overall">The overall mark is the average '
+                   f'of these four.</p>')
+    else:
+        scoring = (f'<input type="hidden" name="score" id="f_score"'
+                   f' value="{sub["score"] if sub["score"] is not None else ""}">'
+                   f'{scorepad("score", sub["score"])}')
+
+    tmpl = core.note_templates(db)
+    chips = "".join(
+        f'<button type="button" class="chip" onclick="useNote(this)">{E(t["text"])}</button>'
+        for t in tmpl)
+    manage = "".join(
+        f'<li>{E(t["text"])}<form method="post" action="/notes/delete">'
+        f'<input type="hidden" name="id" value="{t["id"]}">'
+        f'<button class="linky">remove</button></form></li>' for t in tmpl)
+
+    common = core.student_tag_counts(db, student["id"])
+    recur = ""
+    if common:
+        recur = ('<div class="recur"><span class="sub">Keeps happening:</span> '
+                 + " ".join(f'<span class="pill mute">{E(r["label"])} &times;{r["n"]}</span>'
+                            for r in common) + "</div>")
+
+    action = "/regrade" if regrade else "/grade"
+    save = "Save the change" if regrade else "Save &amp; next"
+    skip = ("" if regrade else
+            '<button class="ghost" formaction="/skip" name="skip" value="1">Skip</button>')
+    return f"""<form method="post" action="{action}" id="gform" class="card">
+      <input type="hidden" name="submission_id" value="{sub['id']}">
+      {scoring}
+      {recur}
+      <div class="tags">{tagboxes}</div>
+      <label class="f">Note (optional)
+        <textarea name="note" id="note" rows="2"
+          placeholder="One line the student will read">{E(sub["note"] or "")}</textarea></label>
+      <div class="chips">{chips}</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="save"{"" if regrade or sub["score"] else " disabled"}>{save}</button>
+        {skip}
+      </div>
+    </form>
+    <details class="card"><summary>Edit the quick notes</summary>
+      <ul class="tmpl">{manage or '<li class="sub">None yet.</li>'}</ul>
+      <form method="post" action="/notes/new" class="adder">
+        <input name="text" maxlength="300" placeholder="Add a sentence you write often" required>
+        <button class="ghost">Add</button></form>
+    </details>"""
+
+
+def previous_panel(db, sub, student):
+    """The last piece this student had marked, so you can see the difference."""
+    prev = core.previous_graded(db, student["id"], sub["id"])
+    if not prev:
+        return '<div class="card"><div class="sub">No earlier marked work.</div></div>'
+    files = db.execute("SELECT * FROM files WHERE submission_id=? ORDER BY ord, id LIMIT 2",
+                       (prev["id"],)).fetchall()
+    thumbs = ""
+    for f in files:
+        n = screen_name(f)
+        thumbs += ('<span class="tinyaudio">&#9834; recording</span>' if is_audio(n)
+                   else f'<img src="/media/{E(n)}" alt="" loading="lazy">')
+    a = (db.execute("SELECT title FROM assignments WHERE id=?", (prev["assignment_id"],)).fetchone()
+         if prev["assignment_id"] else None)
+    when = (prev["graded_at"] or prev["created_at"] or "")[:10]
+    note = f'<div class="sub prevnote">&ldquo;{E(prev["note"])}&rdquo;</div>' if prev["note"] else ""
+    return f"""<div class="card prev">
+      <div class="sub">Last time &mdash; {E(when)}{" &middot; " + E(a["title"]) if a else ""}</div>
+      <div class="prevhead">{score_pill(prev["score"])}
+        <a class="linky" href="/regrade/{prev["id"]}">change this mark</a></div>
+      {note}
+      <div class="prevshots">{thumbs}</div>
+    </div>"""
+
+
+def waiting_list(db, current_id):
+    """Everyone still in the queue, so a name can be found without hunting."""
+    rows = db.execute(
+        "SELECT s.id, s.created_at, s.kind, s.late, st.name, st.group_id,"
+        " a.title FROM submissions s JOIN students st ON st.id=s.student_id"
+        " LEFT JOIN assignments a ON a.id=s.assignment_id"
+        " WHERE s.status='pending' AND s.draft=0 ORDER BY s.created_at LIMIT 60"
+    ).fetchall()
+    if len(rows) < 2:
+        return ""
+    out = ""
+    for r in rows:
+        here = ' class="on"' if r["id"] == current_id else ""
+        kind = ' <span class="pill mute">speaking</span>' if r["kind"] == "voice" else ""
+        late = ' <span class="pill risk">late</span>' if r["late"] else ""
+        out += (f'<li{here}><a href="/queue?id={r["id"]}">{E(r["name"])}</a>'
+                f'<span class="sub">{E(group_name(db, r["group_id"]))}'
+                f'{" &middot; " + E(r["title"]) if r["title"] else ""}</span>'
+                f'{kind}{late}</li>')
+    return (f'<details class="card queuelist"><summary>{len(rows)} waiting '
+            f'&mdash; jump to anyone</summary><ul>{out}</ul></details>')
+
+
+def undo_strip(db):
+    """One click back to the mark you just gave, because keys slip."""
+    last = core.last_graded(db)
+    if not last:
+        return ""
+    st = db.execute("SELECT name FROM students WHERE id=?", (last["student_id"],)).fetchone()
+    if not st:
+        return ""
+    return (f'<div class="undo">Last marked <strong>{E(st["name"])}</strong> '
+            f'{score_pill(last["score"])} '
+            f'<a class="linky" href="/regrade/{last["id"]}">change it</a></div>')
+
+
+def grade_page(db, sub, regrade=False):
+    student = db.execute("SELECT * FROM students WHERE id=?", (sub["student_id"],)).fetchone()
+    assignment = (db.execute("SELECT * FROM assignments WHERE id=?",
+                             (sub["assignment_id"],)).fetchone()
+                  if sub["assignment_id"] else None)
+    files = db.execute("SELECT * FROM files WHERE submission_id=? ORDER BY ord, id",
+                       (sub["id"],)).fetchall()
+    st = core.student_stats(db, student["id"])
+    shots = "".join(shot(f, i) for i, f in enumerate(files)) \
+        or '<p class="sub">Nothing attached.</p>'
+
     remaining = db.execute(
         "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
     ).fetchone()["c"]
-    if not sub:
-        body = """<h1>Grading queue</h1>
-<div class="card"><p style="margin:0">Queue is empty. Nothing to grade.</p></div>"""
-        return html_response(page("Grade", body, "Grade"))
-
-    student = db.execute("SELECT * FROM students WHERE id=?", (sub["student_id"],)).fetchone()
-    assignment = (
-        db.execute("SELECT * FROM assignments WHERE id=?", (sub["assignment_id"],)).fetchone()
-        if sub["assignment_id"]
-        else None
-    )
-    files = db.execute(
-        "SELECT * FROM files WHERE submission_id=? ORDER BY ord, id", (sub["id"],)
-    ).fetchall()
-    st = core.student_stats(db, student["id"])
-    tags = db.execute("SELECT * FROM tags ORDER BY sort, id").fetchall()
-
-    shots = "".join(shot(f, i) for i, f in enumerate(files)) \
-        or '<p class="sub">No image attached.</p>'
 
     # while this student is being scored, quietly pull the next one's pages, so
     # the queue never makes the teacher wait for a download again
-    nxt = db.execute(
-        "SELECT * FROM submissions WHERE status='pending' AND draft=0 AND id<>?"
-        " ORDER BY created_at LIMIT 1", (sub["id"],)
-    ).fetchone()
     ahead = []
-    if nxt:
-        ahead = [screen_name(f) for f in db.execute(
-            "SELECT * FROM files WHERE submission_id=? ORDER BY ord, id LIMIT 4",
-            (nxt["id"],)).fetchall()]
+    if not regrade:
+        nxt = db.execute(
+            "SELECT * FROM submissions WHERE status='pending' AND draft=0 AND id<>?"
+            " ORDER BY created_at LIMIT 1", (sub["id"],)).fetchone()
+        if nxt:
+            ahead = [screen_name(f) for f in db.execute(
+                "SELECT * FROM files WHERE submission_id=? ORDER BY ord, id LIMIT 4",
+                (nxt["id"],)).fetchall() if not is_audio(screen_name(f))]
     prefetch = json.dumps(["/media/" + n for n in ahead])
 
-    pad = "".join(
-        f'<button type="button" data-score="{n}" onclick="pick({n})">{n}</button>'
-        for n in list(range(1, 11))
-    )
-    tagboxes = "".join(
-        f'<label><input type="checkbox" name="tag" value="{t["id"]}"><span>{E(t["label"])}</span></label>'
-        for t in tags
-    )
-
-    prev = (
-        f'Average {fmt(st["average"])} · last 3 {fmt(st["last3"])} · '
-        f'{st["graded_count"]} graded · {st["missed"]} missed'
-    )
-    body = f"""<h1>Grading queue</h1>
-<p class="sub">{remaining} waiting · keys <span class="kbd">1</span>–<span class="kbd">9</span>
-<span class="kbd">0</span>=10 to score, <span class="kbd">Enter</span> to save, <span class="kbd">s</span> to skip.</p>
+    prev = (f'Average {fmt(st["average"])} &middot; last 3 {fmt(st["last3"])} &middot; '
+            f'{st["graded_count"]} graded &middot; {st["missed"]} missed')
+    head = ("<h1>Change a mark</h1>" if regrade else "<h1>Grading queue</h1>")
+    hint = ("" if regrade else
+            f'<p class="sub">{remaining} waiting &middot; keys <span class="kbd">1</span>&ndash;'
+            f'<span class="kbd">9</span> <span class="kbd">0</span>=10, hold '
+            f'<span class="kbd">Shift</span> for a half, <span class="kbd">Enter</span> '
+            f'to save, <span class="kbd">s</span> to skip.</p>')
+    body = f"""{head}
+{hint}
+{"" if regrade else undo_strip(db)}
+{"" if regrade else waiting_list(db, sub["id"])}
 <div class="queue">
   <div class="shots">{shots}</div>
   <div>
     <div class="card">
       <div style="font-weight:600">{E(student["name"])}</div>
-      <div class="sub" style="margin:2px 0 0">{E(group_name(db, student["group_id"]))} ·
+      <div class="sub" style="margin:2px 0 0">{E(group_name(db, student["group_id"]))} &middot;
         {E(assignment["title"]) if assignment else "unassigned"}
         {'<span class="pill risk">late</span>' if sub["late"] else ''}
         {'<span class="pill mute">speaking</span>' if sub["kind"] == "voice" else ''}
         {'<span class="pill mute">resubmission</span>' if sub["improves"] else ''}</div>
-      <div class="sub" style="margin:6px 0 0">{E(prev)}</div>
+      <div class="sub" style="margin:6px 0 0">{prev}</div>
     </div>
-    <form method="post" action="/grade" id="gform" class="card">
-      <input type="hidden" name="submission_id" value="{sub['id']}">
-      <input type="hidden" name="score" id="score">
-      <div class="scorepad">{pad}</div>
-      <div class="tags">{tagboxes}</div>
-      <label class="f">Note (optional)
-        <textarea name="note" rows="2" placeholder="One line the student will read"></textarea></label>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button id="save" disabled>Save &amp; next</button>
-        <button class="ghost" formaction="/skip" name="skip" value="1">Skip</button>
-      </div>
-    </form>
+    {grade_form(db, sub, student, assignment, regrade)}
+    {previous_panel(db, sub, student)}
   </div>
 </div>
-<script>
-function pick(n) {{
-  document.getElementById('score').value = n;
-  document.querySelectorAll('.scorepad button').forEach(b =>
-    b.classList.toggle('sel', b.dataset.score == n));
-  document.getElementById('save').disabled = false;
-}}
-document.addEventListener('keydown', e => {{
-  if (e.target.tagName === 'TEXTAREA' && e.key !== 'Enter') return;
-  if (e.key >= '1' && e.key <= '9') {{ pick(+e.key); e.preventDefault(); }}
-  else if (e.key === '0') {{ pick(10); e.preventDefault(); }}
-  else if (e.key === 'Enter') {{
-    if (document.getElementById('score').value) {{
-      e.preventDefault(); document.getElementById('gform').submit();
-    }}
-  }} else if (e.key === 's' && e.target.tagName !== 'TEXTAREA') {{
-    location.href = '/skip?submission_id={sub["id"]}';
-  }}
-}});
-// tap a page to see it full size - the big file is only fetched if you ask
-function zoom(img) {{
-  if (img.dataset.full && img.src.indexOf(img.dataset.full) < 0) {{
-    img.src = img.dataset.full;
-  }}
-  img.classList.toggle('zoom');
-}}
-window.addEventListener('load', function () {{
-  ({prefetch}).forEach(function (u) {{ new Image().src = u; }});
-}});
-</script>"""
-    return html_response(page("Grade", body, "Grade"))
+<div id="gradedata" hidden data-skip="{sub["id"]}"
+     data-regrade="{1 if regrade else 0}" data-prefetch="{E(prefetch)}"></div>"""
+    return html_response(page("Change a mark" if regrade else "Grade", body, "Grade"))
+
+
+def view_queue(req, db):
+    core.seed_notes(db)
+    want = (req["query"].get("id", [""])[0] or "").strip()
+    sub = None
+    if want.isdigit():
+        sub = db.execute(
+            "SELECT * FROM submissions WHERE id=? AND status='pending' AND draft=0",
+            (int(want),)).fetchone()
+    if not sub:
+        sub = db.execute(
+            "SELECT * FROM submissions WHERE status='pending' AND draft=0"
+            " ORDER BY created_at LIMIT 1").fetchone()
+    if not sub:
+        body = f"""<h1>Grading queue</h1>
+{undo_strip(db)}
+<div class="card"><p style="margin:0">Queue is empty. Nothing to grade.</p></div>"""
+        return html_response(page("Grade", body, "Grade"))
+    return grade_page(db, sub)
+
+
+def view_regrade(req, db, sid):
+    sub = db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+    if not sub:
+        return not_found()
+    core.seed_notes(db)
+    return grade_page(db, sub, regrade=True)
 
 
 def restore_photo(name):
@@ -398,19 +545,6 @@ def screen_name(f):
         return f["preview"] or f["filename"]
     except (IndexError, KeyError):
         return f["filename"]
-
-
-def shot(f, i):
-    """One page of homework. Page 1 loads at once, the rest as they are reached,
-    and the full-size file waits until it is asked for."""
-    small = screen_name(f)
-    dims = ""
-    if f["width"] and f["height"]:
-        dims = f' width="{f["width"]}" height="{f["height"]}"'
-    full = f' data-full="/media/{E(f["filename"])}"' if small != f["filename"] else ""
-    lazy = "" if i == 0 else ' loading="lazy"'
-    return (f'<img src="/media/{E(small)}" alt="page {i+1}"{dims}{full}{lazy}'
-            f' decoding="async" onclick="zoom(this)">')
 
 
 def ring(percent, size=64):
@@ -964,6 +1098,9 @@ def view_assignments(req, db):
 <label class="f" style="justify-content:flex-end">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
 <input type="checkbox" name="publish" value="1"> open to students now</span></label>
+<label class="f" style="justify-content:flex-end">&nbsp;
+<span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
+<input type="checkbox" name="rubric" value="1"> mark on the four criteria</span></label>
 <label class="f" style="justify-content:flex-end">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
 <input type="checkbox" name="announce" value="1" checked> and tell them in Telegram</span></label>
@@ -3409,31 +3546,77 @@ def view_material_file(req, db, mid):
 
 # ----------------------------------------------------------------- actions
 
-def act_grade(req, db):
-    f = req["form"]
-    sid = int(f.get("submission_id", [0])[0])
-    score = f.get("score", [""])[0]
-    if not score:
-        return redirect("/queue")
+def save_grade(db, sub, form):
+    """Write one mark, from either the queue or a correction. Returns the score."""
+    assignment = (db.execute("SELECT * FROM assignments WHERE id=?",
+                             (sub["assignment_id"],)).fetchone()
+                  if sub["assignment_id"] else None)
+    if assignment and assignment["rubric"]:
+        score = core.set_criteria(
+            db, sub["id"],
+            {k: form.get("c_" + k, [""])[0] for k in core.CRITERIA_KEYS})
+    else:
+        score = core.mark_score(form.get("score", [""])[0])
+    if score is None:
+        return None
+    note = (form.get("note", [""])[0] or "").strip() or None
     db.execute(
         "UPDATE submissions SET status='graded', score=?, note=?, graded_at=? WHERE id=?",
-        (float(score), (f.get("note", [""])[0] or "").strip() or None, core.iso(core.now()), sid),
-    )
-    db.execute("DELETE FROM submission_tags WHERE submission_id=?", (sid,))
-    for t in f.get("tag", []):
-        if not t.strip().isdigit():
-            continue
-        db.execute(
-            "INSERT OR IGNORE INTO submission_tags (submission_id, tag_id) VALUES (?,?)",
-            (sid, int(t)),
-        )
+        (score, note, core.iso(core.now()), sub["id"]))
+    db.execute("DELETE FROM submission_tags WHERE submission_id=?", (sub["id"],))
+    for t in form.get("tag", []):
+        if t.strip().isdigit():
+            db.execute(
+                "INSERT OR IGNORE INTO submission_tags (submission_id, tag_id) VALUES (?,?)",
+                (sub["id"], int(t)))
     db.commit()
+    core.used_note(db, note)
+    return score
+
+
+def act_grade(req, db):
+    sid = int(req["form"].get("submission_id", [0])[0])
+    sub = db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+    if not sub or save_grade(db, sub, req["form"]) is None:
+        return redirect("/queue")
     try:
         notify_graded(db, sid)
     except Exception:
         # the score is saved either way; telling the student is best effort and
         # must never put an error page in front of the person marking
         traceback.print_exc()
+    return redirect("/queue")
+
+
+def act_regrade(req, db):
+    """Change a mark that was already given, and tell the student if it moved."""
+    sid = int(req["form"].get("submission_id", [0])[0])
+    sub = db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+    if not sub:
+        return redirect("/queue")
+    was = sub["score"]
+    score = save_grade(db, sub, req["form"])
+    if score is None:
+        return redirect("/regrade/%d" % sid)
+    if was is None or abs((was or 0) - score) > 1e-9:
+        # only when the number actually moved: a corrected tag is not news
+        try:
+            notify_graded(db, sid)
+        except Exception:
+            traceback.print_exc()
+    back = (req["form"].get("back", [""])[0] or "").strip()
+    return redirect(back if back.startswith("/") else "/queue")
+
+
+def act_new_note(req, db):
+    core.add_note_template(db, req["form"].get("text", [""])[0])
+    return redirect("/queue")
+
+
+def act_delete_note(req, db):
+    tid = (req["form"].get("id", [""])[0] or "").strip()
+    if tid.isdigit():
+        core.delete_note_template(db, int(tid))
     return redirect("/queue")
 
 
@@ -3506,10 +3689,11 @@ def act_new_assignment(req, db):
     if already_set(db, int(gid), title, due_iso):
         return redirect("/assignments")
     aid = db.execute(
-        "INSERT INTO assignments (group_id, title, task_type, due_at, created_at, published)"
-        " VALUES (?,?,?,?,?,?)",
+        "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
+        " published, rubric) VALUES (?,?,?,?,?,?,?)",
         (int(gid), title, f.get("task_type", ["task2"])[0], due_iso,
-         core.iso(core.now()), 1 if publish_now else 0),
+         core.iso(core.now()), 1 if publish_now else 0,
+         1 if f.get("rubric", [""])[0] == "1" else 0),
     ).lastrowid
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":
@@ -3767,6 +3951,10 @@ ROUTES = [
     ("GET", r"^/vocab/(\d+)$", view_word_list),
     ("GET", r"^/skip$", act_skip),
     ("POST", r"^/grade$", act_grade),
+    ("POST", r"^/regrade$", act_regrade),
+    ("GET",  r"^/regrade/(\d+)$", view_regrade),
+    ("POST", r"^/notes/new$", act_new_note),
+    ("POST", r"^/notes/delete$", act_delete_note),
     ("POST", r"^/skip$", act_skip),
     ("POST", r"^/groups/new$", act_new_group),
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
@@ -3835,12 +4023,32 @@ class Handler(BaseHTTPRequestHandler):
             # grading, but Telegram keeps them, so fetch it back on demand
             if not restore_photo(name):
                 return self._send(*not_found())
-        with open(full, "rb") as fh:
-            data = fh.read()
         ctype = ("audio/ogg" if name.endswith((".oga", ".ogg"))
+                 else "audio/mpeg" if name.endswith(".mp3")
+                 else "audio/mp4" if name.endswith((".m4a", ".aac"))
+                 else "audio/wav" if name.endswith(".wav")
                  else "image/png" if name.endswith(".png") else "image/jpeg")
-        self._send(200, [("Content-Type", ctype), ("Content-Length", str(len(data))),
-                         ("Cache-Control", "private, max-age=3600")], data)
+        size = os.path.getsize(full)
+        start, end, partial = 0, size - 1, False
+        m = re.match(r"bytes=(\d*)-(\d*)$", (self.headers.get("Range") or "").strip())
+        if m and (m.group(1) or m.group(2)):
+            # a recording will not play or seek in Safari without this
+            if m.group(1):
+                start = int(m.group(1))
+                if m.group(2):
+                    end = min(int(m.group(2)), size - 1)
+            else:
+                start = max(0, size - int(m.group(2)))
+            if start >= size or start > end:
+                return self._send(416, [("Content-Range", "bytes */%d" % size),
+                                        ("Content-Length", "0")], b"")
+            partial = True
+        headers = [("Content-Type", ctype), ("Accept-Ranges", "bytes"),
+                   ("Content-Length", str(end - start + 1)),
+                   ("Cache-Control", "private, max-age=3600")]
+        if partial:
+            headers.append(("Content-Range", "bytes %d-%d/%d" % (start, end, size)))
+        self._send_file(206 if partial else 200, headers, full, start, end - start + 1)
 
     def _student_get(self, path, query):
         parts = path.split("/")

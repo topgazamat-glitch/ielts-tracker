@@ -324,6 +324,10 @@ def migrate(db):
     if "offloaded" not in fcols:
         # 1 = the big file has been deleted from disk; Telegram still has it
         db.execute("ALTER TABLE files ADD COLUMN offloaded INTEGER NOT NULL DEFAULT 0")
+    acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
+    if "rubric" not in acols:
+        # marked on the four criteria rather than one number
+        db.execute("ALTER TABLE assignments ADD COLUMN rubric INTEGER NOT NULL DEFAULT 0")
     scols = {r["name"] for r in db.execute("PRAGMA table_info(submissions)")}
     if "late" not in scols:
         db.execute("ALTER TABLE submissions ADD COLUMN late INTEGER NOT NULL DEFAULT 0")
@@ -415,6 +419,18 @@ def migrate(db):
         correct INTEGER NOT NULL DEFAULT 0,
         ms INTEGER,
         UNIQUE (game_id, question_id, student_id)
+    );
+    CREATE TABLE IF NOT EXISTS criteria_scores (
+        submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        score REAL NOT NULL,
+        PRIMARY KEY (submission_id, key)
+    );
+    CREATE TABLE IF NOT EXISTS note_templates (
+        id INTEGER PRIMARY KEY,
+        text TEXT NOT NULL,
+        sort INTEGER NOT NULL DEFAULT 0,
+        uses INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS daily_music (
         id INTEGER PRIMARY KEY,
@@ -1644,6 +1660,115 @@ def class_champions(standing, db):
         if gid and (gid not in best or r["total"] > best[gid]["total"]):
             best[gid] = r
     return best
+
+
+CRITERIA = [
+    ("task", "Task response", "Did they answer the question that was asked?"),
+    ("coherence", "Coherence", "Paragraphs, linking, does it follow?"),
+    ("lexis", "Vocabulary", "Range and accuracy of word choice"),
+    ("grammar", "Grammar", "Range and accuracy of structures"),
+]
+CRITERIA_KEYS = [k for k, _l, _h in CRITERIA]
+
+DEFAULT_NOTES = [
+    "Good structure - keep using those linking words.",
+    "Answer the whole question: you left half of it out.",
+    "Watch your articles: a / the / nothing.",
+    "Strong vocabulary here. Now use it in the next one too.",
+    "Too short. Aim for the full word count.",
+    "Much better than last time - the practice is showing.",
+]
+
+
+def seed_notes(db):
+    """Six sentences to start from; the teacher edits them from the queue."""
+    if db.execute("SELECT COUNT(*) c FROM note_templates").fetchone()["c"]:
+        return
+    for i, text in enumerate(DEFAULT_NOTES):
+        db.execute("INSERT INTO note_templates (text, sort) VALUES (?,?)", (text, i))
+    db.commit()
+
+
+def note_templates(db):
+    return db.execute(
+        "SELECT * FROM note_templates ORDER BY uses DESC, sort, id").fetchall()
+
+
+def add_note_template(db, text):
+    text = (text or "").strip()
+    if not text:
+        return
+    nxt = db.execute("SELECT COALESCE(MAX(sort),0)+1 s FROM note_templates").fetchone()["s"]
+    db.execute("INSERT INTO note_templates (text, sort) VALUES (?,?)", (text[:300], nxt))
+    db.commit()
+
+
+def delete_note_template(db, tid):
+    db.execute("DELETE FROM note_templates WHERE id=?", (tid,))
+    db.commit()
+
+
+def used_note(db, text):
+    """Nudge whichever template this note came from up the list."""
+    if not text:
+        return
+    db.execute("UPDATE note_templates SET uses=uses+1 WHERE text=?", (text.strip(),))
+    db.commit()
+
+
+def set_criteria(db, submission_id, scores):
+    """Store the per-criterion marks and return the overall, or None.
+
+    The overall is the plain average of whatever was filled in, to the nearest
+    half - the same scale as a hand-given mark, so ratings and the championship
+    need to know nothing about criteria.
+    """
+    db.execute("DELETE FROM criteria_scores WHERE submission_id=?", (submission_id,))
+    kept = []
+    for key in CRITERIA_KEYS:
+        v = mark_score(scores.get(key))
+        if v is None:
+            continue
+        db.execute("INSERT INTO criteria_scores (submission_id, key, score)"
+                   " VALUES (?,?,?)", (submission_id, key, v))
+        kept.append(v)
+    db.commit()
+    if not kept:
+        return None
+    return round(sum(kept) / len(kept) * 2) / 2.0
+
+
+def criteria_for(db, submission_id):
+    return {r["key"]: r["score"] for r in db.execute(
+        "SELECT key, score FROM criteria_scores WHERE submission_id=?",
+        (submission_id,))}
+
+
+def previous_graded(db, student_id, before_id):
+    """The last piece this student had marked before this one."""
+    return db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND status='graded'"
+        " AND score IS NOT NULL AND id<>? ORDER BY COALESCE(graded_at, created_at) DESC,"
+        " id DESC LIMIT 1", (student_id, before_id)).fetchone()
+
+
+def student_tag_counts(db, student_id, days=60):
+    """Which mistakes keep coming back for this student."""
+    since = iso(now() - timedelta(days=days))
+    return db.execute(
+        "SELECT t.label, COUNT(*) n FROM submission_tags st"
+        " JOIN tags t ON t.id=st.tag_id"
+        " JOIN submissions s ON s.id=st.submission_id"
+        " WHERE s.student_id=? AND s.created_at >= ?"
+        " GROUP BY t.id ORDER BY n DESC, t.label LIMIT 6",
+        (student_id, since)).fetchall()
+
+
+def last_graded(db):
+    """The most recently marked piece, for the undo strip on the queue."""
+    return db.execute(
+        "SELECT * FROM submissions WHERE status='graded' AND score IS NOT NULL"
+        " ORDER BY graded_at DESC, id DESC LIMIT 1").fetchone()
 
 
 def mark_score(raw):

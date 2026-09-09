@@ -1017,3 +1017,57 @@ tr.me td { scroll-margin-top: 80px; }
 }
 #navbar.on { width: 80%; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { #navbar { transition: none; } }
+
+/* ---------------------------------------------------- grading */
+audio.voice { width: 100%; margin: 8px 0; }
+.scorepad.halves { margin-top: 6px; }
+.scorepad.halves button {
+  font-size: 12px; padding: 6px 8px; opacity: .85;
+}
+.scorepad.mini button { padding: 5px 9px; font-size: 13px; }
+.criteria { display: grid; gap: 14px; }
+.crit {
+  display: grid; gap: 6px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.crit:last-child { border-bottom: 0; padding-bottom: 0; }
+.crit .sub { margin: 0; }
+#overall { margin: 10px 0 0; font-size: 14px; }
+
+.undo {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 12px; border-radius: 8px;
+  background: var(--surface-2); font-size: 13px;
+}
+.linky {
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+  color: var(--brand); font-weight: 600; text-decoration: underline;
+}
+.queuelist ul { list-style: none; margin: 10px 0 0; padding: 0; }
+.queuelist li {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 0; border-bottom: 1px solid var(--line-soft);
+}
+.queuelist li.on { font-weight: 600; }
+.queuelist li:last-child { border-bottom: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  border: 1px solid var(--line); background: var(--surface);
+  border-radius: 999px; padding: 5px 11px; font-size: 12px;
+  cursor: pointer; color: var(--ink-2); text-align: left;
+}
+.chip:hover { border-color: var(--brand); color: var(--brand); }
+.tmpl { list-style: none; margin: 10px 0; padding: 0; }
+.tmpl li {
+  display: flex; justify-content: space-between; gap: 10px; align-items: center;
+  padding: 5px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px;
+}
+.tmpl form { margin: 0; }
+.recur { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+.prev .prevhead { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.prevnote { font-style: italic; margin: 0 0 8px; }
+.prevshots { display: flex; gap: 8px; }
+.prevshots img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
+.tinyaudio { font-size: 12px; color: var(--ink-3); }
