@@ -32,7 +32,7 @@ def sign_in(base, password):
     return opener
 
 
-def post_file(opener, base, path, title, level_id, collection, section):
+def post_file(opener, base, path, title, level_id, collection, section, unit=""):
     boundary = "----ta" + uuid.uuid4().hex
     ext = os.path.splitext(path)[1].lower()
     with open(path, "rb") as fh:
@@ -40,7 +40,7 @@ def post_file(opener, base, path, title, level_id, collection, section):
     parts = []
     for key, value in (("title", title), ("level_id", str(level_id)),
                        ("collection", collection), ("category", section),
-                       ("group_id", ""), ("unit", ""), ("book", "")):
+                       ("group_id", ""), ("unit", str(unit)), ("book", "")):
         parts.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
                       % (boundary, key, value)).encode("utf-8"))
     parts.append(("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
@@ -60,7 +60,7 @@ def main():
     ap.add_argument("folder")
     ap.add_argument("--level", required=True)
     ap.add_argument("--collection", default="practice")
-    ap.add_argument("--section", default="Tests")
+    ap.add_argument("--section", default="Paper")
     ap.add_argument("--site", default=os.environ.get("SITE", SITE))
     ap.add_argument("--password", default=os.environ.get("TEACHER_PASSWORD", ""))
     ap.add_argument("--upload", action="store_true")
@@ -97,17 +97,24 @@ def main():
     plan = []
     for f in files:
         title = re.sub(r"\.[A-Za-z0-9]+$", "", f).replace("_", " ").strip()
-        plan.append((os.path.join(args.folder, f), title))
-        print("   %-34s %6.1f MB" % (title,
+        # the test number in the name is what files the paper, its audio and its
+        # answers together under one button
+        m = re.search(r"(?i)test[\s_-]*0*(\d{1,2})", title)
+        unit = m.group(1) if m else ""
+        if core.is_test_shelf(args.collection) and not unit:
+            print("   SKIPPED %s - no test number in the name" % title)
+            continue
+        plan.append((os.path.join(args.folder, f), title, unit))
+        print("   %-34s %-9s %6.1f MB" % (title, "Test " + unit if unit else "no test",
               os.path.getsize(os.path.join(args.folder, f)) / 1048576))
     if not args.upload:
         print("\n%d file(s). Add --upload to send them." % len(plan))
         return 0
     sent = 0
-    for path, title in plan:
+    for path, title, unit in plan:
         try:
             post_file(opener, args.site, path, title, lid,
-                      args.collection, args.section)
+                      args.collection, args.section, unit)
             sent += 1
             print("   sent %s" % title)
         except Exception as exc:

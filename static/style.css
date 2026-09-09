@@ -1110,3 +1110,14 @@ button.ghost.danger { color: var(--red); border-color: var(--red); }
 }
 .bulkbar form { margin: 0; }
 #roster td { vertical-align: middle; }
+
+/* one practice test: paper, audio and answers together */
+.testfile {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 14px; flex-wrap: wrap;
+  padding: 12px 0; border-bottom: 1px solid var(--line-soft);
+}
+.testfile:last-child { border-bottom: 0; }
+.testfile a { font-weight: 600; }
+.testfile .sub { margin: 2px 0 0; }
+.testfile audio { max-width: 320px; flex: 1 1 220px; }

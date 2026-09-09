@@ -1685,6 +1685,44 @@ def portal_materials(db, s, token, query):
         return f'<h2>Materials</h2><div class="tiles">{cards}</div>'
 
     crumb = f'<a class="crumb" href="{base}">Materials</a> › {E(core.collection_label(coll))}'
+
+    # the practice shelf is twenty buttons, and each holds a whole test - the
+    # paper, its recording and its answers, so nothing has to be cross-referred
+    if core.is_test_shelf(coll):
+        have = core.units_across(db, level_id, coll)
+        if unit is None:
+            cards = "".join(
+                f'<a class="tile small{"" if n in have else " empty"}" '
+                f'href="{base}&amp;c={coll}&amp;u={n}">'
+                f'<div class="tile-title">Test {n}</div>'
+                f'<div class="sub" style="margin:0">'
+                f'{have[n]} file{"" if have.get(n) == 1 else "s"}</div></a>'
+                if n in have else
+                f'<a class="tile small empty" href="{base}&amp;c={coll}&amp;u={n}">'
+                f'<div class="tile-title">Test {n}</div>'
+                f'<div class="sub" style="margin:0">empty</div></a>'
+                for n in core.tests_in_collection(coll))
+            return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
+        rows = core.files_in_test(db, level_id, coll, unit)
+        order = {name: i for i, name in enumerate(core.sections(coll))}
+        rows = sorted(rows, key=lambda m: (order.get(m["category"], 99), m["title"]))
+        crumb += f' › <a class="crumb" href="{base}&amp;c={coll}">Test {unit}</a>'
+        if not rows:
+            return (f'<p class="sub">{crumb}</p><div class="card">'
+                    f'<p style="margin:0">Nothing here yet.</p></div>')
+        parts = ""
+        for m in rows:
+            kind = m["category"] or "File"
+            src = f'/materials/{m["id"]}/file?s={E(token)}'
+            player = (f'<audio controls preload="none" class="voice" src="{src}"></audio>'
+                      if (m["mime"] or "").startswith("audio") else "")
+            parts += (f'<div class="testfile"><div>'
+                      f'<span class="pill mute">{E(kind)}</span> '
+                      f'<a href="{src}">{E(m["title"])}</a>'
+                      f'<div class="sub">{E(core.human_size(m["size"]))}</div></div>'
+                      f'{player}</div>')
+        return f'<p class="sub">{crumb}</p><div class="card">{parts}</div>'
+
     if query.get("audio") and sect is None:
         counts = core.level_counts(db, level_id, coll)
         names = core.sections(coll)
@@ -3363,7 +3401,8 @@ def crumbs(db, level_id, coll, cat, unit, base):
     if cat:
         bits.append(f'<a class="crumb" href="{base}c={coll}&amp;s={E(cat)}">{E(cat)}</a>')
     if unit is not None:
-        bits.append("Welcome" if unit == 0 else "Unit %d" % unit)
+        bits.append("Welcome" if unit == 0
+                    else "%s %d" % (core.unit_word(coll), unit))
     return '<p class="sub">' + " &rsaquo; ".join(bits) + "</p>"
 
 
@@ -3411,6 +3450,44 @@ def section_tiles(db, level_id, coll, base):
         for name in core.sections(coll))
     return (crumbs(db, level_id, coll, "", None, base)
             + f'<div class="tiles">{cards}</div>')
+
+
+def test_tiles(db, level_id, coll, base):
+    """Twenty buttons - Test 1 to Test 20 - each holding everything for that test."""
+    have = core.units_across(db, level_id, coll)
+    href = f'{base}c={coll}'
+    cards = "".join(
+        tile(f'{href}&amp;u={n}', "Test %d" % n,
+             "%d file%s" % (have[n], "" if have[n] == 1 else "s") if n in have else "empty",
+             small=True, empty=n not in have)
+        for n in core.tests_in_collection(coll))
+    return (crumbs(db, level_id, coll, None, None, base)
+            + f'<div class="tiles">{cards}</div>')
+
+
+def test_files(db, level_id, coll, unit, base):
+    """One test: the paper, its audio and its answers, labelled and together."""
+    rows = core.files_in_test(db, level_id, coll, unit)
+    order = {name: i for i, name in enumerate(core.sections(coll))}
+    rows = sorted(rows, key=lambda m: (order.get(m["category"], 99), m["title"]))
+    if not rows:
+        body = ('<div class="card"><p style="margin:0" class="sub">Nothing here yet.'
+                '</p></div>')
+    else:
+        items = ""
+        for m in rows:
+            kind = m["category"] or "File"
+            size = "%.1f MB" % ((m["size"] or 0) / 1048576.0)
+            player = ""
+            if is_audio(m["original_name"] or m["filename"]):
+                player = (f'<audio controls preload="none" class="voice"'
+                          f' src="/materials/{m["id"]}/file"></audio>')
+            items += (f'<div class="testfile"><div>'
+                      f'<span class="pill mute">{E(kind)}</span> '
+                      f'<a href="/materials/{m["id"]}/file">{E(m["title"])}</a>'
+                      f'<div class="sub">{E(size)}</div></div>{player}</div>')
+        body = f'<div class="card">{items}</div>'
+    return crumbs(db, level_id, coll, None, unit, base) + body
 
 
 def unit_tiles(db, level_id, coll, cat, base):
@@ -3503,9 +3580,12 @@ def view_materials(req, db):
         blocks = search + level_tiles(db, levels)
     elif not coll or coll not in core.COLLECTIONS:
         blocks = search + shelf_tiles(db, only, base)
+    elif core.is_test_shelf(coll):
+        blocks = search + (test_tiles(db, only, coll, base) if unit is None
+                           else test_files(db, only, coll, unit, base))
     elif not cat:
         blocks = search + section_tiles(db, only, coll, base)
-    elif unit is None and core.has_units(coll) and core.units_in(db, only, coll, cat):
+    elif unit is None and core.units_in(db, only, coll, cat):
         blocks = search + unit_tiles(db, only, coll, cat, base)
     else:
         blocks = search + material_table(
@@ -3518,8 +3598,12 @@ def view_materials(req, db):
                     for k in core.COLLECTION_ORDER)
     gopts = ('<option value="">Every class at that level</option>'
              + "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups))
+    # the list covers both shelves: units for a coursebook, tests for the
+    # practice shelf, which runs past twelve
+    highest = max([len(core.UNITS)] + list(core.TEST_COLLECTIONS.values()))
     uopts = ('<option value="">— none —</option>'
-             + "".join(f'<option value="{n}">Unit {n}</option>' for n in core.UNITS))
+             + "".join(f'<option value="{n}">{n}</option>'
+                       for n in range(1, highest + 1)))
     bopts = ('<option value="">— none —</option>'
              + "".join(f'<option value="{k}">{E(v)}</option>'
                        for k, v in core.BOOKS.items()))
@@ -3538,7 +3622,7 @@ walk through in the bot.</p>
   data-sections="{E(sections_json)}">{kopts}</select></label>
 <label class="f">Section<select name="category" id="sect"></select></label>
 <label class="f">Class<select name="group_id">{gopts}</select></label>
-<label class="f">Unit<select name="unit">{uopts}</select></label>
+<label class="f">Unit / Test<select name="unit" id="unitsel">{uopts}</select></label>
 <label class="f">Book<select name="book">{bopts}</select></label>
 </div>
 <label class="f" style="margin-bottom:12px">Note (optional)
@@ -3578,9 +3662,12 @@ def act_new_material(req, db):
         category = core.sections(collection)[0]
     raw_unit = (fields.get("unit", [""])[0] or "").strip()
     # 0 is the Welcome unit - it is a real unit for filing, it just sits
-    # before Unit 1 and so is not in core.UNITS.
+    # before Unit 1 and so is not in core.UNITS. The practice shelf counts
+    # tests instead, and there are twenty of those.
+    allowed = (core.tests_in_collection(collection)
+               if core.is_test_shelf(collection) else core.UNITS)
     unit = (int(raw_unit) if raw_unit.isdigit()
-            and (int(raw_unit) in core.UNITS or int(raw_unit) == 0) else None)
+            and (int(raw_unit) in allowed or int(raw_unit) == 0) else None)
     book = (fields.get("book", [""])[0] or "").strip()
     book = book if book in core.BOOKS else None
     db.execute(

@@ -29,17 +29,31 @@ COLLECTIONS = {
     "selfstudy": ("Self-Study",
                   ["Reading", "Listening", "Vocabulary", "Grammar", "Writing"]),
     "practice": ("Practice tests",
-                 ["Tests", "Answer keys", "Audios"]),
+                 ["Paper", "Audio", "Answer key"]),
 }
 COLLECTION_ORDER = ["empower", "selfstudy", "practice"]
 
-# a practice test belongs to no coursebook unit, so its section lists the papers
-# themselves rather than sending the student through a unit tile first
-UNITLESS = {"practice"}
+# The practice shelf is numbered by test, not by coursebook unit, and a student
+# wants one test with everything in it rather than three lists to cross-refer.
+# So its tiles are the twenty tests, and the sections above become labels on the
+# files inside each one.
+TEST_COLLECTIONS = {"practice": 20}
+
+
+def is_test_shelf(collection):
+    return collection in TEST_COLLECTIONS
+
+
+def tests_in_collection(collection):
+    return list(range(1, TEST_COLLECTIONS.get(collection, 0) + 1))
+
+
+def unit_word(collection):
+    return "Test" if is_test_shelf(collection) else "Unit"
 
 
 def has_units(collection):
-    return collection not in UNITLESS
+    return True
 
 # a material may also carry a unit number and which book it belongs to
 BOOKS = {"class": "Class book", "work": "Work book"}
@@ -51,10 +65,28 @@ LEVEL_UNIT_COUNT = {"Intermediate": 10}
 DEFAULT_UNIT_COUNT = 12
 
 
-def units_for_level(db, level_id):
-    """The unit numbers to offer for this level - 12 for most, 10 for B1+."""
+def units_for_level(db, level_id, collection=None):
+    """The numbers to offer - twenty tests on the practice shelf, else units."""
+    if collection and is_test_shelf(collection):
+        return tests_in_collection(collection)
     name = level_name(db, level_id)
     return list(range(1, LEVEL_UNIT_COUNT.get(name, DEFAULT_UNIT_COUNT) + 1))
+
+
+def units_across(db, level_id, collection):
+    """Every test number that has a file, whatever kind it is."""
+    rows = db.execute(
+        "SELECT unit, COUNT(*) c FROM materials WHERE active=1 AND collection=?"
+        " AND unit IS NOT NULL AND (level_id IS NULL OR level_id IS ?)"
+        " GROUP BY unit ORDER BY unit", (collection, level_id)).fetchall()
+    return {r["unit"]: r["c"] for r in rows}
+
+
+def files_in_test(db, level_id, collection, unit):
+    return db.execute(
+        "SELECT * FROM materials WHERE active=1 AND collection=? AND unit=?"
+        " AND (level_id IS NULL OR level_id IS ?) ORDER BY category, title",
+        (collection, unit, level_id)).fetchall()
 
 # every section name, used when validating an upload
 CATEGORIES = [c for key in COLLECTION_ORDER for c in COLLECTIONS[key][1]]
