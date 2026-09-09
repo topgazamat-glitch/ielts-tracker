@@ -1121,3 +1121,20 @@ button.ghost.danger { color: var(--red); border-color: var(--red); }
 .testfile a { font-weight: 600; }
 .testfile .sub { margin: 2px 0 0; }
 .testfile audio { max-width: 320px; flex: 1 1 220px; }
+
+/* ------------------------------------------- digital tests */
+.dq { padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+.dq:last-child { border-bottom: 0; }
+.dqhead { font-size: 14px; margin-bottom: 8px; }
+.dqhead b { margin-right: 6px; color: var(--brand); }
+.keypick {
+  display: flex; gap: 8px; align-items: flex-start; padding: 5px 0;
+  font-size: 13px; cursor: pointer;
+}
+.keypick input { margin-top: 3px; }
+.keypick b { color: var(--ink-2); margin-right: 4px; }
+.opt { padding: 5px 8px; font-size: 13px; border-radius: 6px; }
+.opt b { color: var(--ink-3); margin-right: 6px; }
+.opt.right { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); font-weight: 600; }
+.opt.chosen { background: color-mix(in srgb, var(--red) 14%, var(--surface)); }
+.passage { white-space: pre-wrap; font-size: 14px; line-height: 1.65; }

@@ -55,7 +55,7 @@ def page(title, body, active="", music=False):
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Progress')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
-{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
+{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
   ' onclick="Music.toggle()" title="Music"></button>' if (music or tune) else ''}
 <a href="/logout">Sign out</a></span></header>
@@ -1567,7 +1567,7 @@ def student_page(title, body):
 def student_shell(s, db, token, tab, body):
     """One page, four tabs, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
-    tabs = [("home", "Homework"), ("materials", "Materials"),
+    tabs = [("home", "Homework"), ("materials", "Materials"), ("tests", "Tests"),
             ("progress", "Progress"), ("class", "Class"), ("goal", "My goal"),
             ("profile", "Profile")]
     nav = "".join(
@@ -1792,6 +1792,109 @@ def portal_materials(db, s, token, query):
             f'<span class="fsize">{E(core.human_size(m["size"]))}</span></a>')
     rows = "".join(parts)
     return f'<p class="sub">{crumb}</p><div class="filelist">{rows}</div>'
+
+
+def portal_tests(db, s, token, query):
+    """Sit a test on the phone and see the score the moment it is handed in."""
+    level_id = core.level_of(db, s["group_id"])
+    tid = query.get("t", [None])[0]
+    tid = int(tid) if tid and tid.isdigit() else None
+    base = f"/s/{E(token)}?tab=tests"
+
+    if tid is None:
+        tests = core.digital_tests(db, level_id, published_only=True)
+        done = {a["test_id"]: a for a in core.student_attempts(db, s["id"])}
+        if not tests:
+            return ('<h2>Tests</h2><div class="card"><p style="margin:0">'
+                    'No tests yet. Your teacher will put one here.</p></div>')
+        cards = ""
+        for t in tests:
+            a = done.get(t["id"])
+            sub = (f'{a["score"]} of {a["total"]}' if a else "%d questions" % t["n"])
+            cards += (f'<a class="tile small" href="{base}&amp;t={t["id"]}">'
+                      f'<div class="tile-title">{E(t["title"])}</div>'
+                      f'<div class="sub" style="margin:0">{sub}</div></a>')
+        past = ""
+        for a in core.student_attempts(db, s["id"])[:8]:
+            past += (f'<li>{E(a["title"])} &mdash; <strong>{a["score"]}</strong> of '
+                     f'{a["total"]} <span class="sub">'
+                     f'{E((a["finished_at"] or "")[:10])}</span></li>')
+        return (f'<h2>Tests</h2><div class="tiles">{cards}</div>'
+                + (f'<h2 style="margin-top:22px">Your results</h2>'
+                   f'<ul class="attn">{past}</ul>' if past else ""))
+
+    t = db.execute("SELECT * FROM dtests WHERE id=? AND published=1", (tid,)).fetchone()
+    if not t:
+        return '<h2>Tests</h2><p class="sub">That test is not open.</p>'
+    qs = core.test_questions(db, tid)
+
+    prev = db.execute(
+        "SELECT * FROM dattempts WHERE test_id=? AND student_id=? AND finished_at IS NOT NULL"
+        " ORDER BY finished_at DESC LIMIT 1", (tid, s["id"])).fetchone()
+    if prev and query.get("again", [""])[0] != "1":
+        given = {r["question_id"]: r for r in db.execute(
+            "SELECT * FROM dresponses WHERE attempt_id=?", (prev["id"],))}
+        rows = ""
+        for q, opts in qs:
+            r = given.get(q["id"])
+            mine = r["given"] if r else None
+            ok = r and r["correct"]
+            mark = ('<span class="pill good">correct</span>' if ok
+                    else '<span class="pill risk">wrong</span>')
+            lines = ""
+            for o in opts:
+                cls = ""
+                if o["letter"] == q["answer"]:
+                    cls = " right"
+                elif o["letter"] == mine:
+                    cls = " chosen"
+                lines += (f'<div class="opt{cls}"><b>{E(o["letter"])}</b> '
+                          f'{E(o["text"])}</div>')
+            rows += (f'<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
+                     f'{E(q["prompt"])} {mark}</div>{lines}</div>')
+        return f"""<h2>{E(t["title"])}</h2>
+<div class="card champ-hero"><div class="sub">You scored</div>
+<div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
+<div class="card">{rows}</div>
+<p style="margin-top:14px"><a class="tab" href="{base}">Back to the tests</a>
+<a class="tab" href="{base}&amp;t={tid}&amp;again=1">Try it again</a></p>"""
+
+    core.start_attempt(db, tid, s["id"])
+    passage = (f'<div class="card"><div class="passage">{E(t["passage"])}</div></div>'
+               if t["passage"] else "")
+    rows = ""
+    for q, opts in qs:
+        picks = "".join(
+            f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
+            f' value="{E(o["letter"])}" required><span><b>{E(o["letter"])}</b> '
+            f'{E(o["text"])}</span></label>' for o in opts)
+        rows += (f'<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
+                 f'{E(q["prompt"])}</div>{picks}</div>')
+    return f"""<h2>{E(t["title"])}</h2>
+<p class="sub">{len(qs)} questions. It is marked as soon as you hand it in.</p>
+{passage}
+<form method="post" action="/s/{E(token)}/test/{tid}">
+<div class="card">{rows}</div>
+<div style="margin-top:12px"><button>Hand it in</button></div>
+</form>"""
+
+
+def act_student_test(req, db, token, tid):
+    """Mark a handed-in test at once and send the student to their result."""
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    t = db.execute("SELECT id FROM dtests WHERE id=? AND published=1", (tid,)).fetchone()
+    if not t:
+        return redirect(f"/s/{token}?tab=tests")
+    given = {}
+    for key, values in req["form"].items():
+        m = re.match(r"^q(\d+)$", key)
+        if m and values:
+            given[int(m.group(1))] = values[0]
+    attempt = core.start_attempt(db, tid, s["id"])
+    core.submit_attempt(db, attempt, given)
+    return redirect(f"/s/{token}?tab=tests&t={tid}")
 
 
 def portal_progress(db, s, token):
@@ -2346,6 +2449,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_materials(db, s, token, query)
     elif tab == "progress":
         body = portal_progress(db, s, token)
+    elif tab == "tests":
+        body = portal_tests(db, s, token, query)
     elif tab == "class":
         sc = (query.get("scope", ["class"])[0] or "class")
         body = portal_class(db, s, token, "school" if sc == "school" else "class")
@@ -3717,6 +3822,137 @@ def serve_material(db, mid, student=None):
                  ("Content-Length", str(len(blob)))], blob
 
 
+def view_tests(req, db):
+    """Digital tests: made from the book, marked by the machine."""
+    rows = core.digital_tests(db)
+    body_rows = ""
+    for t in rows:
+        ready = t["n"] and t["n"] == t["keyed"]
+        state = ('<span class="pill">published</span>' if t["published"]
+                 else '<span class="pill mute">draft</span>')
+        key = (f'<span class="pill good">key complete</span>' if ready
+               else f'<span class="pill risk">{t["keyed"]} of {t["n"]} answers</span>')
+        sat = db.execute("SELECT COUNT(*) c FROM dattempts WHERE test_id=?"
+                         " AND finished_at IS NOT NULL", (t["id"],)).fetchone()["c"]
+        body_rows += (f'<tr><td><a href="/tests/{t["id"]}">{E(t["title"])}</a></td>'
+                      f'<td class="sub">{E(t["level"] or "any level")}</td>'
+                      f'<td>{t["n"]}</td><td>{key}</td><td>{state}</td>'
+                      f'<td class="sub">{sat} sat</td></tr>')
+
+    body = f"""<h1>Digital tests</h1>
+<p class="sub">A test taken on the phone and marked the moment it is handed in. The
+questions come out of the practice book; the answer key does not, so a test cannot be
+published until every answer has been set.</p>
+<div class="tablewrap"><table><tr><th>Test</th><th>Level</th><th>Questions</th>
+<th>Answer key</th><th></th><th></th></tr>
+{body_rows or '<tr><td colspan=6 class="sub">None yet.</td></tr>'}</table></div>
+<h2 style="margin-top:26px">Load a test</h2>
+<div class="card"><form method="post" action="/tests/new" enctype="multipart/form-data"
+ class="inline">
+<label class="f">File<input type="file" name="file" accept=".json,application/json" required></label>
+<label class="f" style="justify-content:flex-end">&nbsp;<button>Load it</button></label>
+</form>
+<p class="sub" style="margin:10px 0 0">Made with
+<span class="kbd">python3 import_tests.py "full book 1.docx" --test 1</span>, which reads
+the Reading section out of the book. Load the file it writes here.</p></div>"""
+    return html_response(page("Digital tests", body, "Tests"))
+
+
+def view_test(req, db, tid):
+    t = db.execute("SELECT * FROM dtests WHERE id=?", (tid,)).fetchone()
+    if not t:
+        return not_found()
+    qs = core.test_questions(db, tid)
+    ready = core.test_ready(db, tid)
+
+    rows = ""
+    for q, opts in qs:
+        picks = "".join(
+            f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
+            f' value="{E(o["letter"])}"{" checked" if q["answer"] == o["letter"] else ""}>'
+            f'<span><b>{E(o["letter"])}</b> {E(o["text"][:90])}</span></label>'
+            for o in opts)
+        missing = "" if q["answer"] else ' <span class="pill risk">no answer</span>'
+        rows += (f'<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
+                 f'{E(q["prompt"])}{missing}</div>{picks}</div>')
+
+    passage = (f'<div class="card"><div class="sub">The text students read</div>'
+               f'<div class="passage">{E(t["passage"])}</div></div>'
+               if t["passage"] else "")
+
+    sat = core.attempts_for_test(db, tid)
+    results = ""
+    if sat:
+        results = "<h2>Who has sat it</h2><div class='tablewrap'><table>" \
+                  "<tr><th>Student</th><th>Score</th><th>When</th></tr>"
+        for a in sat:
+            results += (f'<tr><td>{E(a["name"])}</td>'
+                        f'<td><strong>{a["score"]}</strong> of {a["total"]}</td>'
+                        f'<td class="sub">{E((a["finished_at"] or "")[:16].replace("T", " "))}</td></tr>')
+        results += "</table></div>"
+
+    pub = ""
+    if ready:
+        pub = (f'<form method="post" action="/tests/{tid}/publish">'
+               f'<button>{"Unpublish" if t["published"] else "Publish to students"}'
+               f'</button></form>')
+    else:
+        pub = ('<p class="sub" style="margin:0">Set every answer before publishing.</p>')
+
+    body = f"""<h1>{E(t["title"])}</h1>
+<p class="sub">{len(qs)} questions &middot;
+{"every answer set" if ready else "answer key incomplete"} &middot;
+{"published" if t["published"] else "not published"}</p>
+{passage}
+<form method="post" action="/tests/{tid}/key">
+<div class="card">{rows}</div>
+<div class="seasonbtns"><button>Save the answer key</button>
+<form method="post" action="/tests/{tid}/delete" style="display:inline"
+ onsubmit="return confirm('Delete this test and everything students scored on it?')">
+<button class="ghost danger">Delete</button></form></div>
+</form>
+<div class="card" style="margin-top:14px">{pub}</div>
+{results}"""
+    return html_response(page(t["title"], body, "Tests"))
+
+
+def act_new_test(req, db):
+    fields, files = req["files"]
+    if not files:
+        return redirect("/tests")
+    try:
+        data = json.loads(files[0][1].decode("utf-8"))
+    except Exception:
+        return redirect("/tests")
+    tid = core.load_test(db, data)
+    return redirect(f"/tests/{tid}")
+
+
+def act_test_key(req, db, tid):
+    answers = {}
+    for key, values in req["form"].items():
+        m = re.match(r"^q(\d+)$", key)
+        if m:
+            answers[int(m.group(1))] = values[0]
+    core.set_answer_key(db, tid, answers)
+    return redirect(f"/tests/{tid}")
+
+
+def act_test_publish(req, db, tid):
+    t = db.execute("SELECT published FROM dtests WHERE id=?", (tid,)).fetchone()
+    if t and core.test_ready(db, tid):
+        db.execute("UPDATE dtests SET published=? WHERE id=?",
+                   (0 if t["published"] else 1, tid))
+        db.commit()
+    return redirect(f"/tests/{tid}")
+
+
+def act_test_delete(req, db, tid):
+    db.execute("DELETE FROM dtests WHERE id=?", (tid,))
+    db.commit()
+    return redirect("/tests")
+
+
 def view_music(req, db):
     """One song a day, chosen by hand.
 
@@ -4327,6 +4563,11 @@ ROUTES = [
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/materials$", view_materials),
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
+    ("GET",  r"^/tests$", view_tests),
+    ("GET",  r"^/tests/(\d+)$", view_test),
+    ("POST", r"^/tests/(\d+)/key$", act_test_key),
+    ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
+    ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
@@ -4648,6 +4889,18 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 db.close()
 
+        if path == "/tests/new":
+            if not self._session():
+                return self._send(*redirect("/login"))
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_new_test(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
         if path == "/music/new":
             if not self._session():
                 return self._send(*redirect("/login"))
@@ -4701,6 +4954,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_avatar(
                     {"query": {}, "form": form}, db, token))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/test/(\d+)$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_student_test(
+                    {"query": {}, "form": form}, db, m.group(1), int(m.group(2))))
             finally:
                 db.close()
 

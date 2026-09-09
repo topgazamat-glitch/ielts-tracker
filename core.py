@@ -462,6 +462,46 @@ def migrate(db):
         ms INTEGER,
         UNIQUE (game_id, question_id, student_id)
     );
+    CREATE TABLE IF NOT EXISTS dtests (
+        id INTEGER PRIMARY KEY,
+        level_id INTEGER REFERENCES levels(id),
+        number INTEGER,
+        title TEXT NOT NULL,
+        passage TEXT,                      -- the gap-fill text, when there is one
+        published INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS dquestions (
+        id INTEGER PRIMARY KEY,
+        test_id INTEGER NOT NULL REFERENCES dtests(id) ON DELETE CASCADE,
+        num INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        answer TEXT,                       -- null until the teacher sets the key
+        ord INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS doptions (
+        id INTEGER PRIMARY KEY,
+        question_id INTEGER NOT NULL REFERENCES dquestions(id) ON DELETE CASCADE,
+        letter TEXT NOT NULL,
+        text TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS dattempts (
+        id INTEGER PRIMARY KEY,
+        test_id INTEGER NOT NULL REFERENCES dtests(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        score INTEGER,
+        total INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS dresponses (
+        attempt_id INTEGER NOT NULL REFERENCES dattempts(id) ON DELETE CASCADE,
+        question_id INTEGER NOT NULL REFERENCES dquestions(id) ON DELETE CASCADE,
+        given TEXT,
+        correct INTEGER,
+        PRIMARY KEY (attempt_id, question_id)
+    );
     CREATE TABLE IF NOT EXISTS criteria_scores (
         submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
         key TEXT NOT NULL,
@@ -1891,6 +1931,116 @@ def last_graded(db):
     return db.execute(
         "SELECT * FROM submissions WHERE status='graded' AND score IS NOT NULL"
         " ORDER BY graded_at DESC, id DESC LIMIT 1").fetchone()
+
+
+def load_test(db, data):
+    """Create a digital test from the importer's json. Answers stay empty."""
+    level = db.execute("SELECT id FROM levels WHERE name=?",
+                       (data.get("level", ""),)).fetchone()
+    tid = db.execute(
+        "INSERT INTO dtests (level_id, number, title, passage, published, created_at)"
+        " VALUES (?,?,?,?,0,?)",
+        (level["id"] if level else None, data.get("number"),
+         data.get("title") or "Practice test",
+         (data.get("passages") or {}).get("gap") or None, iso(now()))).lastrowid
+    for i, q in enumerate(data.get("questions") or []):
+        qid = db.execute(
+            "INSERT INTO dquestions (test_id, num, kind, prompt, answer, ord)"
+            " VALUES (?,?,?,?,?,?)",
+            (tid, q.get("num") or i + 1, q.get("kind") or "mcq",
+             q.get("prompt") or "", q.get("answer"), i)).lastrowid
+        for o in q.get("options") or []:
+            db.execute("INSERT INTO doptions (question_id, letter, text) VALUES (?,?,?)",
+                       (qid, o.get("letter") or "?", o.get("text") or ""))
+    db.commit()
+    return tid
+
+
+def digital_tests(db, level_id=None, published_only=False):
+    sql = ("SELECT t.*, l.name level,"
+           " (SELECT COUNT(*) FROM dquestions q WHERE q.test_id=t.id) n,"
+           " (SELECT COUNT(*) FROM dquestions q WHERE q.test_id=t.id AND q.answer IS NOT NULL) keyed"
+           " FROM dtests t LEFT JOIN levels l ON l.id=t.level_id")
+    where, args = [], []
+    if level_id:
+        where.append("(t.level_id IS NULL OR t.level_id=?)"); args.append(level_id)
+    if published_only:
+        where.append("t.published=1")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    return db.execute(sql + " ORDER BY t.number, t.id", args).fetchall()
+
+
+def test_questions(db, test_id):
+    qs = db.execute("SELECT * FROM dquestions WHERE test_id=? ORDER BY ord, num",
+                    (test_id,)).fetchall()
+    out = []
+    for q in qs:
+        opts = db.execute("SELECT * FROM doptions WHERE question_id=? ORDER BY letter",
+                          (q["id"],)).fetchall()
+        out.append((q, opts))
+    return out
+
+
+def set_answer_key(db, test_id, answers):
+    """answers maps question id -> letter. An empty letter clears it."""
+    for qid, letter in answers.items():
+        db.execute("UPDATE dquestions SET answer=? WHERE id=? AND test_id=?",
+                   ((letter or "").strip()[:2] or None, qid, test_id))
+    db.commit()
+
+
+def test_ready(db, test_id):
+    r = db.execute("SELECT COUNT(*) n, SUM(answer IS NOT NULL) k FROM dquestions"
+                   " WHERE test_id=?", (test_id,)).fetchone()
+    return bool(r["n"]) and r["n"] == (r["k"] or 0)
+
+
+def start_attempt(db, test_id, student_id):
+    row = db.execute(
+        "SELECT * FROM dattempts WHERE test_id=? AND student_id=? AND finished_at IS NULL",
+        (test_id, student_id)).fetchone()
+    if row:
+        return row["id"]
+    return db.execute(
+        "INSERT INTO dattempts (test_id, student_id, started_at) VALUES (?,?,?)",
+        (test_id, student_id, iso(now()))).lastrowid
+
+
+def submit_attempt(db, attempt_id, given):
+    """Mark it. given maps question id -> letter."""
+    a = db.execute("SELECT * FROM dattempts WHERE id=?", (attempt_id,)).fetchone()
+    if not a:
+        return None
+    qs = db.execute("SELECT id, answer FROM dquestions WHERE test_id=?",
+                    (a["test_id"],)).fetchall()
+    score = 0
+    for q in qs:
+        letter = (given.get(q["id"]) or "").strip() or None
+        ok = 1 if (letter and q["answer"] and letter == q["answer"]) else 0
+        score += ok
+        db.execute("INSERT INTO dresponses (attempt_id, question_id, given, correct)"
+                   " VALUES (?,?,?,?) ON CONFLICT(attempt_id, question_id) DO UPDATE"
+                   " SET given=excluded.given, correct=excluded.correct",
+                   (attempt_id, q["id"], letter, ok))
+    db.execute("UPDATE dattempts SET finished_at=?, score=?, total=? WHERE id=?",
+               (iso(now()), score, len(qs), attempt_id))
+    db.commit()
+    return score, len(qs)
+
+
+def attempts_for_test(db, test_id):
+    return db.execute(
+        "SELECT a.*, s.name FROM dattempts a JOIN students s ON s.id=a.student_id"
+        " WHERE a.test_id=? AND a.finished_at IS NOT NULL"
+        " ORDER BY a.score DESC, a.finished_at", (test_id,)).fetchall()
+
+
+def student_attempts(db, student_id):
+    return db.execute(
+        "SELECT a.*, t.title FROM dattempts a JOIN dtests t ON t.id=a.test_id"
+        " WHERE a.student_id=? AND a.finished_at IS NOT NULL"
+        " ORDER BY a.finished_at DESC", (student_id,)).fetchall()
 
 
 def mark_score(raw):
