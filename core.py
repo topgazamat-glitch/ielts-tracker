@@ -28,8 +28,18 @@ COLLECTIONS = {
                  "Unit tests"]),
     "selfstudy": ("Self-Study",
                   ["Reading", "Listening", "Vocabulary", "Grammar", "Writing"]),
+    "practice": ("Practice tests",
+                 ["Tests", "Answer keys", "Audios"]),
 }
-COLLECTION_ORDER = ["empower", "selfstudy"]
+COLLECTION_ORDER = ["empower", "selfstudy", "practice"]
+
+# a practice test belongs to no coursebook unit, so its section lists the papers
+# themselves rather than sending the student through a unit tile first
+UNITLESS = {"practice"}
+
+
+def has_units(collection):
+    return collection not in UNITLESS
 
 # a material may also carry a unit number and which book it belongs to
 BOOKS = {"class": "Class book", "work": "Work book"}

@@ -3505,7 +3505,7 @@ def view_materials(req, db):
         blocks = search + shelf_tiles(db, only, base)
     elif not cat:
         blocks = search + section_tiles(db, only, coll, base)
-    elif unit is None and core.units_in(db, only, coll, cat):
+    elif unit is None and core.has_units(coll) and core.units_in(db, only, coll, cat):
         blocks = search + unit_tiles(db, only, coll, cat, base)
     else:
         blocks = search + material_table(
