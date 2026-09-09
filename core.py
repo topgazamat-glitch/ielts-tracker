@@ -1650,6 +1650,33 @@ def past_seasons(db):
     return db.execute("SELECT * FROM seasons ORDER BY no DESC").fetchall()
 
 
+def scope_standing(standing, group_id):
+    """The same table narrowed to one class, ranked within it.
+
+    A student in Beginner is permanently fortieth in a school-wide list, which
+    is a poor thing to show someone every day. The prize is still school-wide;
+    this only changes who they are standing next to.
+    """
+    if not group_id:
+        return standing
+    rows = [dict(r) for r in standing["rows"]
+            if r["student"]["group_id"] == group_id]
+    rows.sort(key=lambda r: (r["eligible"], r["total"],
+                             r["points"].get("homework", 0)), reverse=True)
+    place = 0
+    for r in rows:
+        if r["eligible"]:
+            place += 1
+            r["rank"] = place
+        else:
+            r["rank"] = None
+    out = dict(standing)
+    out["rows"] = rows
+    out["eligible"] = sum(1 for r in rows if r["eligible"])
+    out["finished"] = sum(1 for r in rows if r["done"])
+    return out
+
+
 def class_champions(standing, db):
     """The best eligible student in each class - six winners, not one."""
     best = {}

@@ -54,7 +54,7 @@ def page(title, body, active="", music=False):
 <header class="top">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
-{nav('/ratings', 'Ratings')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
+{nav('/ratings', 'Progress')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
   ' onclick="Music.toggle()" title="Music"></button>' if (music or tune) else ''}
@@ -1731,7 +1731,7 @@ def portal_profile(db, s, token, flash=""):
 </form></div></details>"""
 
 
-def portal_champ_row(db, r, me_id):
+def portal_champ_row(db, r, me_id, show_group=True):
     """One line of the league as a student sees it.
 
     The same table the teacher sees, minus the links into the teacher's pages:
@@ -1752,80 +1752,97 @@ def portal_champ_row(db, r, me_id):
     lessons = (f'<td class="sub">{of}/{of} &#10003;</td>' if r["done"]
                else f'<td class="sub">{r["lessons"]}/{of}</td>')
     mark = ' id="me" class="me"' if me else ''
+    group = (f'<td class="sub">{E(group_name(db, st["group_id"]))}</td>'
+             if show_group else "")
     return (f'<tr{mark}><td>{place}</td>'
             f'<td>{E(st["name"])}{" &#9668;" if me else ""}</td>'
-            f'<td class="sub">{E(group_name(db, st["group_id"]))}</td>'
+            f'{group}'
             f'<td><strong>{r["total"]:g}</strong></td>{bars}{lessons}</tr>')
 
 
-def portal_class(db, s, token):
-    rows = core.rating_rows(db, s["group_id"])
-    medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
-    out = ""
-    for r in rows:
-        me = r["student"]["id"] == s["id"]
-        comp = r["completion"] if r["completion"] is not None else 0
-        out += (f'<tr class="{"me" if me else ""}">'
-                f'<td>{medals.get(r["rank"], str(r["rank"]) + ".")}</td>'
-                f'<td>{E(r["student"]["name"])}{" &#9668;" if me else ""}</td>'
-                f'<td><strong>{fmt(r["index"])}</strong></td>'
-                f'<td>{comp}%</td>'
-                f'<td style="text-align:right">{score_pill(r["average"])}</td></tr>')
+def portal_class(db, s, token, scope="class"):
+    """One league table, not two.
+
+    This page used to stack the championship on top of a second ranked table
+    with a different formula, so a student could be first in one and eighth in
+    the other on the same screen. The ranking now lives in the championship
+    alone; what is left of the old table is their own line, which is the part
+    that told them something.
+    """
     champ = core.championship(db)
+    if not champ["started"]:
+        return f"""<h2>Championship</h2>
+<div class="card"><p style="margin:0">The championship has not started yet.
+Your teacher will start it soon.</p></div>
+<h2>Where you are</h2>
+{standing_line(db, s) or '<p class="sub">Nothing marked yet.</p>'}"""
+
     mine = next((r for r in champ["rows"] if r["student"]["id"] == s["id"]), None)
-    league = ""
-    if mine and champ["started"]:
-        if mine["eligible"]:
-            standing = (f'You are <strong>{mine["rank"]}'
-                        f'{"st" if mine["rank"] == 1 else "nd" if mine["rank"] == 2 else "rd" if mine["rank"] == 3 else "th"}'
-                        f'</strong> in the school with '
-                        f'<strong>{mine["total"]:g}</strong> of '
-                        f'{core.CHAMPIONSHIP_MAX:g} points')
-        else:
-            standing = (f'You need {core.MIN_GRADED} marked pieces of homework this '
-                        f'season to enter. You have {mine["graded"]}')
-        parts = "".join(
-            f'<div class="cp"><span>{E(label)}</span>'
-            f'<span class="cbar"><i style="width:'
-            f'{min(100, (mine["points"].get(key, 0) / float(weight) * 100)):.0f}%"></i></span>'
-            f'<b>{mine["points"].get(key, 0):g}</b></div>'
-            for key, label, weight in core.CHAMPIONSHIP)
-        rows = "".join(portal_champ_row(db, r, s["id"]) for r in champ["rows"])
-        chead = "".join(f'<th title="up to {w:g} points">{E(l)}</th>'
-                        for _k, l, w in core.CHAMPIONSHIP)
-        waiting = len(champ["rows"]) - champ["eligible"]
-        below = (f'<p class="sub">The last {waiting} have not yet handed in '
-                 f'{core.MIN_GRADED} marked pieces, so they are below the line and '
-                 f'cannot win this season.</p>' if waiting else "")
-        frozen = ('<div class="card paused"><strong>The league is paused.</strong>'
-                  '<p class="sub" style="margin:6px 0 0">Your teacher has stopped the '
-                  'table for now. Nothing counts towards the championship until it '
-                  'starts again &mdash; keep working, it will be back.</p></div>'
-                  if champ["paused"] else "")
-        left = core.SEASON_LESSONS - mine["lessons"]
-        pace = ("Your season is finished &mdash; this score is finalised."
-                if mine["done"] else
-                f'{mine["lessons"]} of {core.SEASON_LESSONS} lessons done, '
-                f'{left} to go.')
-        league = f"""<h2>Championship &mdash; season {champ["season"]}</h2>
-<p class="sub">Every student in the school. A season lasts
-{core.SEASON_LESSONS} lessons, not a month, so everyone is judged over the same
-amount of teaching. {pace}</p>
+    if not mine:
+        return f"""<h2>Where you are</h2>
+{standing_line(db, s) or '<p class="sub">Nothing marked yet.</p>'}"""
+
+    shown = core.scope_standing(champ, s["group_id"]) if scope == "class" else champ
+    here = next((r for r in shown["rows"] if r["student"]["id"] == s["id"]), mine)
+
+    if here["eligible"]:
+        rank = here["rank"]
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(rank if rank < 20 else rank % 10, "th")
+        where = "in your class" if scope == "class" else "in the school"
+        standing = (f'You are <strong>{rank}{suffix}</strong> {where} with '
+                    f'<strong>{here["total"]:g}</strong> of {core.CHAMPIONSHIP_MAX:g} points')
+    else:
+        standing = (f'You need {core.MIN_GRADED} marked pieces of homework this '
+                    f'season to enter. You have {here["graded"]}')
+
+    parts = "".join(
+        f'<div class="cp"><span>{E(label)}</span>'
+        f'<span class="cbar"><i style="width:'
+        f'{min(100, (mine["points"].get(key, 0) / float(weight) * 100)):.0f}%"></i></span>'
+        f'<b>{mine["points"].get(key, 0):g}</b></div>'
+        for key, label, weight in core.CHAMPIONSHIP)
+
+    frozen = ('<div class="card paused"><strong>The league is paused.</strong>'
+              '<p class="sub" style="margin:6px 0 0">Your teacher has stopped the '
+              'table for now. Nothing counts towards the championship until it '
+              'starts again &mdash; keep working, it will be back.</p></div>'
+              if champ["paused"] else "")
+
+    left = core.SEASON_LESSONS - mine["lessons"]
+    pace = ("Your season is finished &mdash; this score is finalised."
+            if mine["done"] else
+            f'{mine["lessons"]} of {core.SEASON_LESSONS} lessons done, {left} to go.')
+
+    def tab(sc, label):
+        on = " on" if scope == sc else ""
+        return (f'<a class="tab{on}" href="/s/{E(token)}?tab=class&amp;scope={sc}">'
+                f'{E(label)}</a>')
+    tabs = f'<div class="tabs">{tab("class", "My class")}{tab("school", "Whole school")}</div>'
+
+    rows = "".join(portal_champ_row(db, r, s["id"], show_group=scope == "school")
+                   for r in shown["rows"])
+    chead = "".join(f'<th title="up to {w:g} points">{E(l)}</th>'
+                    for _k, l, w in core.CHAMPIONSHIP)
+    waiting = len(shown["rows"]) - shown["eligible"]
+    below = (f'<p class="sub">The last {waiting} have not yet handed in '
+             f'{core.MIN_GRADED} marked pieces, so they are below the line and '
+             f'cannot win this season.</p>' if waiting else "")
+
+    return f"""<h2>Championship &mdash; season {champ["season"]}</h2>
+<p class="sub">A season lasts {core.SEASON_LESSONS} lessons, not a month, so everyone is
+judged over the same amount of teaching. {pace}
+The prize goes to the best in the whole school.</p>
 {frozen}
 <div class="card"><p style="margin:0 0 12px">{standing}.
 <a href="#me" class="findme">Find me in the table &darr;</a></p>
 <div class="cparts">{parts}</div></div>
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Class</th>
+{tabs}
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th>
+{"<th>Class</th>" if scope == "school" else ""}
 <th>Points</th>{chead}<th>Lessons</th></tr>{rows}</table></div>
 {below}
-"""
-
-    return f"""{league}<h2>Class standings</h2>
-<p class="sub">Half of the score is homework handed in, a quarter your marks, and a
-quarter punctuality, behaviour and taking part in the lesson.</p>
-{standing_line(db, s)}
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Score</th>
-<th>Done</th><th style="text-align:right">Average</th></tr>{out}</table></div>"""
+<h2 style="margin-top:26px">Your homework</h2>
+{standing_line(db, s) or '<p class="sub">Nothing marked yet.</p>'}"""
 
 
 def view_parent_report(req, db, token):
@@ -2120,7 +2137,8 @@ def view_student_portal(req, db, token, flash=""):
     elif tab == "progress":
         body = portal_progress(db, s, token)
     elif tab == "class":
-        body = portal_class(db, s, token)
+        sc = (query.get("scope", ["class"])[0] or "class")
+        body = portal_class(db, s, token, "school" if sc == "school" else "class")
     elif tab == "goal":
         body = portal_goal(db, s, token, flash)
     elif tab == "profile":
@@ -2320,6 +2338,47 @@ def improved_table(db, rows):
             + out + "</table></div>")
 
 
+def attention_block(db, rows):
+    """The point of this page: who has stopped, and who is slipping.
+
+    The ranking below is ordering, not a competition - the competition is the
+    championship, and students see that one. What only this page can tell you is
+    who has quietly stopped handing work in, which the league cannot show
+    because it marks the average of what arrives, not what is missing.
+    """
+    stopped, slipping = [], []
+    for r in rows:
+        st = r["student"]
+        if r["missed"] and r["missed"] >= 2:
+            stopped.append((r["missed"], st, r))
+        elif r["gain"] is not None and r["gain"] <= -0.5:
+            slipping.append((r["gain"], st, r))
+    if not stopped and not slipping:
+        return ('<div class="card good"><strong>Nobody is behind.</strong>'
+                '<p class="sub" style="margin:6px 0 0">No student has missed two '
+                'pieces or dropped half a mark.</p></div>')
+    out = ""
+    if stopped:
+        stopped.sort(key=lambda x: -x[0])
+        out += "<h3>Not handing work in</h3><ul class=\"attn\">"
+        for missed, st, r in stopped[:12]:
+            out += (f'<li><a href="/students/{st["id"]}">{E(st["name"])}</a>'
+                    f'<span class="sub">{E(group_name(db, st["group_id"]))}</span>'
+                    f'<span class="pill risk">{missed} missed</span>'
+                    f'<span class="sub">{r["completion"] or 0}% done</span></li>')
+        out += "</ul>"
+    if slipping:
+        slipping.sort(key=lambda x: x[0])
+        out += "<h3>Marks falling</h3><ul class=\"attn\">"
+        for gain, st, r in slipping[:12]:
+            out += (f'<li><a href="/students/{st["id"]}">{E(st["name"])}</a>'
+                    f'<span class="sub">{E(group_name(db, st["group_id"]))}</span>'
+                    f'<span class="pill risk">{gain:g}</span>'
+                    f'<span class="sub">now {fmt(r["average"])}</span></li>')
+        out += "</ul>"
+    return f'<div class="card attn-card">{out}</div>'
+
+
 def view_ratings(req, db):
     """Standings on everything a student is judged by, class by class."""
     gid = req["query"].get("group", [None])[0]
@@ -2360,9 +2419,16 @@ def view_ratings(req, db):
         improved = improved_table(db, core.most_improved(db))
 
     dl = f'/export.csv?group={gid}' if gid else '/export.csv'
-    body = f"""<h1>Ratings</h1>
-<p class="sub">Ranked on the whole picture, not homework alone: half is effort, a
-quarter the scores, a quarter how they are in the room. {note}</p>
+    watch = attention_block(db, core.rating_rows(db, gid) if gid else core.rating_rows(db))
+    body = f"""<h1>Progress</h1>
+<p class="sub">Your own view of the school &mdash; who is slipping and who needs a word.
+Students do not see this page; the table they compete in is the
+<a href="/championship">championship</a>, which marks the average of what arrives and so
+cannot tell you who has stopped handing work in. This can.</p>
+{watch}
+<h2 style="margin-top:30px">Everyone, in order</h2>
+<p class="sub">Half is effort, a quarter the scores, a quarter how they are in the room.
+{note}</p>
 {tabs}
 {tables}
 <h2 style="margin-top:34px">Most improved</h2>
@@ -2370,7 +2436,7 @@ quarter the scores, a quarter how they are in the room. {note}</p>
 table anyone can win &mdash; it asks nothing about how strong they already were.</p>
 {improved}
 <p style="margin-top:20px"><a href="{dl}">Download as CSV</a> — opens in Excel.</p>"""
-    return html_response(page("Ratings", body, "Ratings"))
+    return html_response(page("Progress", body, "Progress"))
 
 
 
@@ -2954,7 +3020,10 @@ def view_championship(req, db):
     The breakdown is the point: a prize decided by numbers nobody can see is a
     prize people argue about.
     """
-    standing = core.championship(db)
+    full = core.championship(db)
+    gid = (req["query"].get("class", [""])[0] or "").strip()
+    gid = int(gid) if gid.isdigit() else None
+    standing = core.scope_standing(full, gid) if gid else full
     past = core.past_seasons(db)
 
     history = ""
@@ -2983,9 +3052,17 @@ long the rest of the school takes to catch up.</p>
 {history}"""
         return html_response(page("Championship", body_html, "League"))
 
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    def ctab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    scope = ('<div class="tabs">'
+             + ctab("/championship", "Whole school", gid is None)
+             + "".join(ctab(f'/championship?class={g["id"]}', g["name"], gid == g["id"])
+                       for g in groups) + "</div>")
+
     head = "".join(f'<th title="{w} points">{E(l)}</th>'
                    for _k, l, w in core.CHAMPIONSHIP)
-    body = "".join(champ_row(db, r) for r in standing["rows"])
+    body = "".join(champ_row(db, r, show_group=gid is None) for r in standing["rows"])
 
     winner = next((r for r in standing["rows"] if r["rank"] == 1), None)
     top = ""
@@ -2996,10 +3073,10 @@ long the rest of the school takes to catch up.</p>
                f'<div class="sub">{E(group_name(db, winner["student"]["group_id"]))}'
                f' &middot; {winner["total"]:g} of {core.CHAMPIONSHIP_MAX:g} points</div></div>')
 
-    champs = core.class_champions(standing, db)
+    champs = {} if gid else core.class_champions(full, db)
     classes = ""
-    for gid, r in sorted(champs.items(), key=lambda kv: group_name(db, kv[0])):
-        classes += (f'<div class="quick"><div class="sub">{E(group_name(db, gid))}</div>'
+    for cid, r in sorted(champs.items(), key=lambda kv: group_name(db, kv[0])):
+        classes += (f'<div class="quick"><div class="sub">{E(group_name(db, cid))}</div>'
                     f'<strong>{E(r["student"]["name"])}</strong>'
                     f'<div class="sub">{r["total"]:g} points</div></div>')
 
@@ -3042,10 +3119,12 @@ the winner's name, and the next season starts clear from that moment.</p>
 {"" if standing["paused"] else control}</div></div>
 {"<h2>Class champions</h2><div class='quicklinks'>" + classes + "</div>" if classes else ""}
 <h2>The table</h2>
+{scope}
 <p class="sub">{standing["eligible"]} of {total} students have the
 {core.MIN_GRADED} marked pieces needed to be eligible. The rest are listed below the
 line and cannot win this season.</p>
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th><th>Group</th>
+<div class="tablewrap"><table><tr><th>#</th><th>Student</th>
+{"<th>Group</th>" if gid is None else ""}
 <th>Total</th>{head}<th>Lessons</th><th>Handed in</th></tr>
 {body or '<tr><td colspan=11 class="sub">Nobody yet.</td></tr>'}</table></div>
 <h2>How the points work</h2>
