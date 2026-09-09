@@ -366,6 +366,12 @@ def migrate(db):
     if "offloaded" not in fcols:
         # 1 = the big file has been deleted from disk; Telegram still has it
         db.execute("ALTER TABLE files ADD COLUMN offloaded INTEGER NOT NULL DEFAULT 0")
+    # CREATE TABLE IF NOT EXISTS never adds a column to a table that is already
+    # there, so anything added to dquestions after its first deploy needs this
+    qcols = {r["name"] for r in db.execute("PRAGMA table_info(dquestions)")}
+    if qcols and "image" not in qcols:
+        db.execute("ALTER TABLE dquestions ADD COLUMN image TEXT")
+
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "rubric" not in acols:
         # marked on the four criteria rather than one number
