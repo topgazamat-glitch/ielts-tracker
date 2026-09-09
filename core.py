@@ -1043,10 +1043,20 @@ def game_board(db, game_id, limit=None):
     return rows[:limit] if limit else rows
 
 
-def advance_game(db, game_id):
-    """Lobby -> question -> reveal -> question ... -> done."""
+def advance_game(db, game_id, expect_state=None, expect_index=None):
+    """Lobby -> question -> reveal -> question ... -> done.
+
+    A caller may say which step it thinks it is on. If the game has already
+    moved past that - a second board open in another window, a double press,
+    a timer firing just as the button is hit - the request is ignored rather
+    than skipping a question nobody has seen.
+    """
     g = db.execute("SELECT * FROM games WHERE id=?", (game_id,)).fetchone()
     if not g or g["state"] == "done":
+        return
+    if expect_state is not None and g["state"] != expect_state:
+        return
+    if expect_index is not None and g["q_index"] != expect_index:
         return
     if g["state"] in ("lobby", "reveal"):
         nxt = g["q_index"] + 1

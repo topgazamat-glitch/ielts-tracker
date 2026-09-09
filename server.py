@@ -2988,13 +2988,24 @@ def view_game_board(req, db, game_id):
 or straight from the message the bot sent them.
 Code <span class="kbd">{E(g["code"])}</span></p>
 <div id="board"></div>
-<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
+<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;align-items:center">
   <button onclick="step()" id="go">Start</button>
+  <button class="ghost" onclick="toggleAuto()" id="autobtn">Auto: on</button>
+  <span class="sub" id="autonote" style="margin:0"></span>
   <button class="ghost" onclick="if(confirm('End this game?'))location.href='/play/{g["id"]}/end'">End game</button>
 </div>
 <script>
 const GID = {g["id"]};
 let last = "", ac = null, lastTick = -1, lastState = "";
+// The room runs itself: the clock ends a question, the table stands for a few
+// seconds, then the next one comes up. Turning it off hands the pace back, for
+// when a question is worth talking about.
+let auto = true, revealAt = 0, showFor = 5;
+function toggleAuto() {{
+  auto = !auto;
+  revealAt = 0;
+  document.getElementById('autobtn').textContent = 'Auto: ' + (auto ? 'on' : 'off');
+}}
 // the projector is the thing with speakers, so the room hears the clock here
 function beep(freq, ms, type) {{
   try {{
@@ -3032,6 +3043,26 @@ function render(s) {{
     s.state === 'question' ? 'Show the answer' :
     s.state === 'reveal' ? 'Next question' : 'Finished';
   document.getElementById('go').disabled = busy || (s.state === 'done');
+
+  // ---- run the room, unless the teacher has taken the wheel
+  let note = '';
+  if (auto && !busy) {{
+    if (s.state === 'question') {{
+      const everyone = s.players.length > 0 && s.answered >= s.players.length;
+      if (s.left <= 0 || everyone) {{
+        note = everyone ? 'everyone answered' : '';
+        step(s.state, s.q_index);
+      }}
+    }} else if (s.state === 'reveal') {{
+      if (!revealAt) revealAt = Date.now();
+      const left = Math.ceil((showFor * 1000 - (Date.now() - revealAt)) / 1000);
+      if (left <= 0) {{ step(s.state, s.q_index); }}
+      else {{ note = 'next question in ' + left + 's'; }}
+    }}
+  }}
+  if (s.state !== 'reveal') revealAt = 0;
+  const noteEl = document.getElementById('autonote');
+  if (noteEl.textContent !== note) noteEl.textContent = note;
   let h = '';
   if (s.state === 'lobby') {{
     h = '<div class="gcard"><div class="gbig">' + s.players.length +
@@ -3079,15 +3110,23 @@ function podium(rows) {{
     '<div class="pblock">' + (i + 1) + '</div></div>').join('') + '</div>';
 }}
 let busy = false;
-async function step() {{
+async function step(fromState, fromIndex) {{
   if (busy) return;                 // one press is one move, however hard it is hit
   busy = true;
+  revealAt = 0;
   const btn = document.getElementById('go');
   btn.disabled = true;
   btn.textContent = '\u2026';
   Music.nudge();                    // the gesture browsers require for audio
   try {{
-    const r = await fetch('/play/' + GID + '/next', {{method:'POST'}});
+    // say which step this came from, so a stale press or a second board
+    // cannot skip a question nobody has seen
+    const body = (fromState === undefined) ? '' :
+      'state=' + encodeURIComponent(fromState) + '&from=' + fromIndex;
+    const r = await fetch('/play/' + GID + '/next', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: body}});
     last = "";
     render(await r.json());         // straight from the reply, not the next poll
   }} catch (e) {{
@@ -3132,7 +3171,10 @@ def act_game_next(req, db, game_id):
     to two seconds of nothing after a click - long enough that the teacher
     presses again, and the second press advances it a second time.
     """
-    core.advance_game(db, game_id)
+    f = req.get("form") or {}
+    want = (f.get("state", [""])[0] or "").strip() or None
+    idx = (f.get("from", [""])[0] or "").strip()
+    core.advance_game(db, game_id, want, int(idx) if idx.lstrip("-").isdigit() else None)
     return game_state_json(req, db, game_id)
 
 
