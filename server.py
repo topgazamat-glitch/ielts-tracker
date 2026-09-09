@@ -1087,30 +1087,13 @@ def view_assignments(req, db):
     opts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
     body = f"""<h1>Assignments</h1>
 <p class="sub">Open assignments are what the bot offers students when they send a photo.</p>
-<div class="card"><form method="post" action="/assignments/new" class="inline">
-<label class="f">Title<input name="title" placeholder="Task 2 – Technology essay" required></label>
-<label class="f">Group<select name="group_id">{opts}</select></label>
-<label class="f">Type<select name="task_type">
-<option value="task2">Task 2</option><option value="task1">Task 1</option>
-<option value="other">Other</option></select></label>
-<label class="f">Due<input type="date" name="due"></label>
-<label class="f">at<input type="time" name="due_time" value="23:59" step="60"></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
-<span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="publish" value="1"> open to students now</span></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
-<span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
-<input type="checkbox" name="rubric" value="1"> mark on the four criteria</span></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
-<span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="announce" value="1" checked> and tell them in Telegram</span></label>
-<button>Create</button></form>
-<p class="sub" style="margin:10px 0 0">Without the tick it is saved as a draft: students
-cannot see it or submit to it until you press Publish.</p></div>
-<h2>Post a homework list</h2>
+<h2>Set homework</h2>
 <div class="card"><form method="post" action="/assignments/list">
 <div class="inline" style="margin-bottom:10px">
 <label class="f">Group<select name="group_id">{opts}</select></label>
+<label class="f">Type<select name="task_type">
+<option value="other">Other</option><option value="task2">Task 2</option>
+<option value="task1">Task 1</option></select></label>
 <label class="f">Due<input type="date" name="due"></label>
 <label class="f">at<input type="time" name="due_time" value="23:59" step="60"></label>
 <label class="f" style="justify-content:flex-end">&nbsp;
@@ -1118,15 +1101,20 @@ cannot see it or submit to it until you press Publish.</p></div>
 <input type="checkbox" name="publish" value="1" checked> open to students now</span></label>
 <label class="f" style="justify-content:flex-end">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="announce" value="1" checked> send them the list</span></label>
+<input type="checkbox" name="announce" value="1" checked> tell them in Telegram</span></label>
+<label class="f" style="justify-content:flex-end">&nbsp;
+<span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
+<input type="checkbox" name="rubric" value="1"> mark on the four criteria</span></label>
 </div>
-<label class="f">One item per line — numbering is optional
-<textarea name="items" rows="6" style="width:100%"
-placeholder="1. Task 2 essay – Technology&#10;2. Grammar handout page 45&#10;3. Vocabulary unit 4 – write 10 sentences"></textarea></label>
+<label class="f">One item per line &mdash; numbering is optional
+<textarea name="items" rows="6" style="width:100%" required
+placeholder="Task 2 essay &ndash; Technology&#10;Grammar handout page 45&#10;Vocabulary unit 4 &ndash; write 10 sentences"></textarea></label>
 <div style="margin-top:10px"><button onclick="this.disabled=true;this.form.submit()">
-Post list</button></div></form>
-<p class="sub" style="margin:10px 0 0">Each line becomes its own item, so students pick
-which one they are sending and you get a separate score for each.</p></div>
+Set the homework</button></div></form>
+<p class="sub" style="margin:10px 0 0">One line makes one piece of homework, several lines
+make several &mdash; students pick which one they are sending and each gets its own score.
+Without &ldquo;open to students now&rdquo; it is saved as a draft: nobody sees it until you
+press Publish below.</p></div>
 <h2>All assignments</h2>
 <div class="tablewrap"><table><tr><th>Title</th><th>Group</th><th>Type</th><th>Due</th>
 <th>Received</th><th></th><th></th></tr>
@@ -3756,30 +3744,6 @@ def act_set_group_level(req, db, gid):
     return redirect("/groups")
 
 
-def act_new_assignment(req, db):
-    f = req["form"]
-    title = (f.get("title", [""])[0] or "").strip()
-    gid = f.get("group_id", [None])[0]
-    if not title or not gid:
-        return redirect("/assignments")
-    due = f.get("due", [""])[0]
-    due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
-    publish_now = f.get("publish", [""])[0] == "1"
-    if already_set(db, int(gid), title, due_iso):
-        return redirect("/assignments")
-    aid = db.execute(
-        "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
-        " published, rubric) VALUES (?,?,?,?,?,?,?)",
-        (int(gid), title, f.get("task_type", ["task2"])[0], due_iso,
-         core.iso(core.now()), 1 if publish_now else 0,
-         1 if f.get("rubric", [""])[0] == "1" else 0),
-    ).lastrowid
-    db.commit()
-    if publish_now and f.get("announce", [""])[0] == "1":
-        announce(db, aid)
-    return redirect("/assignments")
-
-
 def act_repeat_homework(req, db, gid):
     """Give the same list of tasks again with a new deadline.
 
@@ -3847,6 +3811,7 @@ def already_set(db, group_id, title, due_iso):
     ).fetchone() is not None
 
 
+
 def act_new_list(req, db):
     f = req["form"]
     gid = f.get("group_id", [None])[0]
@@ -3861,10 +3826,11 @@ def act_new_list(req, db):
         if already_set(db, int(gid), title, due_iso):
             continue
         created.append(db.execute(
-            "INSERT INTO assignments (group_id, title, task_type, due_at, created_at, published)"
-            " VALUES (?,?,?,?,?,?)",
+            "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
+            " published, rubric) VALUES (?,?,?,?,?,?,?)",
             (int(gid), title, f.get("task_type", ["other"])[0], due_iso,
-             core.iso(core.now()), 1 if publish_now else 0),
+             core.iso(core.now()), 1 if publish_now else 0,
+             1 if f.get("rubric", [""])[0] == "1" else 0),
         ).lastrowid)
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":
@@ -4049,7 +4015,6 @@ ROUTES = [
     ("GET",  r"^/play/(\d+)/end$", act_game_end),
     ("POST", r"^/play/new$", act_new_game),
     ("POST", r"^/play/(\d+)/next$", act_game_next),
-    ("POST", r"^/assignments/new$", act_new_assignment),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),
     ("POST", r"^/assignments/(\d+)/open$", act_open_assignment),
