@@ -1740,53 +1740,52 @@ def homework_marks(db, student, lo, hi, windows):
     its deadline passes - which may be after the season's lessons are finished.
     A score is not final until they have all come due and been marked.
 
+    Only homework that still exists counts. Deleting a piece of homework leaves
+    the students' marked work in place with its link removed - the record is
+    never destroyed - and those loose marks used to keep scoring here, so a
+    deleted task went on deciding the table. The assignments are the list now,
+    and a mark with nothing to belong to is left out.
+
     Returns (scores, late, missing, waiting, pending).
     """
     stamp = iso(now())
+    # set during the season, or set just before it and falling due inside it -
+    # a deadline should not be lost because the season began the morning after
+    # the homework was written
     was_set = db.execute(
         "SELECT id, due_at FROM assignments WHERE group_id=? AND published=1"
-        " AND due_at IS NOT NULL AND created_at >= ? AND created_at < ?"
-        " ORDER BY due_at", (student["group_id"], lo, hi)).fetchall()
+        " AND created_at < ? AND (created_at >= ? OR (due_at IS NOT NULL AND due_at >= ?))"
+        " ORDER BY due_at IS NULL, due_at",
+        (student["group_id"], hi, lo, lo)).fetchall()
 
     scores, late, missing, waiting, pending = [], 0, 0, 0, 0
-    seen = set()
     for a in was_set:
-        if a["due_at"] > stamp:
+        due = a["due_at"]
+        if due and due > stamp:
             pending += 1                  # set, but the deadline has not arrived
             continue
-        if paused_at(a["due_at"], windows):
+        if due and paused_at(due, windows):
             continue                      # the league was off when this fell due
-        seen.add(a["id"])
         sub = db.execute(
             "SELECT status, score, created_at FROM submissions WHERE student_id=?"
             " AND assignment_id=? AND draft=0 ORDER BY status='graded' DESC,"
             " created_at LIMIT 1", (student["id"], a["id"])).fetchone()
         if not sub:
-            scores.append(0.0)
-            missing += 1
-        elif sub["status"] != "graded" or sub["score"] is None:
+            # with no deadline there is nothing to be late for and nothing to
+            # have missed, so silence is not a nought - it is simply not counted
+            if due:
+                scores.append(0.0)
+                missing += 1
+            continue
+        if paused_at(sub["created_at"], windows):
+            continue
+        if sub["status"] != "graded" or sub["score"] is None:
             waiting += 1                  # sitting in the marking queue
-        elif sub["created_at"] > a["due_at"]:
+        elif due and sub["created_at"] > due:
             scores.append(0.0)
             late += 1
         else:
             scores.append(sub["score"])
-
-    # work marked in the season that belongs to no deadline of its own - an
-    # extra piece, or homework set without one - still counts for what it scored
-    extra = db.execute(
-        "SELECT s.score, s.created_at sent, s.assignment_id aid, a.due_at due"
-        " FROM submissions s LEFT JOIN assignments a ON a.id=s.assignment_id"
-        " WHERE s.student_id=? AND s.status='graded' AND s.score IS NOT NULL"
-        " AND s.created_at >= ? AND s.created_at < ?", (student["id"], lo, hi)).fetchall()
-    for r in extra:
-        if r["aid"] in seen or paused_at(r["sent"], windows):
-            continue
-        if r["due"] and r["sent"] > r["due"]:
-            scores.append(0.0)
-            late += 1
-        else:
-            scores.append(r["score"])
     return scores, late, missing, waiting, pending
 
 
