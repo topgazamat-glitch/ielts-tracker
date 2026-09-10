@@ -1703,6 +1703,82 @@ def season_window(db, student_id, lo, cfg):
     return SEASON_OPEN, len(days), None
 
 
+def handed_summary(graded, late, missing, waiting):
+    """The one line under a student's name, in plain words."""
+    if not graded and not waiting:
+        return "nothing due yet"
+    bits = []
+    done = graded - late - missing
+    if done > 0:
+        bits.append("%d on time" % done)
+    if late:
+        bits.append("%d late" % late)
+    if missing:
+        bits.append("%d not handed in" % missing)
+    if waiting:
+        bits.append("%d waiting to be marked" % waiting)
+    return ", ".join(bits) or "nothing due yet"
+
+
+def homework_marks(db, student, lo, hi, windows):
+    """Every piece of homework this student was set, and what it was worth.
+
+    The average used to be taken over the work that arrived, which meant a
+    student who did one piece well beat one who did all three - and, worse, that
+    handing in late scored a nought while handing in nothing at all was simply
+    left out of the sum. A deadline that has passed with nothing against it is a
+    nought, the same as a late one.
+
+    Work that has been handed in but not yet marked is left out entirely: that
+    is the teacher's queue, not the student's fault.
+
+    Returns (scores, late, missing, waiting).
+    """
+    stamp = iso(now())
+    due_now = db.execute(
+        "SELECT id, due_at FROM assignments WHERE group_id=? AND published=1"
+        " AND due_at IS NOT NULL AND due_at >= ? AND due_at < ? AND due_at <= ?"
+        " ORDER BY due_at", (student["group_id"], lo, hi, stamp)).fetchall()
+
+    scores, late, missing, waiting = [], 0, 0, 0
+    seen = set()
+    for a in due_now:
+        if paused_at(a["due_at"], windows):
+            continue                      # the league was off when this fell due
+        seen.add(a["id"])
+        sub = db.execute(
+            "SELECT status, score, created_at FROM submissions WHERE student_id=?"
+            " AND assignment_id=? AND draft=0 ORDER BY status='graded' DESC,"
+            " created_at LIMIT 1", (student["id"], a["id"])).fetchone()
+        if not sub:
+            scores.append(0.0)
+            missing += 1
+        elif sub["status"] != "graded" or sub["score"] is None:
+            waiting += 1                  # sitting in the marking queue
+        elif sub["created_at"] > a["due_at"]:
+            scores.append(0.0)
+            late += 1
+        else:
+            scores.append(sub["score"])
+
+    # work marked in the season that belongs to no deadline of its own - an
+    # extra piece, or homework set without one - still counts for what it scored
+    extra = db.execute(
+        "SELECT s.score, s.created_at sent, s.assignment_id aid, a.due_at due"
+        " FROM submissions s LEFT JOIN assignments a ON a.id=s.assignment_id"
+        " WHERE s.student_id=? AND s.status='graded' AND s.score IS NOT NULL"
+        " AND s.created_at >= ? AND s.created_at < ?", (student["id"], lo, hi)).fetchall()
+    for r in extra:
+        if r["aid"] in seen or paused_at(r["sent"], windows):
+            continue
+        if r["due"] and r["sent"] > r["due"]:
+            scores.append(0.0)
+            late += 1
+        else:
+            scores.append(r["score"])
+    return scores, late, missing, waiting
+
+
 def championship(db, cfg=None):
     """Everyone's standing for the running season, best first."""
     cfg = cfg or load_config()
@@ -1717,23 +1793,7 @@ def championship(db, cfg=None):
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
         hi, lessons, closed = season_window(db, st["id"], lo, cfg)
 
-        # Homework is the average of the marks given, not the number handed in,
-        # so two classes set different amounts of work still compare. Anything
-        # arriving after its deadline counts as a zero in that average.
-        marked = db.execute(
-            "SELECT s.score, s.created_at sent, a.due_at due FROM submissions s"
-            " LEFT JOIN assignments a ON a.id=s.assignment_id"
-            " WHERE s.student_id=? AND s.status='graded' AND s.score IS NOT NULL"
-            " AND s.created_at >= ? AND s.created_at < ?", (st["id"], lo, hi)).fetchall()
-        counted, late = [], 0
-        for r in marked:
-            if paused_at(r["sent"], windows):
-                continue
-            if r["due"] and r["sent"] > r["due"]:
-                counted.append(0.0)
-                late += 1
-            else:
-                counted.append(r["score"])
+        counted, late, missing, waiting = homework_marks(db, st, lo, hi, windows)
         graded = len(counted)
         parts = {}
         if graded:
@@ -1762,12 +1822,15 @@ def championship(db, cfg=None):
             "student": st, "points": {k: round(v, 2) for k, v in points.items()},
             "total": round(sum(points.values()), 2),
             "graded": graded, "words": words, "late": late,
-            "handed": ("%d marked%s" % (graded, ", %d late" % late if late else "")
-                       if graded else "nothing marked"),
+            "missing": missing, "waiting": waiting,
+            "handed": handed_summary(graded, late, missing, waiting),
             "lessons": lessons, "closed": closed, "done": closed is not None,
             "marked_lessons": lesson_n,
             "average": round(sum(counted) / graded, 2) if graded else None,
-            "eligible": graded >= MIN_GRADED,
+            # deadlines behind them, not marks given: a student should not drop
+            # out of the table because their work is sitting in the queue
+            "eligible": (graded + waiting) >= MIN_GRADED,
+            "counted": graded,
             "missing": [l for k, l, _w in CHAMPIONSHIP if not parts.get(k)],
         })
 

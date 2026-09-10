@@ -2145,8 +2145,8 @@ Your teacher will start it soon.</p></div>
         standing = (f'You are <strong>{rank}{suffix}</strong> {where} with '
                     f'<strong>{here["total"]:g}</strong> of {core.CHAMPIONSHIP_MAX:g} points')
     else:
-        standing = (f'You need {core.MIN_GRADED} marked pieces of homework this '
-                    f'season to enter. You have {here["graded"]}')
+        standing = (f'Your first {core.MIN_GRADED} deadlines have to pass before '
+                    f'you enter. {here["graded"]} so far')
 
     parts = "".join(
         f'<div class="cp"><span>{E(label)}</span>'
@@ -2178,8 +2178,8 @@ Your teacher will start it soon.</p></div>
                     for _k, l, w in core.CHAMPIONSHIP)
     waiting = len(shown["rows"]) - shown["eligible"]
     below = (f'<p class="sub">The last {waiting} have not yet handed in '
-             f'{core.MIN_GRADED} marked pieces, so they are below the line and '
-             f'cannot win this season.</p>' if waiting else "")
+             f'{core.MIN_GRADED} deadlines behind them yet, so they are below the '
+             f'line for now.</p>' if waiting else "")
 
     return f"""<h2>Championship &mdash; season {champ["season"]}</h2>
 <p class="sub">A season lasts {core.SEASON_LESSONS} lessons, not a month, so everyone is
@@ -3538,9 +3538,9 @@ long the rest of the school takes to catch up.</p>
     body_html = f"""<h1>Championship</h1>
 <p class="sub">Season {standing["season"]}, started {E(standing["start"][:10])}.
 {core.SEASON_LESSONS} lessons each, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
-Homework is the average of the marks you give &mdash; not how many pieces &mdash; so two
-classes set different amounts of work still stand in the same table. Anything handed in
-after its deadline counts as a nought in that average.</p>
+Homework is the average over every piece you set: marked on time it scores what you gave
+it, late or never handed in it scores nought, and anything still waiting to be marked is
+left out until you mark it.</p>
 {top}
 {paused}
 <div class="card"><strong>{done} of {total}</strong> students have finished their
@@ -3558,8 +3558,8 @@ the winner's name, and the next season starts clear from that moment.</p>
 <h2>The table</h2>
 {scope}
 <p class="sub">{standing["eligible"]} of {total} students have the
-{core.MIN_GRADED} marked pieces needed to be eligible. The rest are listed below the
-line and cannot win this season.</p>
+{core.MIN_GRADED} deadlines behind them needed to be eligible. The rest are listed below
+the line for now.</p>
 <div class="tablewrap"><table><tr><th>#</th><th>Student</th>
 {"<th>Group</th>" if gid is None else ""}
 <th>Total</th>{head}<th>Lessons</th><th>Handed in</th></tr>
@@ -3569,8 +3569,11 @@ line and cannot win this season.</p>
 <p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten, scaled to
 3; a piece handed in after its deadline is a nought in that average. Words count up to
 {core.VOCAB_TARGET}. In the lesson is the average of punctuality, behaviour and taking
-part. A student needs {core.MIN_GRADED} marked pieces to be eligible &mdash; otherwise one
-lucky ten out of ten decides the season. Nothing you have not recorded scores anything, so
+part. Homework counts everything that was set: a deadline that passed with nothing
+against it is a nought, exactly like one handed in late, so doing one piece well no longer
+beats doing all three. Work waiting to be marked is left out until you mark it. A student
+needs {core.MIN_GRADED} deadlines behind them to be eligible &mdash; otherwise one lucky
+ten out of ten decides the season. Nothing you have not recorded scores anything, so
 an unmarked lesson is a nought for everyone alike and the order of the table is
 unaffected.</p></div>
 {history}"""
