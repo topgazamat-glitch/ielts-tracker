@@ -2746,8 +2746,15 @@ def remove_student(db, student_id):
     # which time the subquery matched nothing and the state was left behind
     who = db.execute("SELECT telegram_id FROM students WHERE id=?",
                      (student_id,)).fetchone()
+    # a past season keeps its winner's name in the record book; only the link
+    # to a row that is about to disappear is let go
+    db.execute("UPDATE seasons SET winner_id=NULL WHERE winner_id=?", (student_id,))
+    db.execute("DELETE FROM dresponses WHERE attempt_id IN"
+               " (SELECT id FROM dattempts WHERE student_id=?)", (student_id,))
+    db.execute("DELETE FROM game_answers WHERE student_id=?", (student_id,))
     for table in ("submissions", "word_progress", "quiz_sessions", "questions",
-                  "parents", "lesson_marks", "students"):
+                  "parents", "lesson_marks", "goals", "game_players", "dattempts",
+                  "students"):
         db.execute(f"DELETE FROM {table} WHERE student_id=?"
                    if table != "students" else "DELETE FROM students WHERE id=?",
                    (student_id,))
