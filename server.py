@@ -2162,8 +2162,10 @@ Your teacher will start it soon.</p></div>
               if champ["paused"] else "")
 
     left = core.SEASON_LESSONS - mine["lessons"]
-    pace = ("Your season is finished &mdash; this score is finalised."
-            if mine["done"] else
+    pace = ("Your season is finished and this score is final."
+            if mine["done"] and mine["final"] else
+            "Your lessons are finished. The last homework from them still counts, "
+            "so this score can still move." if mine["done"] else
             f'{mine["lessons"]} of {core.SEASON_LESSONS} lessons done, {left} to go.')
 
     def tab(sc, label):
@@ -3442,9 +3444,15 @@ def champ_row(db, r, show_group=True, me=None):
     mine = ' class="me"' if me == st["id"] else ""
     seen = r.get("lessons", 0)
     of = core.SEASON_LESSONS
-    lessons = (f'<td class="sub" title="season closed on {r["closed"]}">'
-               f'{of}/{of} &#10003;</td>' if r.get("done")
-               else f'<td class="sub">{seen}/{of}</td>')
+    if r.get("done") and r.get("final"):
+        lessons = (f'<td class="sub" title="finished on {r["closed"]}; every piece'
+                   f' of homework due and marked">{of}/{of} &#10003;</td>')
+    elif r.get("done"):
+        lessons = (f'<td class="sub" title="lessons finished on {r["closed"]}, but'
+                   f' homework from them is still to come">{of}/{of} '
+                   f'<span class="pill watch">provisional</span></td>')
+    else:
+        lessons = f'<td class="sub">{seen}/{of}</td>'
     return (f'<tr{mine}><td>{place}</td>'
             f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>{group}'
             f'<td><strong>{r["total"]:g}</strong></td>{bars}{lessons}'
@@ -3519,6 +3527,7 @@ long the rest of the school takes to catch up.</p>
 
     total = len(standing["rows"])
     done = standing["finished"]
+    settled = sum(1 for r in standing["rows"] if r.get("final"))
     if standing["paused"]:
         control = (f'<form method="post" action="/championship/resume">'
                    f'<button>Resume season {standing["season"]}</button></form>')
@@ -3544,7 +3553,11 @@ left out until you mark it.</p>
 {top}
 {paused}
 <div class="card"><strong>{done} of {total}</strong> students have finished their
-{core.SEASON_LESSONS} lessons.
+{core.SEASON_LESSONS} lessons{", " + str(settled) + " of them settled" if done else ""}.
+<p class="sub" style="margin:6px 0 0">Homework belongs to the lesson it was set in, not to
+the day it is due, so the last pieces of a season fall due after the lessons are over. A
+student is marked <span class="pill watch">provisional</span> until every one of them has
+come due and been marked.</p>
 <p class="sub" style="margin:6px 0 0">A student's lesson count only moves when you record
 their marks for that day, so the season advances at the speed you record it. Close the
 season when enough of them have finished: the table is written into the record book with

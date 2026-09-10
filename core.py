@@ -1703,10 +1703,8 @@ def season_window(db, student_id, lo, cfg):
     return SEASON_OPEN, len(days), None
 
 
-def handed_summary(graded, late, missing, waiting):
+def handed_summary(graded, late, missing, waiting, pending=0):
     """The one line under a student's name, in plain words."""
-    if not graded and not waiting:
-        return "nothing due yet"
     bits = []
     done = graded - late - missing
     if done > 0:
@@ -1717,6 +1715,8 @@ def handed_summary(graded, late, missing, waiting):
         bits.append("%d not handed in" % missing)
     if waiting:
         bits.append("%d waiting to be marked" % waiting)
+    if pending:
+        bits.append("%d not due yet" % pending)
     return ", ".join(bits) or "nothing due yet"
 
 
@@ -1732,17 +1732,28 @@ def homework_marks(db, student, lo, hi, windows):
     Work that has been handed in but not yet marked is left out entirely: that
     is the teacher's queue, not the student's fault.
 
-    Returns (scores, late, missing, waiting).
+    A season is fifteen lessons, and homework set in the last of them falls due
+    after the fifteenth lesson has been and gone. Picking homework by its
+    deadline therefore measured conduct over fifteen lessons and homework over
+    about thirteen, and left the last two pieces free to skip. Homework is
+    counted by the lesson it was set in instead, and each piece is judged once
+    its deadline passes - which may be after the season's lessons are finished.
+    A score is not final until they have all come due and been marked.
+
+    Returns (scores, late, missing, waiting, pending).
     """
     stamp = iso(now())
-    due_now = db.execute(
+    was_set = db.execute(
         "SELECT id, due_at FROM assignments WHERE group_id=? AND published=1"
-        " AND due_at IS NOT NULL AND due_at >= ? AND due_at < ? AND due_at <= ?"
-        " ORDER BY due_at", (student["group_id"], lo, hi, stamp)).fetchall()
+        " AND due_at IS NOT NULL AND created_at >= ? AND created_at < ?"
+        " ORDER BY due_at", (student["group_id"], lo, hi)).fetchall()
 
-    scores, late, missing, waiting = [], 0, 0, 0
+    scores, late, missing, waiting, pending = [], 0, 0, 0, 0
     seen = set()
-    for a in due_now:
+    for a in was_set:
+        if a["due_at"] > stamp:
+            pending += 1                  # set, but the deadline has not arrived
+            continue
         if paused_at(a["due_at"], windows):
             continue                      # the league was off when this fell due
         seen.add(a["id"])
@@ -1776,7 +1787,7 @@ def homework_marks(db, student, lo, hi, windows):
             late += 1
         else:
             scores.append(r["score"])
-    return scores, late, missing, waiting
+    return scores, late, missing, waiting, pending
 
 
 def championship(db, cfg=None):
@@ -1793,7 +1804,7 @@ def championship(db, cfg=None):
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
         hi, lessons, closed = season_window(db, st["id"], lo, cfg)
 
-        counted, late, missing, waiting = homework_marks(db, st, lo, hi, windows)
+        counted, late, missing, waiting, pending = homework_marks(db, st, lo, hi, windows)
         graded = len(counted)
         parts = {}
         if graded:
@@ -1822,9 +1833,12 @@ def championship(db, cfg=None):
             "student": st, "points": {k: round(v, 2) for k, v in points.items()},
             "total": round(sum(points.values()), 2),
             "graded": graded, "words": words, "late": late,
-            "missing": missing, "waiting": waiting,
-            "handed": handed_summary(graded, late, missing, waiting),
+            "not_handed": missing, "waiting": waiting, "pending": pending,
+            "handed": handed_summary(graded, late, missing, waiting, pending),
             "lessons": lessons, "closed": closed, "done": closed is not None,
+            # the lessons can be finished while homework from the last of them
+            # is still to come due, or still to be marked
+            "final": closed is not None and not pending and not waiting,
             "marked_lessons": lesson_n,
             "average": round(sum(counted) / graded, 2) if graded else None,
             # deadlines behind them, not marks given: a student should not drop
