@@ -1004,6 +1004,7 @@ scores, homework, and how they are in class. No password, and nothing they can c
   <input id="plink2" readonly value="/p/{E(core.parent_token(db, s['id']))}"
          style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:13px">
   <button type="button" class="ghost" onclick="copy2()">Copy</button>
+  <a class="btnlink" target="_blank" rel="noopener" href="/p/{E(core.parent_token(db, s['id']))}">Open</a>
   <a class="ghost" style="align-self:center" href="/p/{E(core.parent_token(db, s['id']))}"
      target="_blank">Preview</a>
 </div></div>
@@ -1020,7 +1021,11 @@ upload page — no password, and it shows nobody else's work.</p>
   <input id="plink" readonly value="/s/{E(core.student_token(db, s['id']))}"
          style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:13px">
   <button type="button" class="ghost" onclick="copyLink()">Copy</button>
-</div></div>
+  <a class="btnlink" target="_blank" rel="noopener"
+     href="/s/{E(core.student_token(db, s['id']))}">Open their page</a>
+</div>
+<p class="sub" style="margin:8px 0 0">It opens in a separate window, so this one stays
+where it is &mdash; useful when you are showing the class what they will see.</p></div>
 <script>
 const box = document.getElementById('plink');
 box.value = location.origin + box.value;
@@ -1237,7 +1242,9 @@ def view_roster(req, db):
             f'<tr>'
             f'<td><input type="checkbox" class="pick" name="id" value="{s_["id"]}"'
             f' form="bulk"></td>'
-            f'<td><a href="/students/{s_["id"]}">{E(s_["name"])}</a>{nobot}</td>'
+            f'<td><a href="/students/{s_["id"]}">{E(s_["name"])}</a>{nobot}'
+            f' <a class="peek" target="_blank" rel="noopener" title="open their page"'
+            f' href="/s/{E(core.student_token(db, s_["id"]))}">&#8599;</a></td>'
             f'<td><form method="post" action="/students/{s_["id"]}/move" class="movef">'
             f'<select name="group_id" onchange="this.form.submit()">{move}</select>'
             f'</form></td>'

@@ -10,7 +10,7 @@ Homebrew or Docker, so the whole thing is stdlib `http.server` + `sqlite3` + `ur
 
     python3 run_tests.py
 
-Twenty-six tests, about twenty seconds, nothing to install. Each builds a
+Twenty-seven tests, about twenty seconds, nothing to install. Each builds a
 throwaway database and starts a real server on a spare port; none of them touch
 the live site. Run them before pushing - Railway deploys every push to `main`
 straight to the students.

@@ -39,6 +39,7 @@ site or the real database, and they can run in any order.
 | `nav_test` | pages swap without reloading, so the music keeps playing |
 | `revert_test` | the Telegram mini app stayed removed |
 | `migrate_test` | a column added after a deploy reaches an existing database |
+| `peek_test` | a student's page opens beside the teacher's, not on top of it |
 
 ## Writing another
 
