@@ -6,6 +6,18 @@ from a keyboard-driven web queue. The site charts progress per student and per g
 No dependencies — Python 3 standard library only (this machine has no Node,
 Homebrew or Docker, so the whole thing is stdlib `http.server` + `sqlite3` + `urllib`).
 
+## Tests
+
+    python3 run_tests.py
+
+Twenty-six tests, about twenty seconds, nothing to install. Each builds a
+throwaway database and starts a real server on a spare port; none of them touch
+the live site. Run them before pushing - Railway deploys every push to `main`
+straight to the students.
+
+See `tests/README.md` for what each one holds down.
+
+
 ## Setup
 
 1. Create a bot: message **@BotFather** on Telegram → `/newbot` → copy the token.
