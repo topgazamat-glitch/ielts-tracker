@@ -70,6 +70,7 @@ def page(title, body, active="", music=False):
 <script src="/static/nav.js" defer></script>
 <script src="/static/materials.js" defer></script>
 <script src="/static/grade.js" defer></script>
+<script src="/static/prompts.js" defer></script>
 <script src="/static/roster.js" defer></script>
 <script src="/static/marks.js" defer></script>
 </body></html>"""
@@ -1329,6 +1330,10 @@ points.</p>
 
 def view_assignments(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    core.seed_prompts(db)
+    sug_levels = "".join(f'<option value="{E(l)}">{E(l)}</option>' for l in core.LEVELS)
+    sug_kinds = "".join(f'<option value="{k}">{E(lab)}</option>'
+                        for k, lab, _w, _m in core.prompt_kinds())
     cfg = core.load_config()
     show_closed = req["query"].get("closed", [""])[0] == "1"
     sets = core.all_sets(db)
@@ -1360,9 +1365,16 @@ def view_assignments(req, db):
 <textarea name="items" rows="6" class="wide" required
 placeholder="Task 2 essay &ndash; Technology&#10;Grammar handout page 45&#10;Vocabulary unit 4 &ndash; write 10 sentences"></textarea></label>
 <details class="gap-3"><summary>Make it a writing task they type</summary>
-<p class="sub gap-2">Paste the question. Students get a writing paper &mdash; the
-question on one side, the sheet on the other &mdash; instead of sending a photo of
-their handwriting. One question per posting.</p>
+<p class="sub gap-2">Students get a writing paper &mdash; the question on one side, the
+sheet on the other &mdash; instead of sending a photo of their handwriting. One question
+per posting.</p>
+<div class="inline gap-2" id="suggestbar">
+<label class="f">Level<select id="sug_level">{sug_levels}</select></label>
+<label class="f">Kind<select id="sug_kind">{sug_kinds}</select></label>
+<label class="f pushed">&nbsp;<button type="button" class="ghost"
+  id="suggest">Suggest a question</button></label>
+<label class="f pushed">&nbsp;<a class="linky" href="/prompts">the question bank</a></label>
+</div>
 <label class="f">The question
 <textarea name="prompt" rows="4" class="wide"
  placeholder="Some people think that… Discuss both views and give your own opinion."></textarea></label>
@@ -4340,6 +4352,94 @@ def serve_material(db, mid, student=None):
                  ("Content-Length", str(len(blob)))], blob
 
 
+def view_prompts(req, db):
+    """The bank of writing questions, and somewhere to add your own."""
+    core.seed_prompts(db)
+    level = (req["query"].get("level", [""])[0] or "").strip() or None
+    kind = (req["query"].get("kind", [""])[0] or "").strip() or None
+    rows = core.prompts_for(db, level, kind)
+    labels = dict((k, lab) for k, lab, _w, _m in core.prompt_kinds())
+
+    def tab(href, text, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(text)}</a>'
+    lv = ('<div class="tabs">' + tab("/prompts", "Every level", not level)
+          + "".join(tab(f"/prompts?level={urllib.parse.quote(l)}", l, level == l)
+                    for l in core.LEVELS) + "</div>")
+
+    body_rows = ""
+    ask = ' onsubmit="return confirm(&#39;Remove this question?&#39;)"'
+    for r in rows:
+        mine_tag = '<span class="pill mute">yours</span>' if r["mine"] else ""
+        body_rows += (
+            f'<tr><td class="sub">{E(r["level"])}</td>'
+            f'<td class="sub">{E(labels.get(r["kind"], r["kind"]))}</td>'
+            f'<td>{E(r["text"])}</td>'
+            f'<td class="sub">{r["min_words"] or "&mdash;"} w</td>'
+            f'<td class="sub">{r["used"]}&times;</td>'
+            f'<td>{mine_tag}</td>'
+            f'<td class="rowacts"><form method="post" action="/prompts/delete"'
+            f'{ask}>'
+            f'<input type="hidden" name="id" value="{r["id"]}">'
+            f'<button class="linky danger">remove</button></form></td></tr>')
+
+    lopts = "".join(f'<option value="{E(l)}">{E(l)}</option>' for l in core.LEVELS)
+    kopts = "".join(f'<option value="{k}">{E(lab)}</option>'
+                    for k, lab, _w, _m in core.prompt_kinds())
+    body = f"""<h1>Writing questions</h1>
+<p class="sub">What the site offers when you press <span class="kbd">Suggest a question</span>
+on a writing task. It picks the least-used one for that level and kind, so the same
+question does not come round every week. Add your own and they go into the same pot.</p>
+{lv}
+<div class="tablewrap"><table><tr><th>Level</th><th>Kind</th><th>Question</th>
+<th>Words</th><th>Used</th><th></th><th></th></tr>
+{body_rows or '<tr><td colspan=7 class="sub">Nothing here yet.</td></tr>'}</table></div>
+<h2 class="gap-5">Add your own</h2>
+<div class="card"><form method="post" action="/prompts/new">
+<div class="inline gap-0">
+<label class="f">Level<select name="level">{lopts}</select></label>
+<label class="f">Kind<select name="kind">{kopts}</select></label>
+<label class="f">At least<input type="number" name="min_words" min="0" max="1000"
+  style="width:90px"> words</label>
+<label class="f">Time<input type="number" name="minutes" min="0" max="240"
+  style="width:90px"> minutes</label>
+</div>
+<label class="f">The question<textarea name="text" rows="3" class="wide" required
+  placeholder="Some people think that…"></textarea></label>
+<div class="gap-3"><button>Add it</button></div>
+</form></div>"""
+    return html_response(page("Writing questions", body, "Questions"))
+
+
+def act_new_prompt(req, db):
+    f = req["form"]
+    def whole(key):
+        v = (f.get(key, [""])[0] or "").strip()
+        return int(v) if v.isdigit() and int(v) > 0 else None
+    core.add_prompt(db, f.get("level", [""])[0], f.get("kind", [""])[0],
+                    f.get("text", [""])[0], whole("min_words"), whole("minutes"))
+    return redirect("/prompts")
+
+
+def act_delete_prompt(req, db):
+    pid = (req["form"].get("id", [""])[0] or "").strip()
+    if pid.isdigit():
+        core.delete_prompt(db, int(pid))
+    return redirect("/prompts")
+
+
+def suggest_json(req, db):
+    """One question for a level and kind, for the button on the assignment form."""
+    level = (req["query"].get("level", [""])[0] or "").strip()
+    kind = (req["query"].get("kind", [""])[0] or "").strip()
+    core.seed_prompts(db)
+    row = core.suggest_prompt(db, level, kind)
+    if not row:
+        return json_response({"ok": False,
+                              "why": "nothing written for %s yet" % (level or "that level")})
+    return json_response({"ok": True, "text": row["text"],
+                          "min_words": row["min_words"], "minutes": row["minutes"]})
+
+
 def view_tests(req, db):
     """Digital tests: made from the book, marked by the machine."""
     rows = core.digital_tests(db)
@@ -5100,6 +5200,10 @@ ROUTES = [
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/materials$", view_materials),
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
+    ("GET",  r"^/prompts$", view_prompts),
+    ("GET",  r"^/prompts/suggest$", suggest_json),
+    ("POST", r"^/prompts/new$", act_new_prompt),
+    ("POST", r"^/prompts/delete$", act_delete_prompt),
     ("GET",  r"^/tests$", view_tests),
     ("GET",  r"^/tests/(\d+)$", view_test),
     ("POST", r"^/tests/(\d+)/key$", act_test_key),

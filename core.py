@@ -486,6 +486,17 @@ def migrate(db):
         ms INTEGER,
         UNIQUE (game_id, question_id, student_id)
     );
+    CREATE TABLE IF NOT EXISTS prompts (
+        id INTEGER PRIMARY KEY,
+        level TEXT NOT NULL,               -- Beginner ... IELTS Standard
+        kind TEXT NOT NULL,                -- email, letter, opinion, task1 ...
+        text TEXT NOT NULL,
+        min_words INTEGER,
+        minutes INTEGER,
+        mine INTEGER NOT NULL DEFAULT 0,   -- written by the teacher, not shipped
+        used INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS dtests (
         id INTEGER PRIMARY KEY,
         level_id INTEGER REFERENCES levels(id),
@@ -688,6 +699,7 @@ def init_db():
             "INSERT OR IGNORE INTO tags (label, sort) VALUES (?, ?)", (label, i)
         )
     db.commit()
+    seed_prompts(db)
     return db
 
 
@@ -2722,6 +2734,73 @@ def marks_on(db, group_id, day):
         " WHERE s.group_id=? AND m.day=?", (group_id, day)
     ).fetchall()
     return {r["student_id"]: r for r in rows}
+
+
+def seed_prompts(db):
+    """Put the shipped questions in once, and never tread on the teacher's own."""
+    if db.execute("SELECT COUNT(*) c FROM prompts WHERE mine=0").fetchone()["c"]:
+        return
+    try:
+        import prompts_seed as seed
+    except ImportError:
+        return
+    for level, kinds in seed.BANK.items():
+        words, mins = seed.DEFAULTS.get(level, (None, None))
+        for kind, texts in kinds.items():
+            for t in texts:
+                db.execute(
+                    "INSERT INTO prompts (level, kind, text, min_words, minutes,"
+                    " mine, created_at) VALUES (?,?,?,?,?,0,?)",
+                    (level, kind, t, words, mins, iso(now())))
+    db.commit()
+
+
+def prompt_kinds():
+    try:
+        import prompts_seed as seed
+        return seed.KINDS
+    except ImportError:
+        return [("opinion", "Opinion", None, None)]
+
+
+def suggest_prompt(db, level, kind):
+    """One question, least-used first, so the same one is not set every week."""
+    row = db.execute(
+        "SELECT * FROM prompts WHERE level=? AND kind=?"
+        " ORDER BY used, RANDOM() LIMIT 1", (level, kind)).fetchone()
+    if row:
+        db.execute("UPDATE prompts SET used=used+1 WHERE id=?", (row["id"],))
+        db.commit()
+    return row
+
+
+def prompts_for(db, level=None, kind=None):
+    sql, args = "SELECT * FROM prompts", []
+    where = []
+    if level:
+        where.append("level=?"); args.append(level)
+    if kind:
+        where.append("kind=?"); args.append(kind)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    return db.execute(sql + " ORDER BY level, kind, used, id", args).fetchall()
+
+
+def add_prompt(db, level, kind, text, min_words=None, minutes=None):
+    text = (text or "").strip()
+    if not text or not level or not kind:
+        return None
+    pid = db.execute(
+        "INSERT INTO prompts (level, kind, text, min_words, minutes, mine, created_at)"
+        " VALUES (?,?,?,?,?,1,?)",
+        (level, kind, text[:1500], min_words, minutes, iso(now()))).lastrowid
+    db.commit()
+    return pid
+
+
+def delete_prompt(db, pid):
+    db.execute("DELETE FROM prompts WHERE id=?", (pid,))
+    db.commit()
 
 
 def count_words(text):
