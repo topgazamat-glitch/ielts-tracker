@@ -1227,3 +1227,43 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
 .gcnote { width: 100%; font-size: 12px; margin-top: var(--sp-2); }
 .gradecard .scorepad { gap: var(--sp-1); }
 .gradecard .scorepad button { padding: var(--sp-1) var(--sp-2); font-size: 12px; min-width: 26px; }
+
+/* ------------------------------------------------ on a phone
+ *
+ * Two things a stylesheet written on a laptop gets wrong.
+ *
+ * A finger is not a cursor: the marking pads, score pads, chips and tabs were
+ * drawn at about 22px tall, which is fine to click and fiddly to tap. Anything
+ * meant to be tapped gets a 44px target here - the size both Apple and Google
+ * settled on - without changing how it looks on a desktop.
+ *
+ * And Safari on iOS zooms the page in whenever a field smaller than 16px is
+ * focused, so typing a note on a phone meant pinching back out afterwards.
+ */
+@media (pointer: coarse) {
+  button.mk,
+  button.mk.one,
+  .scorepad button,
+  .scorepad.halves button,
+  .scorepad.mini button,
+  .gradecard .scorepad button,
+  .chip,
+  .tabs .tab,
+  .linky,
+  .peek {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  button.mk, button.mk.one { min-width: 44px; }
+  .chip, .tabs .tab { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .markpad, .scorepad, .chips { gap: var(--sp-2); }
+
+  /* never below 16px, or the page jumps on focus */
+  input, select, textarea,
+  .mnote, .gcnote, .movef select {
+    font-size: 16px;
+  }
+  .movef select { padding: var(--sp-2); }
+}
