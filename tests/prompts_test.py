@@ -93,7 +93,32 @@ print("   %d -> %d" % (before, after))
 assert before == after
 db.close()
 
-print("\n9. THE PAGE STAYS SWAPPABLE")
+print("\n9. THE COURSEBOOK'S OWN WRITING LESSONS")
+u = json.loads(get("/prompts/units?level=Intermediate"))
+print("   Intermediate units with a writing lesson:",
+      [x["unit"] for x in u["units"]])
+assert len(u["units"]) >= 8
+print("   unit 6 is about:", next(x for x in u["units"] if x["unit"] == 6)["topic"])
+print("   taught in:", next(x for x in u["units"] if x["unit"] == 6)["lesson"])
+e = json.loads(get("/prompts/units?level=Elementary"))
+print("   Elementary units:", [x["unit"] for x in e["units"]])
+assert len(e["units"]) == 12
+
+print("\n10. ASKING FOR ONE UNIT'S WRITING")
+d = json.loads(get("/prompts/suggest?level=Intermediate&kind=coursebook&unit=6"))
+print("   ", d["where"])
+print("   ", d["text"])
+assert d["ok"] and "review" in d["text"].lower() and "Unit 6" in d["where"]
+d2 = json.loads(get("/prompts/suggest?level=Elementary&kind=coursebook&unit=4"))
+print("   ", d2["where"], "->", d2["text"])
+assert "Food" in d2["where"]
+
+print("\n11. THE PICKER IS ON THE FORM")
+a2 = get("/assignments")
+print("   a unit dropdown:", 'id="sug_unit"' in a2)
+assert 'id="sug_unit"' in a2
+
+print("\n12. THE PAGE STAYS SWAPPABLE")
 body = re.search(r"<main[^>]*>(.*)</main>", get("/prompts"), re.S).group(1)
 print("   no inline script in main:", "<script" not in body)
 assert "<script" not in body

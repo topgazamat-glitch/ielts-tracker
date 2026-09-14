@@ -391,8 +391,13 @@ class Document:
                 value = parser.parse()
         elif ref.num in self.compressed:
             container, _index = self.compressed[ref.num]
-            for num, val in self._object_stream(container).items():
-                self.cache.setdefault(num, val)
+            try:
+                for num, val in self._object_stream(container).items():
+                    self.cache.setdefault(num, val)
+            except Exception:
+                # one unreadable container should cost its own objects, not the
+                # whole document: a book with a damaged stream still has pages
+                pass
             value = self.cache.get(ref.num)
         self.cache[ref.num] = value
         return value

@@ -381,6 +381,10 @@ def migrate(db):
         db.execute("ALTER TABLE assignments ADD COLUMN prompt TEXT")
         db.execute("ALTER TABLE assignments ADD COLUMN minutes INTEGER")
         db.execute("ALTER TABLE assignments ADD COLUMN min_words INTEGER")
+    pcols = {r["name"] for r in db.execute("PRAGMA table_info(prompts)")}
+    if pcols and "unit" not in pcols:
+        for col in ("unit INTEGER", "lesson TEXT", "topic TEXT"):
+            db.execute("ALTER TABLE prompts ADD COLUMN %s" % col)
     if "in_league" not in acols:
         # homework can be set, marked and seen by students without counting
         # towards the league - a leftover set, or one that was only practice
@@ -493,6 +497,9 @@ def migrate(db):
         text TEXT NOT NULL,
         min_words INTEGER,
         minutes INTEGER,
+        unit INTEGER,                      -- the coursebook unit it belongs to
+        lesson TEXT,                       -- which lesson slot it is taught in
+        topic TEXT,                        -- the unit's title, for the picker
         mine INTEGER NOT NULL DEFAULT 0,   -- written by the teacher, not shipped
         used INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
@@ -700,6 +707,7 @@ def init_db():
         )
     db.commit()
     seed_prompts(db)
+    seed_coursebook(db)
     return db
 
 
@@ -2736,6 +2744,36 @@ def marks_on(db, group_id, day):
     return {r["student_id"]: r for r in rows}
 
 
+def seed_coursebook(db):
+    """The writing lesson from each unit of the coursebook they are studying."""
+    if db.execute("SELECT COUNT(*) c FROM prompts WHERE unit IS NOT NULL"
+                  " AND mine=0").fetchone()["c"]:
+        return
+    try:
+        import writing_bank as wb
+    except ImportError:
+        return
+    for row in wb.LESSONS:
+        level = row["level"]
+        slot = wb.WRITING_SLOT.get(level, "D")
+        words, mins = {"Beginner": (60, 20), "Elementary": (90, 25),
+                       "Pre-Intermediate": (140, 30),
+                       "Intermediate": (180, 35)}.get(level, (150, 30))
+        db.execute(
+            "INSERT INTO prompts (level, kind, text, min_words, minutes, unit,"
+            " lesson, topic, mine, created_at) VALUES (?,?,?,?,?,?,?,?,0,?)",
+            (level, "coursebook", row["task"], words, mins, row["unit"],
+             slot, row["title"], iso(now())))
+    db.commit()
+
+
+def units_with_writing(db, level):
+    rows = db.execute(
+        "SELECT unit, topic, lesson FROM prompts WHERE level=? AND unit IS NOT NULL"
+        " GROUP BY unit ORDER BY unit", (level,)).fetchall()
+    return rows
+
+
 def seed_prompts(db):
     """Put the shipped questions in once, and never tread on the teacher's own."""
     if db.execute("SELECT COUNT(*) c FROM prompts WHERE mine=0").fetchone()["c"]:
@@ -2763,8 +2801,16 @@ def prompt_kinds():
         return [("opinion", "Opinion", None, None)]
 
 
-def suggest_prompt(db, level, kind):
+def suggest_prompt(db, level, kind, unit=None):
     """One question, least-used first, so the same one is not set every week."""
+    if unit:
+        row = db.execute(
+            "SELECT * FROM prompts WHERE level=? AND unit=? ORDER BY used, RANDOM()"
+            " LIMIT 1", (level, unit)).fetchone()
+        if row:
+            db.execute("UPDATE prompts SET used=used+1 WHERE id=?", (row["id"],))
+            db.commit()
+            return row
     row = db.execute(
         "SELECT * FROM prompts WHERE level=? AND kind=?"
         " ORDER BY used, RANDOM() LIMIT 1", (level, kind)).fetchone()

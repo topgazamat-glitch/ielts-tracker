@@ -1370,6 +1370,7 @@ sheet on the other &mdash; instead of sending a photo of their handwriting. One 
 per posting.</p>
 <div class="inline gap-2" id="suggestbar">
 <label class="f">Level<select id="sug_level">{sug_levels}</select></label>
+<label class="f">Unit<select id="sug_unit"><option value="">any unit</option></select></label>
 <label class="f">Kind<select id="sug_kind">{sug_kinds}</select></label>
 <label class="f pushed">&nbsp;<button type="button" class="ghost"
   id="suggest">Suggest a question</button></label>
@@ -4427,16 +4428,30 @@ def act_delete_prompt(req, db):
     return redirect("/prompts")
 
 
+def units_json(req, db):
+    """Which units of a level have a writing lesson, and what it is about."""
+    level = (req["query"].get("level", [""])[0] or "").strip()
+    core.seed_coursebook(db)
+    rows = core.units_with_writing(db, level)
+    return json_response({"units": [
+        {"unit": r["unit"], "topic": r["topic"], "lesson": r["lesson"]} for r in rows]})
+
+
 def suggest_json(req, db):
     """One question for a level and kind, for the button on the assignment form."""
     level = (req["query"].get("level", [""])[0] or "").strip()
     kind = (req["query"].get("kind", [""])[0] or "").strip()
+    unit = (req["query"].get("unit", [""])[0] or "").strip()
     core.seed_prompts(db)
-    row = core.suggest_prompt(db, level, kind)
+    core.seed_coursebook(db)
+    row = core.suggest_prompt(db, level, kind, int(unit) if unit.isdigit() else None)
     if not row:
         return json_response({"ok": False,
                               "why": "nothing written for %s yet" % (level or "that level")})
-    return json_response({"ok": True, "text": row["text"],
+    where = ""
+    if row["unit"]:
+        where = "Unit %d%s" % (row["unit"], " — " + row["topic"] if row["topic"] else "")
+    return json_response({"ok": True, "text": row["text"], "where": where,
                           "min_words": row["min_words"], "minutes": row["minutes"]})
 
 
@@ -5202,6 +5217,7 @@ ROUTES = [
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
     ("GET",  r"^/prompts$", view_prompts),
     ("GET",  r"^/prompts/suggest$", suggest_json),
+    ("GET",  r"^/prompts/units$", units_json),
     ("POST", r"^/prompts/new$", act_new_prompt),
     ("POST", r"^/prompts/delete$", act_delete_prompt),
     ("GET",  r"^/tests$", view_tests),
