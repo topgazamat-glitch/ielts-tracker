@@ -65,6 +65,7 @@ def page(title, body, active="", music=False):
 <script src="/static/materials.js" defer></script>
 <script src="/static/grade.js" defer></script>
 <script src="/static/roster.js" defer></script>
+<script src="/static/marks.js" defer></script>
 </body></html>"""
 
 
@@ -820,29 +821,48 @@ def group_students(db, g):
 
 
 def group_marks(db, g, query):
-    day = (query.get("day", [None])[0] or
-           core.local_day(core.now(), core.load_config()))
+    """Marking a lesson should take a few taps, not fifty-four.
+
+    Three dropdowns a student meant eighteen students cost fifty-four separate
+    choices, every lesson. Almost all of them were the same number. So the page
+    now starts everyone somewhere sensible - last lesson, or one press of a
+    preset - and asks only for the ones who were different.
+    """
+    cfg = core.load_config()
+    day = (query.get("day", [None])[0] or core.local_day(core.now(), cfg))
     existing = core.marks_on(db, g["id"], day)
+    previous, prev_day = core.last_marks_before(db, g["id"], day)
     students = db.execute(
         "SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name", (g["id"],)
     ).fetchall()
 
-    def picker(sid, field, value):
-        opts = "".join(
-            f'<option value="{n}"{" selected" if value == n else ""}>{n}</option>'
-            for n in range(core.MARK_MAX, 0, -1))
-        blank = '<option value=""{}>—</option>'.format(" selected" if not value else "")
-        return (f'<select name="{field}_{sid}" class="mark">{blank}{opts}</select>')
-
     rows = ""
     for st in students:
         row = existing.get(st["id"])
-        cells = "".join(
-            f'<td>{picker(st["id"], f, row[f] if row else None)}</td>'
-            for f in core.MARK_FIELDS)
-        rows += (f'<tr><td>{E(st["name"])}</td>{cells}'
-                 f'<td><input name="note_{st["id"]}" value="{E((row["note"] if row else "") or "")}"'
-                 f' placeholder="optional" style="width:100%"></td></tr>')
+        was = previous.get(st["id"])
+        hidden = "".join(
+            f'<input type="hidden" name="{f}_{st["id"]}" id="f_{f}_{st["id"]}"'
+            f' value="{row[f] if row and row[f] else ""}">' for f in core.MARK_FIELDS)
+        pad = "".join(
+            f'<button type="button" class="mk" data-sid="{st["id"]}" data-v="{n}">{n}</button>'
+            for n in range(1, core.MARK_MAX + 1))
+        detail = "".join(
+            f'<label class="mdet"><span>{f[:4].title()}</span>'
+            + "".join(f'<button type="button" class="mk one" data-sid="{st["id"]}"'
+                      f' data-field="{f}" data-v="{n}">{n}</button>'
+                      for n in range(1, core.MARK_MAX + 1))
+            + "</label>" for f in core.MARK_FIELDS)
+        last = (",".join(str(was[f] or "") for f in core.MARK_FIELDS)) if was else ""
+        rows += (f'<tr data-sid="{st["id"]}" data-last="{last}">'
+                 f'<td class="mname">{E(st["name"])}</td>'
+                 f'<td class="markpad">{hidden}{pad}'
+                 f'<button type="button" class="mk none" data-sid="{st["id"]}"'
+                 f' data-v="">absent</button>'
+                 f'<button type="button" class="linky split" data-sid="{st["id"]}">split</button>'
+                 f'<div class="mdetails" id="d_{st["id"]}" hidden>{detail}</div></td>'
+                 f'<td><input name="note_{st["id"]}" class="mnote"'
+                 f' value="{E((row["note"] if row else "") or "")}"'
+                 f' placeholder="note"></td></tr>')
 
     history = ""
     for h in db.execute(
@@ -855,14 +875,24 @@ def group_marks(db, g, query):
                     f'{E(h["day"])}</a></td><td>{h["n"]} student(s)</td>'
                     f'<td>{round(h["avg"], 2)}/5</td></tr>')
 
+    presets = "".join(
+        f'<button type="button" class="ghost preset" data-all="{n}">Everyone {n}</button>'
+        for n in range(core.MARK_MAX, core.MARK_MAX - 3, -1))
+    copy_last = (f'<button type="button" class="ghost" id="copylast">Same as '
+                 f'{E(prev_day)}</button>' if prev_day else "")
+
     return f"""<h2>Marks for {E(day)}</h2>
-<p class="sub">Give each student 1 to 5 for how they were in the lesson. Saving again
-on the same date replaces what is there.</p>
-<div class="card"><form method="post" action="/groups/{g["id"]}/marks">
+<p class="sub">One tap gives a student all three marks. Start everyone somewhere, then
+change only the ones who were different &mdash; <span class="kbd">split</span> opens the
+three separately when someone was late but worked well.</p>
+<div class="card"><form method="post" action="/groups/{g["id"]}/marks" id="marksform">
 <input type="hidden" name="day" value="{E(day)}">
-<div class="tablewrap"><table><tr><th>Student</th><th>Punctuality</th><th>Behaviour</th>
-<th>Participation</th><th>Note</th></tr>
-{rows or '<tr><td colspan=5 class="sub">Nobody in this class yet.</td></tr>'}</table></div>
+<div class="markbar">{presets}{copy_last}
+  <button type="button" class="ghost" id="clearall">Clear</button>
+  <span class="sub" id="markcount" style="margin:0"></span></div>
+<div class="tablewrap"><table id="marks"><tr><th>Student</th>
+<th>How were they?</th><th>Note</th></tr>
+{rows or '<tr><td colspan=3 class="sub">Nobody in this class yet.</td></tr>'}</table></div>
 <div class="inline" style="margin-top:12px">
 <label class="f">Lesson date<input type="date" name="day2" value="{E(day)}"></label>
 <button>Save marks</button></div></form></div>

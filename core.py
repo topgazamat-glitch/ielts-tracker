@@ -2622,6 +2622,21 @@ MARK_LABELS = {"punctuality": "Punctuality", "behaviour": "Behaviour",
 MARK_MAX = 5
 
 
+def last_marks_before(db, group_id, day):
+    """What this class was given at their previous lesson, keyed by student.
+
+    Most students are the same most days, so the quickest honest way to mark a
+    lesson is to start from the last one and change who differs.
+    """
+    prev = db.execute(
+        "SELECT m.day FROM lesson_marks m JOIN students s ON s.id=m.student_id"
+        " WHERE s.group_id=? AND m.day < ? ORDER BY m.day DESC LIMIT 1",
+        (group_id, day)).fetchone()
+    if not prev:
+        return {}, None
+    return marks_on(db, group_id, prev["day"]), prev["day"]
+
+
 def marks_on(db, group_id, day):
     """What was recorded for this class on one date, keyed by student."""
     rows = db.execute(

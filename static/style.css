@@ -1156,3 +1156,33 @@ button.ghost.danger { color: var(--red); border-color: var(--red); }
   text-decoration: none; color: var(--ink-3); font-size: 12px; padding: 0 3px;
 }
 .peek:hover { color: var(--brand); }
+
+/* ------------------------------------------------ lesson marks */
+.markbar {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  padding-bottom: 12px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
+}
+#marks td { vertical-align: middle; }
+#marks .mname { font-weight: 600; white-space: nowrap; }
+.markpad { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+button.mk {
+  min-width: 34px; padding: 6px 9px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--surface); color: var(--ink-2); cursor: pointer;
+}
+button.mk:hover { border-color: var(--brand); color: var(--brand); }
+button.mk.on {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+button.mk.none { min-width: auto; font-weight: 400; font-size: 12px; color: var(--ink-3); }
+button.mk.none.on { background: var(--ink-3); border-color: var(--ink-3); color: #fff; }
+button.mk.one { min-width: 28px; padding: 3px 7px; font-size: 12px; }
+.split { font-size: 12px; margin-left: 6px; }
+.mdetails { flex-basis: 100%; display: grid; gap: 4px; margin-top: 6px; }
+.mdet { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.mdet span { width: 46px; color: var(--ink-3); }
+#marks tr.mixed .mname::after {
+  content: " ·split"; color: var(--brand); font-size: 11px; font-weight: 400;
+}
+.mnote { width: 100%; font-size: 13px; }
