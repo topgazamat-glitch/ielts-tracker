@@ -11,3 +11,7 @@ __pycache__/
 
 # real data export - student names and photos, never commit
 transfer.json
+
+# look.py renders the pages from a copy of the real database, so a screenshot
+# has students' names in it. Look at them locally; never commit one.
+shots/

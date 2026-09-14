@@ -17,6 +17,26 @@ straight to the students.
 
 See `tests/README.md` for what each one holds down.
 
+## Looking at the pages
+
+    python3 look.py                      every page, four screen sizes
+    python3 look.py /championship        a screenshot, saved into shots/
+    python3 look.py /music phone         the same page at iPhone size
+
+The tests prove the site *works*. This shows what it *looks like*. It renders
+every page in headless Chrome at laptop, small-laptop, narrow and phone sizes,
+and reports anything cut off or sitting past the right edge where nobody can
+reach it. A strip that scrolls sideways on purpose - the navigation on a phone
+- is not reported; the question it asks is never "does it stick out" but "can a
+person get to it".
+
+It starts its own server on a throwaway copy of the data, so it never touches
+the live site and never runs the bot. Needs Google Chrome; nothing else.
+
+Worth running whenever a page changes shape. Reading the stylesheet is not the
+same as looking: the navigation was cut off mid-word on every page for weeks
+while the CSS said, correctly, that it was allowed to scroll.
+
 
 ## Setup
 
@@ -89,6 +109,7 @@ Demo data to see the charts populated: `python3 seed_demo.py --reset`.
 | `charts_png.py` | The same charts as images, for sending into Telegram |
 | `app.py` | Runs the website and the bot together as one program |
 | `seed_demo.py` | Fake group + scores for trying the UI |
+| `look.py` | Renders every page in Chrome and measures it - see above |
 | `data/app.db` | SQLite database · `data/uploads/` submitted photos |
 
 ## Not built yet, by choice

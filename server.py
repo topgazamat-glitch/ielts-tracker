@@ -4674,13 +4674,14 @@ remembered per person, so anyone who wants silence keeps silence.</p>
 {banner}
 {current}
 <div class="card"><h2 style="margin-top:0">Set a song</h2>
-<form method="post" action="/music/new" enctype="multipart/form-data">
-<label>Day<input type="date" name="day" value="{E(day)}"></label>
-<label>Song file
+<form method="post" action="/music/new" enctype="multipart/form-data"
+ class="inline">
+<label class="f">Day<input type="date" name="day" value="{E(day)}"></label>
+<label class="f">Song file
 <input type="file" name="song" accept="audio/*,.mp3,.m4a,.ogg,.wav,.flac" required></label>
-<label>Title <span class="sub">(optional)</span>
+<label class="f">Title <span class="sub">(optional)</span>
 <input name="title" maxlength="120" placeholder="Shown to the students"></label>
-<label>Artist <span class="sub">(optional)</span>
+<label class="f">Artist <span class="sub">(optional)</span>
 <input name="artist" maxlength="120"></label>
 <div class="gap-3"><button>Set the song</button></div>
 </form>
