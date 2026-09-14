@@ -2347,7 +2347,8 @@ Your teacher will start it soon.</p></div>
 
     return f"""<h2>Championship &mdash; season {champ["season"]}</h2>
 <p class="sub">A season lasts {core.SEASON_LESSONS} lessons, not a month, so everyone is
-judged over the same amount of teaching. {pace}
+judged over the same amount of teaching. Every piece of homework and every lesson adds to
+your score, so it climbs as the season goes on. {pace}
 The prize goes to the best in the whole school.</p>
 {frozen}
 <div class="card"><p style="margin:0 0 12px">{standing}.
@@ -3728,9 +3729,11 @@ long the rest of the school takes to catch up.</p>
 <p class="sub">Season {standing["season"]}, counting from
 {E(standing.get("start_day") or standing["start"][:10])}{skipped}.
 {core.SEASON_LESSONS} lessons each, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
-Homework is the average over every piece you set: marked on time it scores what you gave
-it, late or never handed in it scores nought, and anything still waiting to be marked is
-left out until you mark it.</p>
+Points add up as the season goes on. Every mark you give counts towards a season's worth
+of work &mdash; {core.SEASON_LESSONS} pieces of homework out of ten, and
+{core.SEASON_LESSONS} lessons out of five &mdash; so doing more good work raises a score
+rather than only holding it steady. Late or never handed in scores nought; anything still
+waiting to be marked is left out until you mark it.</p>
 {top}
 {paused}
 {gapbox}
@@ -3764,11 +3767,11 @@ the line for now.</p>
 <p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten, scaled to
 3; a piece handed in after its deadline is a nought in that average. Words count up to
 {core.VOCAB_TARGET}. In the lesson is the average of punctuality, behaviour and taking
-part. Homework counts everything that was set: a deadline that passed with nothing
-against it is a nought, exactly like one handed in late, so doing one piece well no longer
-beats doing all three. Work waiting to be marked is left out until you mark it. A student
-needs {core.MIN_GRADED} deadlines behind them to be eligible &mdash; otherwise one lucky
-ten out of ten decides the season. Nothing you have not recorded scores anything, so
+part, and each lesson is worth up to five. Both add up across the season rather than
+averaging out: full marks means {core.SEASON_LESSONS} pieces of homework at ten and
+{core.SEASON_LESSONS} lessons at five. A deadline that passed with nothing against it is a
+nought, exactly like one handed in late. Work waiting to be marked is left out until you
+mark it. A student needs {core.MIN_GRADED} deadlines behind them to be eligible. Nothing you have not recorded scores anything, so
 an unmarked lesson is a nought for everyone alike and the order of the table is
 unaffected.</p></div>
 {history}"""

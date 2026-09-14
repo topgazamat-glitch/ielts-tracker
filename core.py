@@ -1525,14 +1525,28 @@ def climb(db, student_id):
 # is, because a table that rewards ability hands the prize to the same three
 # people every month and everybody else stops reading it.
 
+# A season is counted in lessons, not in days, so a class that met thirteen times
+# and a class that met twelve are judged over the same amount of teaching.
+SEASON_LESSONS = 15
+SEASON_OPEN = "9999-12-31T00:00:00+00:00"   # a season still running has no end yet
+
 CHAMPIONSHIP = [
     ("homework", "Homework", 3.0),
-    ("vocab", "Words learned", 2.0),
     ("conduct", "In the lesson", 2.0),
 ]
 CHAMPIONSHIP_MAX = sum(w for _k, _l, w in CHAMPIONSHIP)
-MIN_GRADED = 3          # fewer than this and one lucky mark decides the month
-VOCAB_TARGET = 60       # words for full marks; beyond this it is worth nothing
+MIN_GRADED = 3          # fewer than this and one lucky mark decides the season
+
+# Points add up rather than average out. Averaging existed so that a student who
+# attended more lessons could not out-score one who attended fewer - but a season
+# is fifteen lessons for everybody now, so that can no longer happen, and a score
+# that climbs as the term goes on is what makes a table worth watching.
+#
+# The targets are what a season of fifteen lessons is worth: a piece of homework
+# for each, marked out of ten, and each lesson worth five.
+HOMEWORK_TARGET = SEASON_LESSONS * 10.0     # 150 marks across the season
+CONDUCT_TARGET = SEASON_LESSONS * 5.0       # 75 across the season
+VOCAB_TARGET = 60       # kept for the Progress page; it scores nothing for now
 
 
 def deadline_iso(day, clock=None, cfg=None):
@@ -1599,8 +1613,6 @@ def _avg_between(db, student_id, lo, hi):
     return r["a"], r["n"]
 
 
-SEASON_LESSONS = 15
-SEASON_OPEN = "9999-12-31T00:00:00+00:00"   # a season still running has no end yet
 
 
 def season_start(db):
@@ -1826,14 +1838,16 @@ def championship(db, cfg=None):
         counted, late, missing, waiting, pending = homework_marks(db, st, lo, hi, windows)
         graded = len(counted)
         parts = {}
-        if graded:
-            parts["homework"] = sum(counted) / graded / 10.0
+        if graded or waiting:
+            # every mark earned counts towards the season's total, so doing more
+            # good work raises the score instead of only holding it steady
+            parts["homework"] = min(1.0, sum(counted) / HOMEWORK_TARGET)
 
         words = sum(1 for r in db.execute(
             "SELECT last_seen FROM word_progress WHERE student_id=? AND streak >= 3"
             " AND last_seen >= ? AND last_seen < ?", (st["id"], lo, hi))
             if not paused_at(r["last_seen"], windows))
-        parts["vocab"] = min(1.0, words / float(VOCAB_TARGET))
+
 
         scored = [(r["punctuality"] or 0) + (r["behaviour"] or 0)
                   + (r["participation"] or 0) for r in db.execute(
@@ -1841,7 +1855,8 @@ def championship(db, cfg=None):
             " WHERE student_id=? AND day >= ? AND day < ?",
             (st["id"], local_day(parse(lo), cfg), local_day(parse(hi), cfg)))
             if not paused_day(r["day"], windows, cfg)]
-        parts["conduct"] = (min(1.0, (sum(scored) / len(scored) / 3.0) / float(MARK_MAX))
+        # each lesson is worth up to five, and they add up across the season
+        parts["conduct"] = (min(1.0, (sum(scored) / 3.0) / CONDUCT_TARGET)
                             if scored else 0.0)
         lesson_n = len(scored)
 

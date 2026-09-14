@@ -76,8 +76,10 @@ print("\nAfter deleting:")
 print("   %-38s hw %s of 3" % (r["handed"], r["points"]["homework"]))
 print("   counted pieces:", r["graded"], "(only the homework that still exists)")
 assert r["graded"] == 1
-assert abs(r["points"]["homework"] - 1.8) < 0.01, r["points"]["homework"]
-print("   the three 10s from deleted tasks no longer score:", r["points"]["homework"], "= 6/10 -> 1.8")
+# only the surviving 6 counts, towards a season's worth of marks
+assert abs(r["points"]["homework"] - 6 / core.HOMEWORK_TARGET * 3) < 0.01, r["points"]["homework"]
+print("   the three 10s from deleted tasks no longer score: 6 of %d marks -> %s"
+      % (core.HOMEWORK_TARGET, r["points"]["homework"]))
 
 print("\nThe student's own record is untouched:")
 sp = urllib.request.urlopen(B + "/s/tok0000000000000000?tab=progress").read().decode()
