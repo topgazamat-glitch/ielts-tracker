@@ -433,8 +433,20 @@ def grade_page(db, sub, regrade=False):
     files = db.execute("SELECT * FROM files WHERE submission_id=? ORDER BY ord, id",
                        (sub["id"],)).fetchall()
     st = core.student_stats(db, student["id"])
-    shots = "".join(shot(f, i) for i, f in enumerate(files)) \
-        or '<p class="sub">Nothing attached.</p>'
+    if sub["kind"] == "text":
+        # typed work reads as a paper: the question, then what they wrote
+        mins = ""
+        if sub["written_secs"]:
+            mins = " &middot; %d min at the keyboard" % max(1, sub["written_secs"] // 60)
+        q = (f'<div class="question"><h3>The question</h3>'
+             f'<div class="qtext">{E(assignment["prompt"])}</div></div>'
+             if assignment and assignment["prompt"] else "")
+        shots = (f'<div class="paper reading">{q}'
+                 f'<div class="sheet"><h3>{sub["words"] or 0} words{mins}</h3>'
+                 f'<div class="written">{E(sub["answer"] or "")}</div></div></div>')
+    else:
+        shots = "".join(shot(f, i) for i, f in enumerate(files)) \
+            or '<p class="sub">Nothing attached.</p>'
 
     remaining = db.execute(
         "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
@@ -541,6 +553,10 @@ def view_grade_grid(req, db):
         files = db.execute("SELECT * FROM files WHERE submission_id=? ORDER BY ord, id"
                            " LIMIT 4", (sub["id"],)).fetchall()
         shots = ""
+        if sub["kind"] == "text":
+            shots = (f'<div class="written short">{E(sub["answer"] or "")}</div>'
+                     f'<div class="sub">{sub["words"] or 0} words</div>')
+            files = []
         for f in files:
             n = screen_name(f)
             if is_audio(n):
@@ -1343,6 +1359,19 @@ def view_assignments(req, db):
 <label class="f">One item per line &mdash; numbering is optional
 <textarea name="items" rows="6" class="wide" required
 placeholder="Task 2 essay &ndash; Technology&#10;Grammar handout page 45&#10;Vocabulary unit 4 &ndash; write 10 sentences"></textarea></label>
+<details class="gap-3"><summary>Make it a writing task they type</summary>
+<p class="sub gap-2">Paste the question. Students get a writing paper &mdash; the
+question on one side, the sheet on the other &mdash; instead of sending a photo of
+their handwriting. One question per posting.</p>
+<label class="f">The question
+<textarea name="prompt" rows="4" class="wide"
+ placeholder="Some people think that… Discuss both views and give your own opinion."></textarea></label>
+<div class="inline gap-2">
+<label class="f">At least<input type="number" name="min_words" min="0" max="1000"
+ placeholder="250" style="width:90px"> words</label>
+<label class="f">Time<input type="number" name="minutes" min="0" max="240"
+ placeholder="40" style="width:90px"> minutes</label>
+</div></details>
 <div class="gap-3"><button onclick="this.disabled=true;this.form.submit()">
 Set the homework</button></div></form>
 <p class="sub gap-3">One line makes one piece of homework, several lines
@@ -1775,13 +1804,15 @@ def student_page(title, body):
 <main style="max-width:600px">{body}</main>
 {song_tag()}
 <script src="/static/music.js" defer></script>
-<script src="/static/nav.js" defer></script></body></html>"""
+<script src="/static/nav.js" defer></script>
+<script src="/static/write.js" defer></script></body></html>"""
 
 
 def student_shell(s, db, token, tab, body):
     """One page, four tabs, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
-    tabs = [("home", "Homework"), ("materials", "Materials"), ("tests", "Tests"),
+    tabs = [("home", "Homework"), ("write", "Writing"),
+            ("materials", "Materials"), ("tests", "Tests"),
             ("progress", "Progress"), ("class", "Class"), ("goal", "My goal"),
             ("profile", "Profile")]
     nav = "".join(
@@ -2095,6 +2126,49 @@ def portal_tests(db, s, token, query):
 </form>"""
 
 
+def act_student_write(req, db, token, sub_id, quiet=False):
+    """Keep what has been typed; hand it in only when they say so."""
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    row = db.execute("SELECT * FROM submissions WHERE id=? AND student_id=?"
+                     " AND kind='text'", (sub_id, s["id"])).fetchone()
+    if not row or row["status"] != "pending":
+        return (json_response({"ok": False}) if quiet
+                else redirect(f"/s/{token}?tab=write"))
+    f = req["form"]
+    text = f.get("answer", [""])[0]
+    secs = (f.get("seconds", [""])[0] or "").strip()
+    hand_in = f.get("hand_in", [""])[0] == "1"
+    core.save_writing(db, sub_id, text, int(secs) if secs.isdigit() else None, hand_in)
+    if quiet:
+        return json_response({"ok": True, "words": core.count_words(text)})
+    if hand_in and row["assignment_id"]:
+        try:
+            notify_handed_in(db, sub_id)
+        except Exception:
+            traceback.print_exc()
+    return redirect(f"/s/{token}?tab=write&a={row['assignment_id'] or ''}")
+
+
+def notify_handed_in(db, sub_id):
+    """Tell the teacher a typed answer has arrived, the way a photo does."""
+    token = CFG.get("telegram_token")
+    if not token:
+        return
+    row = db.execute(
+        "SELECT s.words, st.name, a.title FROM submissions s"
+        " JOIN students st ON st.id=s.student_id"
+        " LEFT JOIN assignments a ON a.id=s.assignment_id WHERE s.id=?",
+        (sub_id,)).fetchone()
+    who = core.meta_get(db, "teacher_chat_id")
+    if not row or not who:
+        return
+    import bot
+    bot.send(token, who, "%s typed %d words for %s" % (
+        row["name"], row["words"] or 0, row["title"] or "a writing task"))
+
+
 def act_student_test(req, db, token, tid):
     """Mark a handed-in test at once and send the student to their result."""
     s = core.student_by_token(db, token)
@@ -2111,6 +2185,88 @@ def act_student_test(req, db, token, tid):
     attempt = core.start_attempt(db, tid, s["id"])
     core.submit_attempt(db, attempt, given)
     return redirect(f"/s/{token}?tab=tests&t={tid}")
+
+
+def portal_write(db, s, token, query):
+    """A writing paper: the question on one side, the sheet on the other.
+
+    Laid out the way the real thing is, because the point is to practise under
+    something like exam conditions - not to fill in a form. On a phone the two
+    stack, with the question collapsed once it has been read, because a column
+    of text and a column of typing side by side on a 360px screen is neither.
+    """
+    aid = query.get("a", [None])[0]
+    aid = int(aid) if aid and aid.isdigit() else None
+    base = f"/s/{E(token)}?tab=write"
+
+    if aid is None:
+        open_tasks = [a for a in db.execute(
+            "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
+            " AND prompt IS NOT NULL ORDER BY COALESCE(due_at, created_at) DESC",
+            (s["group_id"],)) if core.still_open(a["due_at"])]
+        done = {r["assignment_id"]: r for r in db.execute(
+            "SELECT * FROM submissions WHERE student_id=? AND kind='text'",
+            (s["id"],))}
+        if not open_tasks:
+            return ('<h2>Writing</h2><div class="card"><p>No writing task open just '
+                    'now. When your teacher sets one it appears here.</p></div>')
+        cards = ""
+        for a in open_tasks:
+            r = done.get(a["id"])
+            if r and not r["draft"]:
+                sub = "handed in &middot; %d words" % (r["words"] or 0)
+            elif r and (r["words"] or 0):
+                sub = "%d words so far" % r["words"]
+            else:
+                sub = "not started"
+            day, clock = core.deadline_parts(a["due_at"], core.load_config())
+            cards += (f'<a class="tile" href="{base}&amp;a={a["id"]}">'
+                      f'<div class="tile-title">{E(a["title"])}</div>'
+                      f'<div class="sub flush">{sub}'
+                      f'{" &middot; due " + E(day) if day else ""}</div></a>')
+        return f'<h2>Writing</h2><div class="tiles">{cards}</div>'
+
+    task = core.writing_task(db, aid)
+    if not task or task["group_id"] != s["group_id"]:
+        return '<h2>Writing</h2><p class="sub">That task is not open to you.</p>'
+    row = core.open_writing(db, s["id"], aid)
+    handed = not row["draft"]
+    day, clock = core.deadline_parts(task["due_at"], core.load_config())
+    least = task["min_words"] or 0
+
+    if handed:
+        return f"""<h2>{E(task["title"])}</h2>
+<div class="card good"><strong>Handed in.</strong>
+<p class="sub gap-2">{row["words"] or 0} words. Your teacher will mark it and you
+will see the score on your Homework page.</p></div>
+<div class="paper"><div class="question"><h3>The question</h3>
+<div class="qtext">{E(task["prompt"])}</div></div>
+<div class="sheet"><h3>What you wrote</h3>
+<div class="written">{E(row["answer"] or "")}</div></div></div>
+<p class="gap-3"><a class="tab" href="{base}">Back to writing tasks</a></p>"""
+
+    return f"""<h2>{E(task["title"])}</h2>
+<p class="sub">Write your answer here instead of on paper. It saves as you type.
+{"Due " + E(day) + " at " + E(clock) + "." if day else ""}</p>
+<div class="paper" id="paper" data-sub="{row["id"]}" data-min="{least}"
+     data-minutes="{task["minutes"] or 0}">
+  <div class="question">
+    <button type="button" class="qtoggle" id="qtoggle">The question</button>
+    <div class="qbody" id="qbody"><div class="qtext">{E(task["prompt"])}</div></div>
+  </div>
+  <div class="sheet">
+    <form method="post" action="/s/{E(token)}/write/{row["id"]}" id="writeform">
+      <textarea name="answer" id="answer" spellcheck="false"
+        placeholder="Start writing here…">{E(row["answer"] or "")}</textarea>
+      <div class="sheetbar">
+        <span id="wordcount" class="counter">0 words</span>
+        <span id="clock" class="counter"></span>
+        <span id="saved" class="sub"></span>
+        <button name="hand_in" value="1">Hand it in</button>
+      </div>
+    </form>
+  </div>
+</div>"""
 
 
 def portal_progress(db, s, token):
@@ -2672,6 +2828,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_materials(db, s, token, query)
     elif tab == "progress":
         body = portal_progress(db, s, token)
+    elif tab == "write":
+        body = portal_write(db, s, token, query)
     elif tab == "tests":
         body = portal_tests(db, s, token, query)
     elif tab == "class":
@@ -4765,16 +4923,25 @@ def act_new_list(req, db):
     due = f.get("due", [""])[0]
     due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
     publish_now = f.get("publish", [""])[0] == "1"
+    # a question makes it a writing paper; only the first item carries it, since
+    # one posting is one question
+    prompt = (f.get("prompt", [""])[0] or "").strip() or None
+    def whole(key):
+        v = (f.get(key, [""])[0] or "").strip()
+        return int(v) if v.isdigit() and int(v) > 0 else None
+    minutes, min_words = whole("minutes"), whole("min_words")
     created = []
     for title in items:
         if already_set(db, int(gid), title, due_iso):
             continue
         created.append(db.execute(
             "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
-            " published, rubric) VALUES (?,?,?,?,?,?,?)",
+            " published, rubric, prompt, minutes, min_words)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (int(gid), title, f.get("task_type", ["other"])[0], due_iso,
              core.iso(core.now()), 1 if publish_now else 0,
-             1 if f.get("rubric", [""])[0] == "1" else 0),
+             1 if f.get("rubric", [""])[0] == "1" else 0,
+             prompt, minutes, min_words),
         ).lastrowid)
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":
@@ -5338,6 +5505,18 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_avatar(
                     {"query": {}, "form": form}, db, token))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/write/(\d+)(/save)?$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_student_write(
+                    {"query": {}, "form": form}, db, m.group(1), int(m.group(2)),
+                    quiet=bool(m.group(3))))
             finally:
                 db.close()
 

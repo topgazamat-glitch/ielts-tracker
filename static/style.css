@@ -1267,3 +1267,62 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
   }
   .movef select { padding: var(--sp-2); }
 }
+
+/* ---------------------------------------------- the writing paper
+ *
+ * A real paper puts the question on one side and the sheet on the other, so
+ * this does too. On a phone they stack and the question folds away once it has
+ * been read, because two columns of text on a 360px screen is neither.
+ */
+.paper {
+  display: grid; gap: var(--sp-4); align-items: start;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+}
+.paper .question, .paper .sheet {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: var(--sp-4);
+  box-shadow: var(--shadow-1);
+}
+.paper h3 { margin: 0 0 var(--sp-2); font-size: 13px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.qtext { font-size: 16px; line-height: 1.65; white-space: pre-wrap; }
+.qtoggle { display: none; }
+#answer {
+  width: 100%; min-height: 58vh; resize: vertical;
+  border: 0; padding: 0; background: none; color: var(--ink);
+  font: 16px/1.9 ui-serif, Georgia, "Times New Roman", serif;
+}
+#answer:focus { outline: none; }
+.sheetbar {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-top: var(--sp-3); padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-soft);
+}
+.counter {
+  font-size: 13px; font-weight: 700; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.counter.short { color: var(--red); }
+.sheetbar button { margin-left: auto; }
+.written {
+  font: 16px/1.9 ui-serif, Georgia, "Times New Roman", serif;
+  white-space: pre-wrap; word-break: break-word;
+}
+.written.short {
+  max-height: 190px; overflow-y: auto; font-size: 14px; line-height: 1.7;
+}
+.paper.reading .sheet { background: var(--surface); }
+
+@media (max-width: 860px) {
+  .paper { grid-template-columns: 1fr; }
+  .paper .question { padding: var(--sp-3); }
+  .qtoggle {
+    display: block; width: 100%; text-align: left; background: none;
+    border: 0; padding: 0; font-size: 13px; font-weight: 700; color: var(--brand);
+    text-transform: uppercase; letter-spacing: .06em; cursor: pointer;
+  }
+  .qtoggle::after { content: " ▾"; }
+  .qtoggle.shut::after { content: " ▸"; }
+  .qbody { margin-top: var(--sp-2); }
+  #answer { min-height: 46vh; }
+}

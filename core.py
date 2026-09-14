@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import sqlite3
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -374,6 +375,12 @@ def migrate(db):
         db.execute("ALTER TABLE dquestions ADD COLUMN image TEXT")
 
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
+    if "prompt" not in acols:
+        # a writing task carries its question, so the student can see it beside
+        # the sheet they are writing on, the way a real paper is laid out
+        db.execute("ALTER TABLE assignments ADD COLUMN prompt TEXT")
+        db.execute("ALTER TABLE assignments ADD COLUMN minutes INTEGER")
+        db.execute("ALTER TABLE assignments ADD COLUMN min_words INTEGER")
     if "in_league" not in acols:
         # homework can be set, marked and seen by students without counting
         # towards the league - a leftover set, or one that was only practice
@@ -389,6 +396,11 @@ def migrate(db):
         db.execute("ALTER TABLE submissions ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
     if "improves" not in scols:
         db.execute("ALTER TABLE submissions ADD COLUMN improves INTEGER")
+    if "answer" not in scols:
+        # typed work, instead of a photograph of handwriting
+        db.execute("ALTER TABLE submissions ADD COLUMN answer TEXT")
+        db.execute("ALTER TABLE submissions ADD COLUMN words INTEGER")
+        db.execute("ALTER TABLE submissions ADD COLUMN written_secs INTEGER")
     if "draft" not in scols:
         # work in progress: pages can still be added, the teacher cannot see it.
         # everything that already existed was already sent, so it stays 0.
@@ -2710,6 +2722,53 @@ def marks_on(db, group_id, day):
         " WHERE s.group_id=? AND m.day=?", (group_id, day)
     ).fetchall()
     return {r["student_id"]: r for r in rows}
+
+
+def count_words(text):
+    """Words the way a writing paper counts them."""
+    return len([w for w in re.split(r"\s+", (text or "").strip()) if w])
+
+
+def writing_task(db, assignment_id):
+    a = db.execute("SELECT * FROM assignments WHERE id=?", (assignment_id,)).fetchone()
+    return a if a and a["prompt"] else None
+
+
+def open_writing(db, student_id, assignment_id):
+    """The student's answer in progress, made if this is their first look."""
+    row = db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND assignment_id=?"
+        " AND kind='text' ORDER BY id DESC LIMIT 1",
+        (student_id, assignment_id)).fetchone()
+    if row:
+        return row
+    sid = db.execute(
+        "INSERT INTO submissions (student_id, assignment_id, created_at, kind, draft,"
+        " answer, words) VALUES (?,?,?, 'text', 1, '', 0)",
+        (student_id, assignment_id, iso(now()))).lastrowid
+    db.commit()
+    return db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+
+
+def save_writing(db, sub_id, text, seconds=None, hand_in=False):
+    """Keep what has been typed. Handing in is the only thing that is final.
+
+    Saving happens while they write, so a closed tab or a flat battery costs a
+    few seconds of typing rather than an essay.
+    """
+    text = text or ""
+    fields = [text, count_words(text)]
+    sql = "UPDATE submissions SET answer=?, words=?"
+    if seconds is not None:
+        sql += ", written_secs=?"
+        fields.append(int(seconds))
+    if hand_in:
+        sql += ", draft=0, created_at=?"
+        fields.append(iso(now()))
+    sql += " WHERE id=? AND status='pending'"
+    fields.append(sub_id)
+    db.execute(sql, fields)
+    db.commit()
 
 
 def save_mark(db, student_id, day, values, note=None):

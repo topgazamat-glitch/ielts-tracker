@@ -45,6 +45,7 @@ site or the real database, and they can run in any order.
 | `inleague_test` | a set of homework can be marked without scoring |
 | `design_test` | spacing, type and colour stay a system, not a pile of patches |
 | `mobile_test` | viewport, scrolling, 44px tap targets, no zoom on focus |
+| `writing_test` | typed answers: set, write, autosave, hand in, mark |
 | `accumulate_test` | points are awarded per fixture and add up |
 
 ## Writing another
