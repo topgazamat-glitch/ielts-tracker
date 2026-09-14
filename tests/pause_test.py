@@ -106,5 +106,26 @@ print("\nStarting a fresh season wipes the pause history")
 core.start_season(db)
 print("   pauses now:", core.pause_windows(db), "paused:", core.is_paused(db))
 assert core.pause_windows(db) == [] and not core.is_paused(db)
+print("\n7. A PAUSE CAN BE TAKEN BACK")
+# a season of its own, so this does not lean on what went before
+core.start_season(db, start)
+hand(ali, 2, 9)                      # inside what will be paused
+db.commit()
+core.pause_season(db, start + timedelta(days=1))
+core.resume_season(db, start + timedelta(days=4))
+with_pause = {r["student"]["name"]: r for r in core.championship(db)["rows"]}["Ali"]
+print("   with the pause:     %d piece(s) counted (%s)"
+      % (with_pause["graded"], with_pause["handed"]))
+spans = len(core.pause_windows(db))
+print("   recorded pauses:", spans)
+assert spans == 1
+core.drop_pause(db, 0)
+without = {r["student"]["name"]: r for r in core.championship(db)["rows"]}["Ali"]
+print("   after taking it back: %d piece(s) counted (%s)"
+      % (without["graded"], without["handed"]))
+print("   the pause is gone:", core.pause_windows(db) == [])
+assert core.pause_windows(db) == []
+assert without["graded"] > with_pause["graded"], "the work inside it should count again"
+
 print("\nAll pause checks passed.")
 db.close(); shutil.rmtree(tmp)

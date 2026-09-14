@@ -3693,13 +3693,21 @@ long the rest of the school takes to catch up.</p>
     # a resumed pause leaves no mark on the page, and silently drops the lessons
     # and homework that fell inside it - so say so plainly
     cfgx = core.load_config()
-    gaps = []
-    for a, b in (standing.get("pauses") or []):
+    gaps = ""
+    for i, (a, b) in enumerate(standing.get("pauses") or []):
         first = core.local_day(core.parse(a), cfgx)
         last = ("still paused" if b == core.SEASON_OPEN
                 else core.local_day(core.parse(b), cfgx))
-        gaps.append("%s to %s" % (first, last))
-    skipped = (" &middot; <strong>not counting %s</strong>" % E("; ".join(gaps))) if gaps else ""
+        gaps += (f'<li><strong>{E(first)} to {E(last)}</strong> is not counted &mdash; '
+                 f'lessons taught and homework due in that stretch score nothing.'
+                 f'<form method="post" action="/championship/unpause" '
+                 f'onsubmit="return confirm(\'Count {first} to {last} after all? '
+                 f'Everyone\\u2019s score will change.\')">'
+                 f'<input type="hidden" name="i" value="{i}">'
+                 f'<button class="linky">count it after all</button></form></li>')
+    skipped = ""
+    gapbox = (f'<div class="card paused"><strong>Some of the season is being skipped'
+              f'</strong><ul class="attn">{gaps}</ul></div>' if gaps else "")
     if standing["paused"]:
         control = (f'<form method="post" action="/championship/resume">'
                    f'<button>Resume season {standing["season"]}</button></form>')
@@ -3725,6 +3733,7 @@ it, late or never handed in it scores nought, and anything still waiting to be m
 left out until you mark it.</p>
 {top}
 {paused}
+{gapbox}
 <div class="card"><strong>{done} of {total}</strong> students have finished their
 {core.SEASON_LESSONS} lessons{", " + str(settled) + " of them settled" if done else ""}.
 <p class="sub" style="margin:6px 0 0">Homework belongs to the lesson it was set in, not to
@@ -3778,6 +3787,14 @@ def act_close_season(req, db):
 
 def act_pause_season(req, db):
     core.pause_season(db)
+    return redirect("/championship")
+
+
+def act_unpause_span(req, db):
+    """Undo one recorded pause, so that stretch counts again."""
+    i = (req["form"].get("i", [""])[0] or "").strip()
+    if i.isdigit():
+        core.drop_pause(db, int(i))
     return redirect("/championship")
 
 
@@ -4903,6 +4920,7 @@ ROUTES = [
     ("POST", r"^/championship/close$", act_close_season),
     ("POST", r"^/championship/pause$", act_pause_season),
     ("POST", r"^/championship/resume$", act_resume_season),
+    ("POST", r"^/championship/unpause$", act_unpause_span),
     ("GET",  r"^/play$", view_play),
     ("GET",  r"^/play/(\d+)$", view_game_board),
     ("GET",  r"^/play/(\d+)/state\.json$", game_state_json),

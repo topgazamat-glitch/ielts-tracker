@@ -1655,6 +1655,26 @@ def resume_season(db, when=None):
     meta_set(db, "season_paused_at", "")
 
 
+def drop_pause(db, index):
+    """Take back a recorded pause, so what happened inside it counts again.
+
+    A pause is easy to start by accident and, once resumed, used to be
+    invisible: a lesson taught that day stayed on the class's marking page but
+    counted for nobody. Undoing one has to be possible without a developer.
+    """
+    raw = meta_get(db, "season_pauses")
+    done = json.loads(raw) if raw else []
+    if 0 <= index < len(done):
+        done.pop(index)
+        meta_set(db, "season_pauses", json.dumps(done))
+        return True
+    # the open one, if that is the index being pointed at
+    if index == len(done) and is_paused(db):
+        meta_set(db, "season_paused_at", "")
+        return True
+    return False
+
+
 def clear_pauses(db):
     meta_set(db, "season_pauses", "[]")
     meta_set(db, "season_paused_at", "")
