@@ -34,6 +34,12 @@ def login_failed(client):
     LOGIN_ATTEMPTS.setdefault(client, []).append(time.time())
 E = html.escape
 
+# The certificate's foil seal. These are the one place in the app with colours of
+# their own: a certificate is printed and shared outside the site, so it keeps
+# its gold whatever palette the page is wearing. Everything else uses the tokens
+# in static/style.css.
+FOIL = {"light": "#f7e3a1", "mid": "#d8b04a", "deep": "#a97c1c", "edge": "#8a6413"}
+
 
 # ------------------------------------------------------------------ layout
 
@@ -154,7 +160,7 @@ def view_overview(req, db):
             f"{rows}</table></div>"
         )
     else:
-        risk_html = '<div class="card"><p class="sub" style="margin:0">Nobody is flagged. '
+        risk_html = '<div class="card"><p class="sub">Nobody is flagged. '
         risk_html += "Students appear here after two consecutive misses or a falling trend.</p></div>"
 
     body = f"""{today_block(db, pending)}
@@ -165,7 +171,7 @@ def view_overview(req, db):
 def todo(href, headline, detail, urgent=False):
     return (f'<a class="todo{" urgent" if urgent else ""}" href="{href}">'
             f'<div class="todo-head">{headline}</div>'
-            f'<div class="sub" style="margin:2px 0 0">{detail}</div></a>')
+            f'<div class="sub gap-1">{detail}</div></a>')
 
 
 def today_block(db, pending):
@@ -224,7 +230,7 @@ def today_block(db, pending):
                       "Students asked you something")
 
     if not items:
-        return ('<h1>Today</h1><div class="card"><p style="margin:0">'
+        return ('<h1>Today</h1><div class="card"><p>'
                 'Nothing is waiting. Everything is graded and every class is up to '
                 'date.</p></div>')
     return f'<h1>Today</h1><div class="todos">{items}</div>'
@@ -465,12 +471,12 @@ def grade_page(db, sub, regrade=False):
   <div>
     <div class="card">
       <div style="font-weight:600">{E(student["name"])}</div>
-      <div class="sub" style="margin:2px 0 0">{E(group_name(db, student["group_id"]))} &middot;
+      <div class="sub gap-1">{E(group_name(db, student["group_id"]))} &middot;
         {E(assignment["title"]) if assignment else "unassigned"}
         {'<span class="pill risk">late</span>' if sub["late"] else ''}
         {'<span class="pill mute">speaking</span>' if sub["kind"] == "voice" else ''}
         {'<span class="pill mute">resubmission</span>' if sub["improves"] else ''}</div>
-      <div class="sub" style="margin:6px 0 0">{prev}</div>
+      <div class="sub gap-2">{prev}</div>
     </div>
     {grade_form(db, sub, student, assignment, regrade)}
     {previous_panel(db, sub, student)}
@@ -556,7 +562,7 @@ def view_grade_grid(req, db):
 
     head = "<h1>Grade a whole task</h1>"
     if not sets and not loose:
-        return html_response(page("Grade", head + '<div class="card"><p style="margin:0">'
+        return html_response(page("Grade", head + '<div class="card"><p>'
                                   'Nothing waiting.</p></div>', "Grade"))
     warn = ('<div class="card paused">This homework is marked on the four criteria, so it'
             ' needs the one-at-a-time page. <a href="/queue">Open the queue</a>.</div>'
@@ -572,7 +578,7 @@ lot &mdash; no page load between students, and you can see what an eight looks l
 <div class="gradegrid">{cards or '<p class="sub">Nothing waiting for this one.</p>'}</div>
 <div class="markbar" style="margin-top:14px;border:0">
   <button>Save the marked ones</button>
-  <span class="sub" id="gridcount" style="margin:0"></span>
+  <span class="sub" id="gridcount"></span>
 </div></form>"""
     return html_response(page("Grade", body, "Grade"))
 
@@ -620,7 +626,7 @@ def view_queue(req, db):
     if not sub:
         body = f"""<h1>Grading queue</h1>
 {undo_strip(db)}
-<div class="card"><p style="margin:0">Queue is empty. Nothing to grade.</p></div>"""
+<div class="card"><p>Queue is empty. Nothing to grade.</p></div>"""
         return html_response(page("Grade", body, "Grade"))
     return grade_page(db, sub)
 
@@ -716,7 +722,7 @@ def view_groups(req, db):
         cards += f"""<a class="groupcard" href="/groups/{g["id"]}">
   <div class="gc-head">
     <div><div class="gc-name">{E(g["name"])}</div>
-      <div class="sub" style="margin:2px 0 0">{E(level)} · {len(rows)} students</div></div>
+      <div class="sub gap-1">{E(level)} · {len(rows)} students</div></div>
     {ring(comp)}
   </div>
   <div class="gc-figures">
@@ -862,7 +868,7 @@ def group_overview(db, g, period):
 {stat("Average score", fmt(round(sum(avgs) / len(avgs), 2) if avgs else None), "/10")}
 {stat("Lesson mark", fmt(round(sum(marks) / len(marks), 2) if marks else None), "/5")}
 {stat("To grade", waiting)}</div>
-<div class="card"><p style="margin:0">{summary}</p></div>
+<div class="card"><p>{summary}</p></div>
 
 <div class="quicklinks">
   <a class="quick" href="/groups/{g["id"]}?tab=marks">
@@ -1014,11 +1020,11 @@ three separately when someone was late but worked well.</p>
 <input type="hidden" name="day" value="{E(day)}">
 <div class="markbar">{presets}{copy_last}
   <button type="button" class="ghost" id="clearall">Clear</button>
-  <span class="sub" id="markcount" style="margin:0"></span></div>
+  <span class="sub" id="markcount"></span></div>
 <div class="tablewrap"><table id="marks"><tr><th>Student</th>
 <th>How were they?</th><th>Note</th></tr>
 {rows or '<tr><td colspan=3 class="sub">Nobody in this class yet.</td></tr>'}</table></div>
-<div class="inline" style="margin-top:12px">
+<div class="inline gap-3">
 <label class="f">Lesson date<input type="date" name="day2" value="{E(day)}"></label>
 <button>Save marks</button></div></form></div>
 <h2>Lessons recorded</h2>
@@ -1071,11 +1077,11 @@ def group_homework(db, g):
   <form method="post" action="/groups/{g["id"]}/repeat" class="inline">
     <div style="flex:1;min-width:220px">
       <div style="font-weight:600">Set the same homework again</div>
-      <div class="sub" style="margin:2px 0 0">{E(titles)} — last due {E(when)}</div>
+      <div class="sub gap-1">{E(titles)} — last due {E(when)}</div>
     </div>
-    <label class="f" style="margin:0">New deadline
+    <label class="f">New deadline
       <input type="date" name="due" value="{E(core.shift_days(when, 7))}" required></label>
-    <label class="f" style="margin:0">at
+    <label class="f">at
       <input type="time" name="due_time" value="{E(last_time or '23:59')}" step="60"></label>
     <label class="check"><input type="checkbox" name="announce" value="1" checked>
       <span>Tell students</span></label>
@@ -1153,7 +1159,7 @@ def view_student(req, db, sid):
 {hist or '<tr><td colspan=3 class="sub">No assignments yet.</td></tr>'}</table></div>
 <h2>Report for parents</h2>
 <div class="card">
-<p class="sub" style="margin:0 0 8px">A read-only page you can send to a parent:
+<p class="sub gap-0">A read-only page you can send to a parent:
 scores, homework, and how they are in class. No password, and nothing they can change.</p>
 <div style="display:flex;gap:8px">
   <input id="plink2" readonly value="/p/{E(core.parent_token(db, s['id']))}"
@@ -1170,7 +1176,7 @@ function copy2() {{ b2.select(); navigator.clipboard.writeText(b2.value); }}
 </script>
 <h2>Their private link</h2>
 <div class="card">
-<p class="sub" style="margin:0 0 8px">Send this to {E(s["name"])} only. It opens their own
+<p class="sub gap-0">Send this to {E(s["name"])} only. It opens their own
 upload page — no password, and it shows nobody else's work.</p>
 <div style="display:flex;gap:8px">
   <input id="plink" readonly value="/s/{E(core.student_token(db, s['id']))}"
@@ -1179,7 +1185,7 @@ upload page — no password, and it shows nobody else's work.</p>
   <a class="btnlink" target="_blank" rel="noopener"
      href="/s/{E(core.student_token(db, s['id']))}">Open their page</a>
 </div>
-<p class="sub" style="margin:8px 0 0">It opens in a separate window, so this one stays
+<p class="sub gap-2">It opens in a separate window, so this one stays
 where it is &mdash; useful when you are showing the class what they will see.</p></div>
 <script>
 const box = document.getElementById('plink');
@@ -1190,7 +1196,7 @@ function copyLink() {{
 </script>
 <h2>Parent link</h2>
 <div class="card">
-<p class="sub" style="margin:0 0 8px">Optional. A parent who taps this gets a weekly
+<p class="sub gap-0">Optional. A parent who taps this gets a weekly
 summary of {E(s["name"])}'s completion and average — nothing else.</p>
 <input readonly id="klink" value="/start P{E(core.parent_token(db, s['id']))}"
        style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:13px">
@@ -1280,17 +1286,17 @@ def batch_block(db, r, cfg, open_only):
                  f'<button class="linky danger">delete</button></form></td></tr>')
 
     edit = f"""<details><summary>Edit this homework</summary>
-<form method="post" action="/assignments/batch/edit" class="inline" style="margin-top:10px">
+<form method="post" action="/assignments/batch/edit" class="inline gap-3">
 {key}
 <label class="f">New deadline<input type="date" name="new_due" value="{E(day)}"></label>
 <label class="f">at<input type="time" name="new_time" value="{E(clock or "23:59")}" step="60"></label>
-<label class="f" style="justify-content:flex-end">&nbsp;<button>Move the deadline</button></label>
+<label class="f pushed">&nbsp;<button>Move the deadline</button></label>
 </form>
-<p class="sub" style="margin:8px 0 0">Moves every item in this batch. A piece already
+<p class="sub gap-2">Moves every item in this batch. A piece already
 handed in after the old deadline stops counting as late. Leaving a set out of the league
 keeps it on the students' page and keeps your marks &mdash; it simply stops awarding
 points.</p>
-<div class="tablewrap" style="margin-top:10px"><table>
+<div class="tablewrap gap-3"><table>
 <tr><th>Item</th><th>Type</th><th>Sent</th><th></th></tr>{rows}</table></div>
 </details>"""
 
@@ -1324,22 +1330,22 @@ def view_assignments(req, db):
 <option value="task1">Task 1</option></select></label>
 <label class="f">Due<input type="date" name="due"></label>
 <label class="f">at<input type="time" name="due_time" value="23:59" step="60"></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
+<label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
 <input type="checkbox" name="publish" value="1" checked> open to students now</span></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
+<label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
 <input type="checkbox" name="announce" value="1" checked> tell them in Telegram</span></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
+<label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
 <input type="checkbox" name="rubric" value="1"> mark on the four criteria</span></label>
 </div>
 <label class="f">One item per line &mdash; numbering is optional
-<textarea name="items" rows="6" style="width:100%" required
+<textarea name="items" rows="6" class="wide" required
 placeholder="Task 2 essay &ndash; Technology&#10;Grammar handout page 45&#10;Vocabulary unit 4 &ndash; write 10 sentences"></textarea></label>
-<div style="margin-top:10px"><button onclick="this.disabled=true;this.form.submit()">
+<div class="gap-3"><button onclick="this.disabled=true;this.form.submit()">
 Set the homework</button></div></form>
-<p class="sub" style="margin:10px 0 0">One line makes one piece of homework, several lines
+<p class="sub gap-3">One line makes one piece of homework, several lines
 make several &mdash; students pick which one they are sending and each gets its own score.
 Without &ldquo;open to students now&rdquo; it is saved as a draft: nobody sees it until you
 press Publish below.</p></div>
@@ -1348,7 +1354,7 @@ press Publish below.</p></div>
 it. Close, move or delete the whole batch, or open it to deal with a single item.
 {shut} batch(es) closed &mdash;
 <a href="/assignments?closed={0 if show_closed else 1}">{"hide" if show_closed else "show"} them</a>.</p>
-{blocks or '<div class="card"><p style="margin:0" class="sub">Nothing set yet.</p></div>'}"""
+{blocks or '<div class="card"><p class="sub">Nothing set yet.</p></div>'}"""
     return html_response(page("Assignments", body, "Assignments"))
 
 
@@ -1445,7 +1451,7 @@ def view_roster(req, db):
 <input type="hidden" name="group" value="{gid or ''}">
 <input type="hidden" name="show" value="{E(show)}">
 <label class="f">Find<input name="q" id="rq" value="{E(q)}" placeholder="type a name"></label>
-<label class="f" style="justify-content:flex-end">&nbsp;<button class="ghost">Search</button></label>
+<label class="f pushed">&nbsp;<button class="ghost">Search</button></label>
 </form>
 <form method="post" action="/students/bulk" id="bulk"></form>
 <div class="bulkbar" id="bulkbar" hidden>
@@ -1464,9 +1470,9 @@ def view_roster(req, db):
 <div class="card"><form method="post" action="/students/new" class="inline">
 <label class="f">Name<input name="name" required placeholder="For someone not on Telegram"></label>
 <label class="f">Class<select name="group_id">{opts}</select></label>
-<label class="f" style="justify-content:flex-end">&nbsp;<button>Add</button></label>
+<label class="f pushed">&nbsp;<button>Add</button></label>
 </form>
-<p class="sub" style="margin:10px 0 0">They get their own page link straight away. If they
+<p class="sub gap-3">They get their own page link straight away. If they
 join through the bot later, that account links up on its own.</p></div>"""
     return html_response(page("Students", body, "Students"))
 
@@ -1526,16 +1532,16 @@ Words they get wrong come back the next day; words they know come back later and
 <label class="f">Book<input name="source" placeholder="4000 Essential Words 1"></label>
 <label class="f">Unit<input name="unit" placeholder="15" style="width:80px"></label>
 <label class="f">Group<select name="group_id">{opts}</select></label>
-<label class="f" style="justify-content:flex-end">&nbsp;
+<label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)"
  title="Each line carries its own wrong answers instead of borrowing them from other rows">
 <input type="checkbox" name="kind" value="grammar"> grammar questions</span></label></div>
 <label class="f">One per line: <code>word = meaning</code>, or
 <code>word = meaning | example sentence</code> to unlock fill-the-gap.
 For a grammar list: <code>She is ____ than me. = taller | more tall | tallest</code>
-<textarea name="words" rows="8" style="width:100%"
+<textarea name="words" rows="8" class="wide"
 placeholder="abandon = tashlab ketmoq / покидать | They had to abandon the car.&#10;absolute = mutlaq / абсолютный"></textarea></label>
-<div style="margin-top:10px"><button>Create list</button></div></form></div>
+<div class="gap-3"><button>Create list</button></div></form></div>
 <div class="tablewrap"><table><tr><th>List</th><th>Group</th><th>Words</th>
 <th>Practising</th><th>Status</th></tr>
 {rows or '<tr><td colspan=5 class="sub">No word lists yet.</td></tr>'}</table></div>"""
@@ -1567,15 +1573,15 @@ def view_word_list(req, db, wid):
 group answers correctly less than 60% of the time — worth reteaching.</p>
 <div class="card"><form method="post" action="/vocab/{wid}/add" class="inline">
 <label class="f" style="flex:1">Add more words (one per line, <code>word = meaning</code>)
-<textarea name="words" rows="3" style="width:100%"></textarea></label>
+<textarea name="words" rows="3" class="wide"></textarea></label>
 <button>Add</button></form></div>
 <details class="adder"><summary>Replace every word in this list</summary>
 <div class="card"><form method="post" action="/vocab/{wid}/replace">
 <label class="f">One per line, <code>word = meaning</code>, or
 <code>word = meaning | example sentence</code>. What students already know
 about a word is kept as long as the word itself stays on the list.
-<textarea name="words" rows="6" style="width:100%"></textarea></label>
-<div style="margin-top:10px"><button>Replace the list</button></div>
+<textarea name="words" rows="6" class="wide"></textarea></label>
+<div class="gap-3"><button>Replace the list</button></div>
 </form></div></details>
 <div class="tablewrap"><table><tr><th>Word</th><th>Meaning</th><th>Gap mode</th>
 <th>Students who know it</th><th>Group accuracy</th><th></th></tr>
@@ -1785,7 +1791,7 @@ def student_shell(s, db, token, tab, body):
   <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
   <div>
     <div class="name">{E(s["name"])}</div>
-    <div class="sub" style="margin:0">{E(group_name(db, s["group_id"]))}
+    <div class="sub">{E(group_name(db, s["group_id"]))}
       {"· " + E(level) if level else ""}</div>
   </div>
 </div>
@@ -1827,7 +1833,7 @@ def portal_home(db, s, token, flash):
   <div class="pbar"><i style="width:{pct}%"></i></div>
   <ul class="checklist">{rows}</ul></div>"""
     if not lists:
-        lists = '<div class="card"><p style="margin:0">Nothing set at the moment.</p></div>'
+        lists = '<div class="card"><p>Nothing set at the moment.</p></div>'
 
     drafts = ""
     for d in db.execute(
@@ -1863,7 +1869,7 @@ def portal_home(db, s, token, flash):
       <span class="dz-hint">Whole page, from directly above, in good light.
       You can attach several pages at once.</span>
     </label>
-    <div style="margin-top:12px"><button>Send to teacher</button></div>
+    <div class="gap-3"><button>Send to teacher</button></div>
   </form>
 </div>
 {drafts}
@@ -1874,7 +1880,7 @@ def portal_home(db, s, token, flash):
 def portal_materials(db, s, token, query):
     level_id = core.level_of(db, s["group_id"])
     if not level_id:
-        return ('<div class="card"><p style="margin:0">Your class has no level yet. '
+        return ('<div class="card"><p>Your class has no level yet. '
                 'Ask your teacher.</p></div>')
     coll = (query.get("c", [None])[0] or "")
     sect = query.get("s", [None])[0]
@@ -1888,7 +1894,7 @@ def portal_materials(db, s, token, query):
         cards = "".join(
             f'<a class="tile" href="{base}&amp;c={key}">'
             f'<div class="tile-title">{E(core.collection_label(key))}</div>'
-            f'<div class="sub" style="margin:0">{counts.get(key, 0)} files</div></a>'
+            f'<div class="sub">{counts.get(key, 0)} files</div></a>'
             for key in core.COLLECTION_ORDER)
         return f'<h2>Materials</h2><div class="tiles">{cards}</div>'
 
@@ -1903,12 +1909,12 @@ def portal_materials(db, s, token, query):
                 f'<a class="tile small{"" if n in have else " empty"}" '
                 f'href="{base}&amp;c={coll}&amp;u={n}">'
                 f'<div class="tile-title">Test {n}</div>'
-                f'<div class="sub" style="margin:0">'
+                f'<div class="sub">'
                 f'{have[n]} file{"" if have.get(n) == 1 else "s"}</div></a>'
                 if n in have else
                 f'<a class="tile small empty" href="{base}&amp;c={coll}&amp;u={n}">'
                 f'<div class="tile-title">Test {n}</div>'
-                f'<div class="sub" style="margin:0">empty</div></a>'
+                f'<div class="sub">empty</div></a>'
                 for n in core.tests_in_collection(coll))
             return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
         rows = core.files_in_test(db, level_id, coll, unit)
@@ -1917,7 +1923,7 @@ def portal_materials(db, s, token, query):
         crumb += f' › <a class="crumb" href="{base}&amp;c={coll}">Test {unit}</a>'
         if not rows:
             return (f'<p class="sub">{crumb}</p><div class="card">'
-                    f'<p style="margin:0">Nothing here yet.</p></div>')
+                    f'<p>Nothing here yet.</p></div>')
         parts = ""
         for m in rows:
             kind = m["category"] or "File"
@@ -1941,7 +1947,7 @@ def portal_materials(db, s, token, query):
                 cards += (f'<a class="tile" href="{base}&amp;c={coll}'
                           f'&amp;s={names.index(section)}">'
                           f'<div class="tile-title">{E(label)}</div>'
-                          f'<div class="sub" style="margin:0">'
+                          f'<div class="sub">'
                           f'{counts.get(section, 0)} files</div></a>')
         return (f'<p class="sub">{crumb} › Listening audios</p>'
                 f'<div class="tiles">{cards}</div>')
@@ -1955,11 +1961,11 @@ def portal_materials(db, s, token, query):
                 total = counts.get(name, 0) + counts.get("Workbook audios", 0)
                 cards += (f'<a class="tile" href="{base}&amp;c={coll}&amp;audio=1">'
                           f'<div class="tile-title">{E(name)}</div>'
-                          f'<div class="sub" style="margin:0">{total} files</div></a>')
+                          f'<div class="sub">{total} files</div></a>')
                 continue
             cards += (f'<a class="tile" href="{base}&amp;c={coll}&amp;s={i}">'
                       f'<div class="tile-title">{E(name)}</div>'
-                      f'<div class="sub" style="margin:0">'
+                      f'<div class="sub">'
                       f'{counts.get(name, 0)} files</div></a>')
         return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
 
@@ -1978,7 +1984,7 @@ def portal_materials(db, s, token, query):
             f'<a class="tile small{"" if n in units else " empty"}" '
             f'href="{base}&amp;c={coll}&amp;s={sect}&amp;u={n}">'
             f'<div class="tile-title">{"Welcome" if n == 0 else "Unit %d" % n}</div>'
-            f'<div class="sub" style="margin:0">{units.get(n, 0)} files</div></a>'
+            f'<div class="sub">{units.get(n, 0)} files</div></a>'
             for n in numbers)
         return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
 
@@ -1988,7 +1994,7 @@ def portal_materials(db, s, token, query):
     else:
         mats = core.materials_at_level(db, level_id, coll, category)
     if not mats:
-        return f'<p class="sub">{crumb}</p><div class="card"><p style="margin:0">Nothing here yet.</p></div>'
+        return f'<p class="sub">{crumb}</p><div class="card"><p>Nothing here yet.</p></div>'
     parts = []
     for m in mats:
         icon = "&#9834;" if (m["mime"] or "").startswith("audio") else "&#128196;"
@@ -2013,7 +2019,7 @@ def portal_tests(db, s, token, query):
         tests = core.digital_tests(db, level_id, published_only=True)
         done = {a["test_id"]: a for a in core.student_attempts(db, s["id"])}
         if not tests:
-            return ('<h2>Tests</h2><div class="card"><p style="margin:0">'
+            return ('<h2>Tests</h2><div class="card"><p>'
                     'No tests yet. Your teacher will put one here.</p></div>')
         cards = ""
         for t in tests:
@@ -2021,7 +2027,7 @@ def portal_tests(db, s, token, query):
             sub = (f'{a["score"]} of {a["total"]}' if a else "%d questions" % t["n"])
             cards += (f'<a class="tile small" href="{base}&amp;t={t["id"]}">'
                       f'<div class="tile-title">{E(t["title"])}</div>'
-                      f'<div class="sub" style="margin:0">{sub}</div></a>')
+                      f'<div class="sub">{sub}</div></a>')
         past = ""
         for a in core.student_attempts(db, s["id"])[:8]:
             past += (f'<li>{E(a["title"])} &mdash; <strong>{a["score"]}</strong> of '
@@ -2064,7 +2070,7 @@ def portal_tests(db, s, token, query):
 <div class="card champ-hero"><div class="sub">You scored</div>
 <div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
 <div class="card">{rows}</div>
-<p style="margin-top:14px"><a class="tab" href="{base}">Back to the tests</a>
+<p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
 <a class="tab" href="{base}&amp;t={tid}&amp;again=1">Try it again</a></p>"""
 
     core.start_attempt(db, tid, s["id"])
@@ -2085,7 +2091,7 @@ def portal_tests(db, s, token, query):
 {passage}
 <form method="post" action="/s/{E(token)}/test/{tid}">
 <div class="card">{rows}</div>
-<div style="margin-top:12px"><button>Hand it in</button></div>
+<div class="gap-3"><button>Hand it in</button></div>
 </form>"""
 
 
@@ -2124,7 +2130,7 @@ def portal_progress(db, s, token):
             state = '<span class="pill mute">waiting</span>'
         else:
             state = '<span class="pill risk">not sent</span>'
-        hist += f'<tr><td>{E(t["title"])}</td><td style="text-align:right">{state}</td></tr>'
+        hist += f'<tr><td>{E(t["title"])}</td><td class="right">{state}</td></tr>'
     comp = f'{st["completion"]}%' if st["completion"] is not None else "—"
     vocab = ""
     if v["practised"]:
@@ -2216,8 +2222,8 @@ def portal_profile(db, s, token, flash=""):
 
     return f"""{flash}
 <div class="pf-head">{photo}
-  <div><h2 style="margin:0">{E(s["name"])}</h2>
-    <p class="sub" style="margin:2px 0 0">{E(group_name(db, s["group_id"]))}
+  <div><h2>{E(s["name"])}</h2>
+    <p class="sub gap-1">{E(group_name(db, s["group_id"]))}
       &middot; {E(core.level_name(db, core.level_of(db, s["group_id"])) or "")}</p></div>
 </div>
 
@@ -2245,12 +2251,12 @@ def portal_profile(db, s, token, flash=""):
     <label class="f">Phone<input name="phone" type="tel" value="{E(field("phone"))}"
       placeholder="+998 .."></label>
   </div>
-  <label class="f" style="margin-top:10px">About you
+  <label class="f gap-3">About you
     <input name="about" value="{E(field("about"))}"
            placeholder="Why you are learning English"></label>
-  <label class="f" style="margin-top:10px">Your photo
+  <label class="f gap-3">Your photo
     <input type="file" name="photo" accept="image/*"></label>
-  <div style="margin-top:14px"><button>Save</button></div>
+  <div class="gap-4"><button>Save</button></div>
 </form></div></details>"""
 
 
@@ -2296,7 +2302,7 @@ def portal_class(db, s, token, scope="class"):
     champ = core.championship(db)
     if not champ["started"]:
         return f"""<h2>Championship</h2>
-<div class="card"><p style="margin:0">The championship has not started yet.
+<div class="card"><p>The championship has not started yet.
 Your teacher will start it soon.</p></div>
 <h2>Where you are</h2>
 {standing_line(db, s) or '<p class="sub">Nothing marked yet.</p>'}"""
@@ -2329,7 +2335,7 @@ Your teacher will start it soon.</p></div>
         for key, label, weight in core.CHAMPIONSHIP)
 
     frozen = ('<div class="card paused"><strong>The league is paused.</strong>'
-              '<p class="sub" style="margin:6px 0 0">Your teacher has stopped the '
+              '<p class="sub gap-2">Your teacher has stopped the '
               'table for now. Nothing counts towards the championship until it '
               'starts again &mdash; keep working, it will be back.</p></div>'
               if champ["paused"] else "")
@@ -2406,7 +2412,7 @@ def view_parent_report(req, db, token):
             state = '<span class="pill mute">waiting to be marked</span>'
         else:
             state = '<span class="pill risk">not handed in</span>'
-        hist += f'<tr><td>{E(t["title"])}</td><td style="text-align:right">{state}</td></tr>'
+        hist += f'<tr><td>{E(t["title"])}</td><td class="right">{state}</td></tr>'
 
     mark_cards = "".join(
         stat(core.MARK_LABELS[f], fmt(marks[f]), "/5") for f in core.MARK_FIELDS)
@@ -2426,10 +2432,10 @@ def view_parent_report(req, db, token):
     body = f"""<div class="whoami">
   <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
   <div><div class="name">{E(s["name"])}</div>
-    <div class="sub" style="margin:0">{E(group_name(db, s["group_id"]))}
+    <div class="sub">{E(group_name(db, s["group_id"]))}
       {"· " + E(level) if level else ""} · report for parents</div></div>
 </div>
-<div class="card"><p style="margin:0">Overall this student is <strong>{verdict}</strong>:
+<div class="card"><p>Overall this student is <strong>{verdict}</strong>:
 {completion if completion is not None else 0}% of homework handed in,
 an average score of {fmt(st["average"])} out of 10, and
 {fmt(marks["overall"])} out of 5 for how they are in class across
@@ -2441,7 +2447,7 @@ an average score of {fmt(st["average"])} out of 10, and
 <h2>In the classroom</h2>
 <div class="grid">{mark_cards}</div>
 <div class="tablewrap">{"<table>" + recent + "</table>" if recent
-   else '<div class="card"><p style="margin:0" class="sub">No lessons marked yet.</p></div>'}</div>
+   else '<div class="card"><p class="sub">No lessons marked yet.</p></div>'}</div>
 <h2>Homework, piece by piece</h2>
 <div class="card">{charts.score_line(st["timeline"], band=band)}
 <div class="legend"><span><i style="background:var(--accent)"></i>their trend</span>
@@ -2519,11 +2525,12 @@ def portal_goal(db, s, token, flash=""):
       <div class="cert-seal">
         <svg viewBox="0 0 120 120" aria-hidden="true">
           <defs><radialGradient id="foil" cx="35%" cy="30%">
-            <stop offset="0%" stop-color="#f7e3a1"/><stop offset="45%" stop-color="#d8b04a"/>
-            <stop offset="100%" stop-color="#a97c1c"/></radialGradient></defs>
+            <stop offset="0%" stop-color="{FOIL["light"]}"/>
+            <stop offset="45%" stop-color="{FOIL["mid"]}"/>
+            <stop offset="100%" stop-color="{FOIL["deep"]}"/></radialGradient></defs>
           <circle cx="60" cy="60" r="52" fill="url(#foil)"/>
           <circle cx="60" cy="60" r="44" fill="none" stroke="#fff" stroke-opacity=".55"/>
-          <circle cx="60" cy="60" r="52" fill="none" stroke="#8a6413" stroke-width="1.5"/>
+          <circle cx="60" cy="60" r="52" fill="none" stroke="{FOIL["edge"]}" stroke-width="1.5"/>
         </svg>
         <div class="cert-sealtext"><span class="k">Overall</span>
           <span class="v">{overall:g}</span></div>
@@ -2547,7 +2554,7 @@ def portal_goal(db, s, token, flash=""):
   Print or save as PDF</button></div>
 """
     else:
-        card = ('<div class="card"><p style="margin:0">Choose a band for all four '
+        card = ('<div class="card"><p>Choose a band for all four '
                 'sections and your card will appear here.</p></div>')
 
     return f"""{flash}
@@ -2561,9 +2568,9 @@ works it out: a quarter rounds up to the next half band.</p>
   <div class="inline">{"".join(picker(k) for k in core.BAND_SECTIONS)}
     <label class="f">Exam date (optional)<input type="date" name="target_date"
       value="{E(target)}"></label></div>
-  <label class="f" style="margin-top:12px">Your photo (optional)
+  <label class="f gap-3">Your photo (optional)
     <input type="file" name="photo" accept="image/*"></label>
-  <div style="margin-top:12px"><button>Save my goal</button></div>
+  <div class="gap-3"><button>Save my goal</button></div>
 </form></div>"""
 
 
@@ -2801,7 +2808,7 @@ def view_homework(req, db):
 group average {avg}%</p>
 <div class="tablewrap"><table><tr><th>Student</th>{head}<th>Done</th></tr>{body}</table></div>"""
     if not blocks:
-        blocks = ('<div class="card"><p style="margin:0">No open homework. '
+        blocks = ('<div class="card"><p>No open homework. '
                   'Post a list on the Assignments page.</p></div>')
     body = f"""<h1>Homework</h1>
 <p class="sub">A tick means the student has sent something for that item. Rows are
@@ -2845,13 +2852,13 @@ def rating_table(db, rows, show_group=False):
     cols = 12 if show_group else 11
     return (f'<div class="tablewrap"><table><tr>{head}</tr>{body_rows}'
             f'</table></div>' if body_rows else
-            f'<div class="card"><p class="sub" style="margin:0">Nobody here yet.</p></div>')
+            f'<div class="card"><p class="sub">Nobody here yet.</p></div>')
 
 
 def improved_table(db, rows):
     """Ranked on gain alone - the one table a weaker student can win."""
     if not rows:
-        return ('<div class="card"><p class="sub" style="margin:0">Nothing to compare '
+        return ('<div class="card"><p class="sub">Nothing to compare '
                 'yet. It needs a student who went up, with at least two graded pieces '
                 'this month and two the month before.</p></div>')
     out = ""
@@ -2886,7 +2893,7 @@ def attention_block(db, rows):
             slipping.append((r["gain"], st, r))
     if not stopped and not slipping:
         return ('<div class="card good"><strong>Nobody is behind.</strong>'
-                '<p class="sub" style="margin:6px 0 0">No student has missed two '
+                '<p class="sub gap-2">No student has missed two '
                 'pieces or dropped half a mark.</p></div>')
     out = ""
     if stopped:
@@ -3035,12 +3042,12 @@ the <code>transfer.json</code> it produces.</p>
 <div class="card"><form method="post" action="/import" enctype="multipart/form-data">
 <input type="file" name="file" accept=".json,application/json" required
        style="width:100%;padding:14px;border:1px dashed var(--line)">
-<div style="margin-top:12px"><button>Import</button></div></form>
-<p class="sub" style="margin:10px 0 0">This merges rather than replaces. Anything
+<div class="gap-3"><button>Import</button></div></form>
+<p class="sub gap-3">This merges rather than replaces. Anything
 already here is matched and left alone, so importing the same file twice changes
 nothing.</p></div>
 <h2>Download a backup</h2>
-<div class="card"><p class="sub" style="margin:0 0 8px">Everything in one file:
+<div class="card"><p class="sub gap-0">Everything in one file:
 students, homework, submissions, scores and the photographs themselves. Keep a copy
 somewhere of your own — it is the file this page accepts back.</p>
 <a href="/backup.json"><button type="button">Download backup</button></a></div>
@@ -3167,15 +3174,15 @@ Code <span class="kbd">{E(g["code"])}</span></p>
 <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;align-items:center">
   <button onclick="step()" id="go">Start</button>
   <button class="ghost" onclick="toggleAuto()" id="autobtn">Auto: on</button>
-  <label class="sub" style="margin:0">Table for
+  <label class="sub">Table for
     <select id="showfor" onchange="setShowFor(this.value)">
       <option value="3">3s</option><option value="5" selected>5s</option>
       <option value="8">8s</option><option value="10">10s</option>
     </select></label>
-  <label class="sub" style="margin:0">Start at
+  <label class="sub">Start at
     <input id="minplayers" type="number" min="1" max="40" value="2"
            style="width:56px" onchange="setMin(this.value)"> in the room</label>
-  <span class="sub" id="autonote" style="margin:0"></span>
+  <span class="sub" id="autonote"></span>
   <button class="ghost" onclick="if(confirm('End this game?'))location.href='/play/{g["id"]}/end'">End game</button>
 </div>
 <script>
@@ -3303,7 +3310,7 @@ function board(rows, from) {{
   if (!rows.length) return '';
   from = from || 1;
   return '<div class="tablewrap"><table><tr><th>#</th><th></th><th>Student</th>' +
-    '<th></th><th>Right</th><th style="text-align:right">Points</th></tr>' +
+    '<th></th><th>Right</th><th class="right">Points</th></tr>' +
     rows.map((r, i) => {{
       const d = r.delta > 0 ? '<span class="gup">&uarr;' + r.delta + '</span>'
               : r.delta < 0 ? '<span class="gdown">&darr;' + (-r.delta) + '</span>' : '';
@@ -3311,7 +3318,7 @@ function board(rows, from) {{
         '</td><td>' + esc(r.name) + (r.run >= 2 ?
           ' <span class="grunmini">' + r.run + '🔥</span>' : '') +
         '</td><td>' + d + '</td><td>' + r.correct +
-        '</td><td style="text-align:right"><strong>' + r.score + '</strong></td></tr>';
+        '</td><td class="right"><strong>' + r.score + '</strong></td></tr>';
     }}).join('') + '</table></div>';
 }}
 function podium(rows) {{
@@ -3669,7 +3676,7 @@ not for a calendar month. A class that meets thirteen times and a class that mee
 are then judged over exactly the same amount of teaching. A student's season closes on
 their {core.SEASON_LESSONS}th recorded lesson and their score is frozen there, however
 long the rest of the school takes to catch up.</p>
-<form method="post" action="/championship/start" style="margin-top:14px">
+<form method="post" action="/championship/start" class="gap-4">
 <button>Start season {standing["season"]}</button></form></div>
 {history}"""
         return html_response(page("Championship", body_html, "League"))
@@ -3730,12 +3737,12 @@ long the rest of the school takes to catch up.</p>
         control = (f'<form method="post" action="/championship/resume">'
                    f'<button>Resume season {standing["season"]}</button></form>')
         paused = (f'<div class="card paused"><strong>The league is paused.</strong>'
-                  f'<p class="sub" style="margin:6px 0 0">Paused since '
+                  f'<p class="sub gap-2">Paused since '
                   f'{E(standing["paused_at"][:10])}. Nothing counts while it is off: '
                   f'homework marked now, lessons taught now and words learnt now all '
                   f'stay out of the season, and nobody\'s lesson count moves. The table '
                   f'below is frozen exactly as it stood.</p>'
-                  f'<div style="margin-top:12px">{control}</div></div>')
+                  f'<div class="gap-3">{control}</div></div>')
     else:
         paused = ""
         control = (f'<form method="post" action="/championship/pause">'
@@ -3757,11 +3764,11 @@ marked is left out until you mark it.</p>
 {gapbox}
 <div class="card"><strong>{done} of {total}</strong> students have finished their
 {core.SEASON_LESSONS} lessons{", " + str(settled) + " of them settled" if done else ""}.
-<p class="sub" style="margin:6px 0 0">Homework belongs to the lesson it was set in, not to
+<p class="sub gap-2">Homework belongs to the lesson it was set in, not to
 the day it is due, so the last pieces of a season fall due after the lessons are over. A
 student is marked <span class="pill watch">provisional</span> until every one of them has
 come due and been marked.</p>
-<p class="sub" style="margin:6px 0 0">A student's lesson count only moves when you record
+<p class="sub gap-2">A student's lesson count only moves when you record
 their marks for that day, so the season advances at the speed you record it. Close the
 season when enough of them have finished: the table is written into the record book with
 the winner's name, and the next season starts clear from that moment.</p>
@@ -3782,11 +3789,11 @@ the line for now.</p>
 {body or '<tr><td colspan=11 class="sub">Nobody yet.</td></tr>'}</table></div>
 <h2>How the points work</h2>
 <div class="card"><ul class="rules">{rules}</ul>
-<p class="sub" style="margin:10px 0 0"><strong>Each time, not in total.</strong> A set of
+<p class="sub gap-3"><strong>Each time, not in total.</strong> A set of
 homework marked 10, 8 and 7 averages 8.3, which is 2.5 of the 3 it was worth. The next set
 marked 10, 9 and 8 averages 9, which is 2.7. That student now has 5.2 for homework, and it
 keeps climbing all season.</p>
-<p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten, scaled to
+<p class="sub gap-3">Homework is the average mark out of ten, scaled to
 3; a piece handed in after its deadline is a nought in that average. Words count up to
 {core.VOCAB_TARGET}. In the lesson is the average of punctuality, behaviour and taking
 part, and each lesson is worth up to five. Both add up across the season rather than
@@ -3867,7 +3874,7 @@ def crumbs(db, level_id, coll, cat, unit, base):
 def tile(href, title, sub, small=False, empty=False):
     return (f'<a class="tile{" small" if small else ""}{" empty" if empty else ""}"'
             f' href="{href}"><div class="tile-title">{title}</div>'
-            f'<div class="sub" style="margin:0">{sub}</div></a>')
+            f'<div class="sub">{sub}</div></a>')
 
 
 def unit_files(db, level_id, coll, cat, unit):
@@ -3929,7 +3936,7 @@ def test_files(db, level_id, coll, unit, base):
     order = {name: i for i, name in enumerate(core.sections(coll))}
     rows = sorted(rows, key=lambda m: (order.get(m["category"], 99), m["title"]))
     if not rows:
-        body = ('<div class="card"><p style="margin:0" class="sub">Nothing here yet.'
+        body = ('<div class="card"><p class="sub">Nothing here yet.'
                 '</p></div>')
     else:
         items = ""
@@ -3980,7 +3987,7 @@ def material_hits(db, q, level_id):
 
 def material_table(db, mats, head):
     if not mats:
-        return head + ('<div class="card"><p style="margin:0">Nothing here yet.</p></div>')
+        return head + ('<div class="card"><p>Nothing here yet.</p></div>')
     rows = ""
     for m in mats:
         scope = core.level_name(db, m["level_id"]) or "All levels"
@@ -3990,7 +3997,7 @@ def material_table(db, mats, head):
             scope += " · " + core.book_label(m["book"])
         if m["group_id"]:
             scope += " · " + group_name(db, m["group_id"])
-        note = (f'<div class="sub" style="margin:2px 0 0">{E(m["note"])}</div>'
+        note = (f'<div class="sub gap-1">{E(m["note"])}</div>'
                 if m["note"] else "")
         rows += (f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
                  f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
@@ -4084,7 +4091,7 @@ walk through in the bot.</p>
 <label class="f">Book<select name="book">{bopts}</select></label>
 </div>
 <label class="f" style="margin-bottom:12px">Note (optional)
-<input name="note" placeholder="Read before Monday" style="width:100%"></label>
+<input name="note" placeholder="Read before Monday" class="wide"></label>
 <label class="dropzone">
   <input type="file" name="file" required
          onchange="this.closest('.dropzone').classList.add('has');
@@ -4093,7 +4100,7 @@ walk through in the bot.</p>
   <span class="dz-hint">PDF, Word, PowerPoint, images, audio or video. Up to 45 MB —
   Telegram's limit for what a bot can send.</span>
 </label>
-<div style="margin-top:12px"><button>Upload</button></div></form></div>
+<div class="gap-3"><button>Upload</button></div></form></div>
 </details>"""
     return html_response(page("Materials", body, "Materials"))
 
@@ -4203,9 +4210,9 @@ published until every answer has been set.</p>
 <div class="card"><form method="post" action="/tests/new" enctype="multipart/form-data"
  class="inline">
 <label class="f">File<input type="file" name="file" accept=".json,application/json" required></label>
-<label class="f" style="justify-content:flex-end">&nbsp;<button>Load it</button></label>
+<label class="f pushed">&nbsp;<button>Load it</button></label>
 </form>
-<p class="sub" style="margin:10px 0 0">Made with
+<p class="sub gap-3">Made with
 <span class="kbd">python3 import_tests.py "full book 1.docx" --test 1</span>, which reads
 the Reading section out of the book. Load the file it writes here.</p></div>"""
     return html_response(page("Digital tests", body, "Tests"))
@@ -4252,7 +4259,7 @@ def view_test(req, db, tid):
                f'<button>{"Unpublish" if t["published"] else "Publish to students"}'
                f'</button></form>')
     else:
-        pub = ('<p class="sub" style="margin:0">Set every answer before publishing.</p>')
+        pub = ('<p class="sub">Set every answer before publishing.</p>')
 
     body = f"""<h1>{E(t["title"])}</h1>
 <p class="sub">{len(qs)} questions &middot;
@@ -4266,7 +4273,7 @@ def view_test(req, db, tid):
  onsubmit="return confirm('Delete this test and everything students scored on it?')">
 <button class="ghost danger">Delete</button></form></div>
 </form>
-<div class="card" style="margin-top:14px">{pub}</div>
+<div class="card gap-4">{pub}</div>
 {results}"""
     return html_response(page(t["title"], body, "Tests"))
 
@@ -4337,10 +4344,10 @@ def view_music(req, db):
         current = f"""<div class="card">
 <div class="sub">Playing on {E(day)}{" (today)" if day == today else ""}</div>
 <h2 style="margin:4px 0 10px">{name}{by}</h2>
-<audio controls preload="none" style="width:100%" src="/song/{E(day)}"></audio>
-<p class="sub" style="margin:10px 0 0">{song["bytes"] / 1024.0 / 1024.0:.1f} MB
+<audio controls preload="none" class="wide" src="/song/{E(day)}"></audio>
+<p class="sub gap-3">{song["bytes"] / 1024.0 / 1024.0:.1f} MB
 &middot; uploaded {E(song["created_at"][:16].replace("T", " "))}</p>
-<form method="post" action="/music/delete" style="margin-top:10px"
+<form method="post" action="/music/delete" class="gap-3"
  onsubmit="return confirm('Remove the song for {E(day)}?')">
 <input type="hidden" name="day" value="{E(day)}">
 <button class="ghost danger">Remove this song</button></form></div>"""
@@ -4381,9 +4388,9 @@ remembered per person, so anyone who wants silence keeps silence.</p>
 <input name="title" maxlength="120" placeholder="Shown to the students"></label>
 <label>Artist <span class="sub">(optional)</span>
 <input name="artist" maxlength="120"></label>
-<div style="margin-top:12px"><button>Set the song</button></div>
+<div class="gap-3"><button>Set the song</button></div>
 </form>
-<p class="sub" style="margin:12px 0 0">mp3, m4a, ogg, wav or flac, up to 20 MB. Setting a
+<p class="sub gap-3">mp3, m4a, ogg, wav or flac, up to 20 MB. Setting a
 song for a day that already has one replaces it. Works from a phone: the file picker
 opens your music or your downloads.</p></div>
 <h2>Recent days</h2>

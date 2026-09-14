@@ -43,6 +43,7 @@ site or the real database, and they can run in any order.
 | `marks_test` | marking a lesson is taps, presets and last lesson's marks |
 | `gridgrade_test` | a whole task marked on one page, halves and notes included |
 | `inleague_test` | a set of homework can be marked without scoring |
+| `design_test` | spacing, type and colour stay a system, not a pile of patches |
 | `accumulate_test` | points are awarded per fixture and add up |
 
 ## Writing another
