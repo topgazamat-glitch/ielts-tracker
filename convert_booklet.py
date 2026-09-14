@@ -149,12 +149,36 @@ def build(booklet, key, title, level, number):
             "passages": {}, "questions": questions}, skipped
 
 
+# The booklets are filed by level and named with a level letter - "E09AC",
+# "I06.1", "P01BD" - so the level should not have to be typed in and got wrong
+# on all thirty of them.
+FOLDER_LEVELS = [
+    ("pre-intermediate", "Pre-Intermediate"),
+    ("intermediate", "Intermediate"),
+    ("elementary", "Elementary"),
+    ("beginner", "Beginner"),
+]
+PREFIX_LEVELS = {"E": "Elementary", "U": "Elementary", "I": "Intermediate",
+                 "P": "Pre-Intermediate", "B": "Beginner"}
+
+
+def guess_level(path):
+    """The folder it sits in first, then the letter it starts with."""
+    low = os.path.abspath(os.path.expanduser(path)).lower()
+    for needle, level in FOLDER_LEVELS:
+        if needle in low:
+            return level
+    first = os.path.basename(path)[:1].upper()
+    return PREFIX_LEVELS.get(first)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("booklet")
     ap.add_argument("key")
     ap.add_argument("--title", default="")
-    ap.add_argument("--level", default="Pre-Intermediate")
+    ap.add_argument("--level", default="",
+                    help="normally worked out from the folder and the filename")
     ap.add_argument("--number", type=int, default=1)
     ap.add_argument("--out", default="")
     args = ap.parse_args()
@@ -163,7 +187,13 @@ def main():
     key = read_key(args.key)
     print("booklet: %d labelled exercises | key: %d" % (len(booklet), len(key)))
     title = args.title or os.path.basename(args.booklet).split("—")[0].strip()
-    data, skipped = build(booklet, key, title, args.level, args.number)
+    level = args.level or guess_level(args.booklet)
+    if not level:
+        sys.exit("Could not tell the level from the name or the folder - "
+                 "pass --level \"Elementary\" (or Pre-Intermediate, "
+                 "Intermediate, Beginner).")
+    print("level: %s%s" % (level, "" if args.level else " (from the folder)"))
+    data, skipped = build(booklet, key, title, level, args.number)
     kinds = {}
     for q in data["questions"]:
         kinds[q["kind"]] = kinds.get(q["kind"], 0) + 1
