@@ -21,6 +21,7 @@ import zipfile
 
 LABEL = re.compile(r"^(\d+\.\d+)\s+(.*)$")
 NUMBERED = re.compile(r"^(\d+)\s+(.*)$")
+NEXT_LABEL = re.compile(r"\s\d+\.\d+\s")
 OPTIONS = re.compile(r"\s([A-D])\s+(?=\S)")
 
 
@@ -47,7 +48,10 @@ def read_key(path):
         for part in m.group(2).split("·"):
             n = NUMBERED.match(part.strip())
             if n:
-                answers[int(n.group(1))] = n.group(2).strip()
+                # a key line sometimes runs straight into the next exercise -
+                # "lose. 1.8 1 para 5" - and without this the full stop and
+                # everything after it became part of the answer
+                answers[int(n.group(1))] = NEXT_LABEL.split(n.group(2))[0].strip()
         if answers:
             keys[m.group(1)] = answers
     return keys
@@ -100,6 +104,41 @@ def tidy_answer(want):
     return want.strip(" .·")
 
 
+GAP = re.compile(r"[\u2026.]{3,}")
+
+
+def typeable(want, why=False, prompt=""):
+    """Could a student sitting at a keyboard produce exactly this?
+
+    Everything here was found by marking a converted test with its own answer
+    key and watching questions come back wrong. An answer the key itself
+    cannot match is worse than no question: the student is right and the
+    screen says otherwise.
+    """
+    if len(want) > 60 or "\u2026" in want or "\u00b7" in want:
+        return "answer too long to mark" if why else False
+    if want.endswith("?"):
+        # the key holds the question the student was meant to write
+        return "answer is a question to write" if why else False
+    if want.startswith("\u2014") or " except " in want:
+        return "answer is a note to the teacher" if why else False
+    if len(want.split()) > 6:
+        return "answer is a whole sentence" if why else False
+    if "/" in want:
+        parts = [p.strip() for p in want.split("/")]
+        if any("," in p or len(p.split()) > 3 for p in parts):
+            # "was / were, would definitely do" is two gaps, not two choices,
+            # and the marker reads a slash as "either of these will do"
+            return "two answers in one box" if why else False
+        # The same slash means two different things. In "have/need" it offers
+        # the student a choice; in "beat / won", against a sentence with two
+        # gaps, it is the answer to each of them in turn. The prompt settles
+        # it: two gaps, or a sentence that already shows the choices.
+        if len(GAP.findall(prompt)) >= 2 or "/" in prompt:
+            return "two answers in one box" if why else False
+    return False if why else True
+
+
 def build(booklet, key, title, level, number):
     questions, n = [], 0
     skipped = []
@@ -137,13 +176,17 @@ def build(booklet, key, title, level, number):
                 n -= 1
                 skipped.append((label, instruction, "matching - needs its list"))
                 break
-            elif len(want) <= 60 and "…" not in want and "·" not in want:
+            elif not typeable(want, prompt=prompt):
+                # one unmarkable answer is not a reason to throw away the
+                # other nine questions in the exercise - drop just this one
+                n -= 1
+                why = typeable(want, why=True, prompt=prompt)
+                if (label, instruction, why) not in skipped:
+                    skipped.append((label, instruction, why))
+                continue
+            else:
                 q["kind"] = "typed"
                 q["options"] = []
-            else:
-                n -= 1
-                skipped.append((label, instruction, "answer too long to mark"))
-                break
             questions.append(q)
     return {"level": level, "number": number, "title": title,
             "passages": {}, "questions": questions}, skipped
