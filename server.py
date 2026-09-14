@@ -1225,9 +1225,13 @@ def batch_block(db, r, cfg, open_only):
     got, total = core.set_received(db, gid, due)
     graded = core.set_graded_count(db, gid, due)
 
+    counts = all(a["in_league"] for a in items)
     state = ('<span class="pill mute">closed</span>' if closed
              else '<span class="pill mute">draft</span>' if draft
              else '<span class="pill">open</span>')
+    if not counts:
+        state += ' <span class="pill mute">not in the league</span>'
+
     if r["shut"] != r["shutmax"] or (not draft and r["pub"] != r["pubmax"]):
         state += ' <span class="pill mute">mixed</span>'
 
@@ -1245,6 +1249,8 @@ def batch_block(db, r, cfg, open_only):
         buttons += form("open", "Reopen all")
     else:
         buttons += form("close", "Close all")
+    buttons += form("league", "Count in the league" if not counts
+                    else "Leave out of the league")
     warn = ("Delete all %d item(s)? %d marked piece(s) stay with the student "
             "and keep their score - they just stop being linked to this homework."
             % (len(items), graded)) if graded else \
@@ -1281,7 +1287,9 @@ def batch_block(db, r, cfg, open_only):
 <label class="f" style="justify-content:flex-end">&nbsp;<button>Move the deadline</button></label>
 </form>
 <p class="sub" style="margin:8px 0 0">Moves every item in this batch. A piece already
-handed in after the old deadline stops counting as late.</p>
+handed in after the old deadline stops counting as late. Leaving a set out of the league
+keeps it on the students' page and keeps your marks &mdash; it simply stops awarding
+points.</p>
 <div class="tablewrap" style="margin-top:10px"><table>
 <tr><th>Item</th><th>Type</th><th>Sent</th><th></th></tr>{rows}</table></div>
 </details>"""
@@ -4717,6 +4725,14 @@ def act_batch_delete(req, db):
     return redirect("/assignments")
 
 
+def act_batch_league(req, db):
+    """Count a set of homework in the league, or stop counting it."""
+    gid, due, items = _batch_of(req, db)
+    if items:
+        core.set_in_league(db, gid, due, not all(a["in_league"] for a in items))
+    return redirect("/assignments")
+
+
 def act_batch_edit(req, db):
     """Move the deadline for every item that was set together."""
     gid, due, items = _batch_of(req, db)
@@ -4950,6 +4966,7 @@ ROUTES = [
     ("POST", r"^/assignments/batch/publish$", act_batch_publish),
     ("POST", r"^/assignments/batch/delete$", act_batch_delete),
     ("POST", r"^/assignments/batch/edit$", act_batch_edit),
+    ("POST", r"^/assignments/batch/league$", act_batch_league),
     ("POST", r"^/assignments/(\d+)/close$", act_close_assignment),
     ("POST", r"^/assignments/(\d+)/open$", act_open_assignment),
     ("POST", r"^/assignments/(\d+)/edit$", act_edit_assignment),

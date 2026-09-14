@@ -42,6 +42,8 @@ site or the real database, and they can run in any order.
 | `peek_test` | a student's page opens beside the teacher's, not on top of it |
 | `marks_test` | marking a lesson is taps, presets and last lesson's marks |
 | `gridgrade_test` | a whole task marked on one page, halves and notes included |
+| `inleague_test` | a set of homework can be marked without scoring |
+| `accumulate_test` | points are awarded per fixture and add up |
 
 ## Writing another
 

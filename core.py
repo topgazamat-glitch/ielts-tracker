@@ -228,7 +228,8 @@ CREATE TABLE IF NOT EXISTS assignments (
     due_at TEXT,
     created_at TEXT NOT NULL,
     closed INTEGER NOT NULL DEFAULT 0,
-    published INTEGER NOT NULL DEFAULT 0
+    published INTEGER NOT NULL DEFAULT 0,
+    in_league INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -373,6 +374,11 @@ def migrate(db):
         db.execute("ALTER TABLE dquestions ADD COLUMN image TEXT")
 
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
+    if "in_league" not in acols:
+        # homework can be set, marked and seen by students without counting
+        # towards the league - a leftover set, or one that was only practice
+        db.execute("ALTER TABLE assignments ADD COLUMN in_league"
+                   " INTEGER NOT NULL DEFAULT 1")
     if "rubric" not in acols:
         # marked on the four criteria rather than one number
         db.execute("ALTER TABLE assignments ADD COLUMN rubric INTEGER NOT NULL DEFAULT 0")
@@ -1183,6 +1189,17 @@ def set_items(db, group_id, due_at):
         (group_id, due_at)).fetchall()
 
 
+def set_in_league(db, group_id, due_at, on):
+    """Count a whole set of homework in the league, or stop counting it."""
+    if due_at is None:
+        db.execute("UPDATE assignments SET in_league=? WHERE group_id=? AND due_at IS NULL",
+                   (1 if on else 0, group_id))
+    else:
+        db.execute("UPDATE assignments SET in_league=? WHERE group_id=? AND due_at=?",
+                   (1 if on else 0, group_id, due_at))
+    db.commit()
+
+
 def set_received(db, group_id, due_at):
     """How many students in the class have sent something for this batch."""
     items = set_items(db, group_id, due_at)
@@ -1787,6 +1804,7 @@ def homework_marks(db, student, lo, hi, windows):
     # the homework was written
     was_set = db.execute(
         "SELECT id, due_at FROM assignments WHERE group_id=? AND published=1"
+        " AND in_league=1"
         " AND created_at < ? AND (created_at >= ? OR (due_at IS NOT NULL AND due_at >= ?))"
         " ORDER BY due_at IS NULL, due_at",
         (student["group_id"], hi, lo, lo)).fetchall()
