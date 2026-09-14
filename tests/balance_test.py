@@ -72,9 +72,10 @@ print("  the last two count as missed:", r["not_handed"] == 2)
 assert r["not_handed"] == 2, r["not_handed"]
 print("  all 15 are in the average  :", r["graded"] == 15)
 assert r["graded"] == 15
-avg = (13 * 8 + 0 + 0) / 15.0
-print("  average is (13x8 + 0 + 0)/15 = %.2f/10 -> %.2f of 3" % (avg, avg / 10 * 3))
-assert abs(r["points"]["homework"] - round(avg / 10 * 3, 2)) < 0.02
+# fifteen separate fixtures: thirteen marked 8 (2.4 each), two missed (0)
+want = 13 * (8 / 10.0 * 3)
+print("  thirteen at 8 -> 2.4 each, two missed -> 0:  %.2f" % want)
+assert abs(r["points"]["homework"] - round(want, 2)) < 0.05
 
 print("\nAnd a piece not yet due is left out, not counted as missed:")
 d = lesson_days[-1]

@@ -45,7 +45,8 @@ def lessons(sid, n, mark=5):
 
 print("1. WORDS NO LONGER SCORE")
 print("   components:", [(k, w) for k, _l, w in core.CHAMPIONSHIP])
-print("   the most anyone can reach:", core.CHAMPIONSHIP_MAX)
+print("   worth per fixture: homework %g, lesson %g"
+      % (core.HOMEWORK_PER_SET, core.CONDUCT_PER_LESSON))
 assert [k for k, _l, _w in core.CHAMPIONSHIP] == ["homework", "conduct"]
 assert core.CHAMPIONSHIP_MAX == 5.0
 
@@ -58,11 +59,13 @@ rows = {r["student"]["name"]: r for r in core.championship(db)["rows"]}
 last = -1
 for n in (1, 2, 5, 15):
     r = rows["Lessons %d" % n]
-    print("   %-2d lesson(s) at 5/5/5 -> in the lesson %s of 2" % (n, r["points"]["conduct"]))
+    print("   %-2d lesson(s) at 5/5/5 -> in the lesson %s" % (n, r["points"]["conduct"]))
     assert r["points"]["conduct"] > last
     last = r["points"]["conduct"]
-print("   fifteen lessons is full marks:", rows["Lessons 15"]["points"]["conduct"] == 2.0)
-assert rows["Lessons 15"]["points"]["conduct"] == 2.0
+# a lesson at five out of five is two points, every time
+print("   fifteen lessons at 5/5/5 -> %s  (15 x 2)" % rows["Lessons 15"]["points"]["conduct"])
+assert rows["Lessons 15"]["points"]["conduct"] == 30.0
+assert rows["Lessons 1"]["points"]["conduct"] == 2.0
 
 print("\n3. MORE HOMEWORK, MORE POINTS")
 for n in (1, 3, 8, 15):
@@ -75,11 +78,13 @@ rows = {r["student"]["name"]: r for r in core.championship(db)["rows"]}
 last = -1
 for n in (1, 3, 8, 15):
     r = rows["HW %d" % n]
-    print("   %-2d piece(s) at 10/10 -> homework %s of 3" % (n, r["points"]["homework"]))
+    print("   %-2d piece(s) at 10/10 -> homework %s" % (n, r["points"]["homework"]))
     assert r["points"]["homework"] > last
     last = r["points"]["homework"]
-print("   fifteen at ten is full marks:", rows["HW 15"]["points"]["homework"] == 3.0)
-assert rows["HW 15"]["points"]["homework"] == 3.0
+# each piece was set on its own day, so each is a fixture worth 3
+print("   fifteen pieces at 10 -> %s  (15 x 3)" % rows["HW 15"]["points"]["homework"])
+assert rows["HW 15"]["points"]["homework"] == 45.0
+assert rows["HW 1"]["points"]["homework"] == 3.0
 
 print("\n4. QUALITY STILL MATTERS")
 good = student("All tens"); lessons(good, 3)
@@ -93,7 +98,7 @@ print("   ten pieces at 10 -> %s | ten pieces at 6 -> %s"
       % (rows["All tens"]["points"]["homework"], rows["All sixes"]["points"]["homework"]))
 assert rows["All tens"]["points"]["homework"] > rows["All sixes"]["points"]["homework"]
 
-print("\n5. NOTHING CAN EXCEED ITS SHARE")
+print("\n5. THE TOTAL IS THE TWO ADDED TOGETHER, WITH NO CEILING")
 extra = student("Overachiever"); lessons(extra, 3)
 for i in range(core.SEASON_LESSONS):
     hand(extra, i, 10)
@@ -101,6 +106,7 @@ db.commit()
 r = {x["student"]["name"]: x for x in core.championship(db)["rows"]}["Overachiever"]
 print("   fifteen tens and three lessons -> homework %s, in the lesson %s, total %s"
       % (r["points"]["homework"], r["points"]["conduct"], r["total"]))
-assert r["points"]["homework"] == 3.0 and r["total"] <= core.CHAMPIONSHIP_MAX
+assert r["points"]["homework"] == 45.0
+assert r["total"] == round(r["points"]["homework"] + r["points"]["conduct"], 2)
 db.close(); shutil.rmtree(tmp)
 print("\nPoints add up now.")

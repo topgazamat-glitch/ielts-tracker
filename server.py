@@ -2246,7 +2246,7 @@ def portal_profile(db, s, token, flash=""):
 </form></div></details>"""
 
 
-def portal_champ_row(db, r, me_id, show_group=True):
+def portal_champ_row(db, r, me_id, show_group=True, tops=None):
     """One line of the league as a student sees it.
 
     The same table the teacher sees, minus the links into the teacher's pages:
@@ -2260,7 +2260,8 @@ def portal_champ_row(db, r, me_id, show_group=True):
     bars = ""
     for key, label, weight in core.CHAMPIONSHIP:
         got = r["points"].get(key, 0)
-        share = got / weight * 100.0 if weight else 0
+        best = (tops or {}).get(key) or 0
+        share = (got / best * 100.0) if best else 0
         bars += (f'<td class="cpt"><span class="cbar"><i style="width:'
                  f'{min(100, share):.0f}%"></i></span>{got:g}</td>')
     of = core.SEASON_LESSONS
@@ -2305,15 +2306,17 @@ Your teacher will start it soon.</p></div>
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(rank if rank < 20 else rank % 10, "th")
         where = "in your class" if scope == "class" else "in the school"
         standing = (f'You are <strong>{rank}{suffix}</strong> {where} with '
-                    f'<strong>{here["total"]:g}</strong> of {core.CHAMPIONSHIP_MAX:g} points')
+                    f'<strong>{here["total"]:g}</strong> points')
     else:
         standing = (f'Your first {core.MIN_GRADED} deadlines have to pass before '
                     f'you enter. {here["graded"]} so far')
 
+    best = {k: max([r["points"].get(k) or 0 for r in champ["rows"]] or [0])
+            for k, _l, _w in core.CHAMPIONSHIP}
     parts = "".join(
         f'<div class="cp"><span>{E(label)}</span>'
         f'<span class="cbar"><i style="width:'
-        f'{min(100, (mine["points"].get(key, 0) / float(weight) * 100)):.0f}%"></i></span>'
+        f'{min(100, (mine["points"].get(key, 0) / float(best.get(key) or 1) * 100)):.0f}%"></i></span>'
         f'<b>{mine["points"].get(key, 0):g}</b></div>'
         for key, label, weight in core.CHAMPIONSHIP)
 
@@ -2336,9 +2339,9 @@ Your teacher will start it soon.</p></div>
                 f'{E(label)}</a>')
     tabs = f'<div class="tabs">{tab("class", "My class")}{tab("school", "Whole school")}</div>'
 
-    rows = "".join(portal_champ_row(db, r, s["id"], show_group=scope == "school")
-                   for r in shown["rows"])
-    chead = "".join(f'<th title="up to {w:g} points">{E(l)}</th>'
+    rows = "".join(portal_champ_row(db, r, s["id"], show_group=scope == "school",
+                                    tops=best) for r in shown["rows"])
+    chead = "".join(f'<th title="up to {w:g} points each time">{E(l)}</th>'
                     for _k, l, w in core.CHAMPIONSHIP)
     waiting = len(shown["rows"]) - shown["eligible"]
     below = (f'<p class="sub">The last {waiting} have not yet handed in '
@@ -3589,7 +3592,7 @@ def act_student_answer(req, db, token):
     return json_response({"ok": bool(result)})
 
 
-def champ_row(db, r, show_group=True, me=None):
+def champ_row(db, r, show_group=True, me=None, tops=None):
     st = r["student"]
     medals = {1: "&#129351;", 2: "&#129352;", 3: "&#129353;"}
     place = (medals.get(r["rank"], str(r["rank"]) + ".") if r["rank"]
@@ -3600,7 +3603,10 @@ def champ_row(db, r, show_group=True, me=None):
         if got is None:
             bars += f'<td class="sub cnone" title="{E(label)}: nothing recorded">&mdash;</td>'
             continue
-        share = got / weight * 100.0 if weight else 0
+        # nothing is out of anything now, so a bar is drawn against the best in
+        # that column rather than against a ceiling that no longer exists
+        best = (tops or {}).get(key) or 0
+        share = (got / best * 100.0) if best else 0
         bars += (f'<td class="cpt"><span class="cbar"><i style="width:'
                  f'{min(100, share):.0f}%"></i></span>{got:g}</td>')
     group = f'<td>{E(group_name(db, st["group_id"]))}</td>' if show_group else ""
@@ -3668,9 +3674,12 @@ long the rest of the school takes to catch up.</p>
              + "".join(ctab(f'/championship?class={g["id"]}', g["name"], gid == g["id"])
                        for g in groups) + "</div>")
 
-    head = "".join(f'<th title="{w} points">{E(l)}</th>'
+    head = "".join(f'<th title="up to {w:g} points each time">{E(l)}</th>'
                    for _k, l, w in core.CHAMPIONSHIP)
-    body = "".join(champ_row(db, r, show_group=gid is None) for r in standing["rows"])
+    tops = {k: max([r["points"].get(k) or 0 for r in standing["rows"]] or [0])
+            for k, _l, _w in core.CHAMPIONSHIP}
+    body = "".join(champ_row(db, r, show_group=gid is None, tops=tops)
+                   for r in standing["rows"])
 
     winner = next((r for r in standing["rows"] if r["rank"] == 1), None)
     top = ""
@@ -3679,7 +3688,7 @@ long the rest of the school takes to catch up.</p>
                f'{standing["season"]}</div>'
                f'<div class="champ-name">{E(winner["student"]["name"])}</div>'
                f'<div class="sub">{E(group_name(db, winner["student"]["group_id"]))}'
-               f' &middot; {winner["total"]:g} of {core.CHAMPIONSHIP_MAX:g} points</div></div>')
+               f' &middot; {winner["total"]:g} points</div></div>')
 
     champs = {} if gid else core.class_champions(full, db)
     classes = ""
@@ -3723,17 +3732,18 @@ long the rest of the school takes to catch up.</p>
         paused = ""
         control = (f'<form method="post" action="/championship/pause">'
                    f'<button class="ghost">Pause the league</button></form>')
-    rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; up to {w:g} points</li>'
-                    for _k, l, w in core.CHAMPIONSHIP)
+    when = {"homework": "every set you mark", "conduct": "every lesson"}
+    rules = "".join(
+        f'<li><strong>{E(l)}</strong> &mdash; up to {w:g} points '
+        f'{when.get(k, "each time")}</li>' for k, l, w in core.CHAMPIONSHIP)
     body_html = f"""<h1>Championship</h1>
 <p class="sub">Season {standing["season"]}, counting from
 {E(standing.get("start_day") or standing["start"][:10])}{skipped}.
-{core.SEASON_LESSONS} lessons each, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
-Points add up as the season goes on. Every mark you give counts towards a season's worth
-of work &mdash; {core.SEASON_LESSONS} pieces of homework out of ten, and
-{core.SEASON_LESSONS} lessons out of five &mdash; so doing more good work raises a score
-rather than only holding it steady. Late or never handed in scores nought; anything still
-waiting to be marked is left out until you mark it.</p>
+{core.SEASON_LESSONS} lessons each, everyone in the school. It runs like a football league:
+every piece of homework you set is worth up to {core.HOMEWORK_PER_SET:g} points and every
+lesson up to {core.CONDUCT_PER_LESSON:g}, and those points are added to the running total
+and never taken away. Late or never handed in scores nought; anything still waiting to be
+marked is left out until you mark it.</p>
 {top}
 {paused}
 {gapbox}
@@ -3764,6 +3774,10 @@ the line for now.</p>
 {body or '<tr><td colspan=11 class="sub">Nobody yet.</td></tr>'}</table></div>
 <h2>How the points work</h2>
 <div class="card"><ul class="rules">{rules}</ul>
+<p class="sub" style="margin:10px 0 0"><strong>Each time, not in total.</strong> A set of
+homework marked 10, 8 and 7 averages 8.3, which is 2.5 of the 3 it was worth. The next set
+marked 10, 9 and 8 averages 9, which is 2.7. That student now has 5.2 for homework, and it
+keeps climbing all season.</p>
 <p class="sub" style="margin:10px 0 0">Homework is the average mark out of ten, scaled to
 3; a piece handed in after its deadline is a nought in that average. Words count up to
 {core.VOCAB_TARGET}. In the lesson is the average of punctuality, behaviour and taking

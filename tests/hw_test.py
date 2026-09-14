@@ -71,13 +71,14 @@ print("  two 9s beats one 10:        %.2f > %.2f  %s" % (
     d["points"]["homework"], b["points"]["homework"],
     d["points"]["homework"] > b["points"]["homework"]))
 assert d["points"]["homework"] > b["points"]["homework"]
-# points add up towards a season's worth of work: 15 pieces out of ten
-print("  one piece at 10 earns:      %.2f of 3   (10 of %d marks)"
-      % (b["points"]["homework"], core.HOMEWORK_TARGET))
-assert abs(b["points"]["homework"] - 10 / core.HOMEWORK_TARGET * 3) < 0.01
-print("  two pieces at 9 earn:       %.2f of 3   (18 of %d marks)"
-      % (d["points"]["homework"], core.HOMEWORK_TARGET))
-assert abs(d["points"]["homework"] - 18 / core.HOMEWORK_TARGET * 3) < 0.01
+# each task here was set on its own day, so each is its own fixture worth 3:
+# Bek did one at 10 and missed two, so 3 + 0 + 0; Dilnoza did two at 9
+print("  one at 10, two missed ->    %.2f  (3.0 + 0 + 0)" % b["points"]["homework"])
+assert abs(b["points"]["homework"] - 3.0) < 0.01
+print("  two at 9, one missed  ->    %.2f  (2.7 + 2.7 + 0)" % d["points"]["homework"])
+assert abs(d["points"]["homework"] - 5.4) < 0.01
+print("  three at 8            ->    %.2f  (2.4 x 3)" % a["points"]["homework"])
+assert abs(a["points"]["homework"] - 7.2) < 0.01
 print("  did nothing scores nought:  %.2f, and is ranked, not hidden: %s" % (
     by["Rustam"]["points"]["homework"], by["Rustam"]["rank"] is not None))
 assert by["Rustam"]["points"]["homework"] == 0 and by["Rustam"]["rank"]

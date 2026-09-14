@@ -1534,18 +1534,19 @@ CHAMPIONSHIP = [
     ("homework", "Homework", 3.0),
     ("conduct", "In the lesson", 2.0),
 ]
+# what a single fixture of each kind is worth; the season total has no ceiling
 CHAMPIONSHIP_MAX = sum(w for _k, _l, w in CHAMPIONSHIP)
 MIN_GRADED = 3          # fewer than this and one lucky mark decides the season
 
-# Points add up rather than average out. Averaging existed so that a student who
-# attended more lessons could not out-score one who attended fewer - but a season
-# is fifteen lessons for everybody now, so that can no longer happen, and a score
-# that climbs as the term goes on is what makes a table worth watching.
+# A football league, not an exam. Every homework you set is a fixture worth up to
+# three points - the average of the marks in it, out of ten - and every lesson is
+# a fixture worth up to two. Those points are added to the running total and
+# never taken away, so the table climbs all season and a good week shows.
 #
-# The targets are what a season of fifteen lessons is worth: a piece of homework
-# for each, marked out of ten, and each lesson worth five.
-HOMEWORK_TARGET = SEASON_LESSONS * 10.0     # 150 marks across the season
-CONDUCT_TARGET = SEASON_LESSONS * 5.0       # 75 across the season
+# Nothing is capped: a season with more fixtures simply has more points in it,
+# the way a longer league season does.
+HOMEWORK_PER_SET = 3.0      # the most one piece of homework can be worth
+CONDUCT_PER_LESSON = 2.0    # the most one lesson can be worth
 VOCAB_TARGET = 60       # kept for the Progress page; it scores nothing for now
 
 
@@ -1791,6 +1792,7 @@ def homework_marks(db, student, lo, hi, windows):
         (student["group_id"], hi, lo, lo)).fetchall()
 
     scores, late, missing, waiting, pending = [], 0, 0, 0, 0
+    batches = {}                      # (due_at) -> the marks from that set
     for a in was_set:
         due = a["due_at"]
         if due and due > stamp:
@@ -1802,11 +1804,13 @@ def homework_marks(db, student, lo, hi, windows):
             "SELECT status, score, created_at FROM submissions WHERE student_id=?"
             " AND assignment_id=? AND draft=0 ORDER BY status='graded' DESC,"
             " created_at LIMIT 1", (student["id"], a["id"])).fetchone()
+        key = due or "none"
         if not sub:
             # with no deadline there is nothing to be late for and nothing to
             # have missed, so silence is not a nought - it is simply not counted
             if due:
                 scores.append(0.0)
+                batches.setdefault(key, []).append(0.0)
                 missing += 1
             continue
         if paused_at(sub["created_at"], windows):
@@ -1815,10 +1819,12 @@ def homework_marks(db, student, lo, hi, windows):
             waiting += 1                  # sitting in the marking queue
         elif due and sub["created_at"] > due:
             scores.append(0.0)
+            batches.setdefault(key, []).append(0.0)
             late += 1
         else:
             scores.append(sub["score"])
-    return scores, late, missing, waiting, pending
+            batches.setdefault(key, []).append(float(sub["score"]))
+    return scores, late, missing, waiting, pending, batches
 
 
 def championship(db, cfg=None):
@@ -1835,13 +1841,17 @@ def championship(db, cfg=None):
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
         hi, lessons, closed = season_window(db, st["id"], lo, cfg)
 
-        counted, late, missing, waiting, pending = homework_marks(db, st, lo, hi, windows)
+        counted, late, missing, waiting, pending, batches = homework_marks(
+            db, st, lo, hi, windows)
         graded = len(counted)
         parts = {}
-        if graded or waiting:
-            # every mark earned counts towards the season's total, so doing more
-            # good work raises the score instead of only holding it steady
-            parts["homework"] = min(1.0, sum(counted) / HOMEWORK_TARGET)
+        # each set of homework is its own fixture: the average of the marks in
+        # it, out of ten, worth up to three points, added to the running total
+        earned = 0.0
+        for marks in batches.values():
+            earned += sum(marks) / len(marks) / 10.0 * HOMEWORK_PER_SET
+        if batches:
+            parts["homework"] = round(earned, 2)
 
         words = sum(1 for r in db.execute(
             "SELECT last_seen FROM word_progress WHERE student_id=? AND streak >= 3"
@@ -1855,14 +1865,13 @@ def championship(db, cfg=None):
             " WHERE student_id=? AND day >= ? AND day < ?",
             (st["id"], local_day(parse(lo), cfg), local_day(parse(hi), cfg)))
             if not paused_day(r["day"], windows, cfg)]
-        # each lesson is worth up to five, and they add up across the season
-        parts["conduct"] = (min(1.0, (sum(scored) / 3.0) / CONDUCT_TARGET)
-                            if scored else 0.0)
+        # each lesson is its own fixture too, worth up to two points
+        parts["conduct"] = round(
+            sum(v / 3.0 / 5.0 * CONDUCT_PER_LESSON for v in scored), 2)
         lesson_n = len(scored)
 
-        # no rescaling: the scale is small and fixed, so what is missing shows
-        # as a nought rather than quietly inflating everything else
-        points = {k: parts.get(k, 0.0) * w for k, _l, w in CHAMPIONSHIP}
+        # the parts are points already - each fixture was scored as it happened
+        points = {k: round(parts.get(k, 0.0), 2) for k, _l, _w in CHAMPIONSHIP}
         rows.append({
             "student": st, "points": {k: round(v, 2) for k, v in points.items()},
             "total": round(sum(points.values()), 2),
