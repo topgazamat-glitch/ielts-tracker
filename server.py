@@ -117,7 +117,7 @@ def view_login(req, err=""):
 <label class="f">Password<input type="password" name="password" autofocus></label>
 <button>Enter</button></form></div>"""
     # deliberately not the teacher layout: a signed-out visitor sees no navigation
-    return html_response(student_page("Sign in", body))
+    return html_response(student_page("Sign in", body, music=False))
 
 
 def view_overview(req, db):
@@ -1803,20 +1803,27 @@ def forget_song():
     _song_cache["day"] = None
 
 
-def student_page(title, body):
-    """Standalone layout - no teacher navigation, no sign-in."""
+def student_page(title, body, music=True):
+    """Standalone layout - no teacher navigation, no sign-in.
+
+    `music` is off for pages a stranger can reach: the song of the day
+    belongs to the class, and its filename is nobody else's business.
+    """
+    bar = ('<span class="right"><span id="songname" class="songname" hidden>'
+           '</span><button type="button" id="musicbtn" class="musicbtn"'
+           ' onclick="Music.toggle()" title="Music"></button></span>'
+           ) if music else ""
+    tune = song_tag() if music else ""
+    player = '<script src="/static/music.js" defer></script>' if music else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head>
 <body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span>
-<span class="right"><span id="songname" class="songname" hidden></span>
-<button type="button" id="musicbtn" class="musicbtn"
-  onclick="Music.toggle()" title="Music"></button></span></header>
+{bar}</header>
 <main style="max-width:600px">{body}</main>
-{song_tag()}
-<script src="/static/music.js" defer></script>
+{tune}{player}
 <script src="/static/nav.js" defer></script>
 <script src="/static/write.js" defer></script></body></html>"""
 
