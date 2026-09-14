@@ -2140,6 +2140,28 @@ def last_graded(db):
         " ORDER BY graded_at DESC, id DESC LIMIT 1").fetchone()
 
 
+def answer_matches(given, expected):
+    """Is a typed answer right?
+
+    Marking typing has to be forgiving about the things that are not the point -
+    case, spacing, a stray full stop, a curly apostrophe - and strict about the
+    word itself. Several acceptable answers are separated by a slash.
+    """
+    def tidy(t):
+        t = (t or "").strip().lower()
+        t = t.replace("\u2019", "'").replace("\u2018", "'")
+        t = re.sub(r"^[\s\-–—]+|[\s.,;:!?]+$", "", t)
+        return re.sub(r"\s+", " ", t)
+    got = tidy(given)
+    if not got:
+        return False
+    for want in str(expected or "").split("/"):
+        want = tidy(want)
+        if want and got == want:
+            return True
+    return False
+
+
 def load_test(db, data):
     """Create a digital test from the importer's json. Answers stay empty."""
     level = db.execute("SELECT id FROM levels WHERE name=?",
@@ -2200,8 +2222,9 @@ def test_questions(db, test_id):
 def set_answer_key(db, test_id, answers):
     """answers maps question id -> letter. An empty letter clears it."""
     for qid, letter in answers.items():
+        # a typed answer is a word or two, not a letter
         db.execute("UPDATE dquestions SET answer=? WHERE id=? AND test_id=?",
-                   ((letter or "").strip()[:2] or None, qid, test_id))
+                   ((letter or "").strip()[:120] or None, qid, test_id))
     db.commit()
 
 
@@ -2227,12 +2250,17 @@ def submit_attempt(db, attempt_id, given):
     a = db.execute("SELECT * FROM dattempts WHERE id=?", (attempt_id,)).fetchone()
     if not a:
         return None
-    qs = db.execute("SELECT id, answer FROM dquestions WHERE test_id=?",
+    qs = db.execute("SELECT id, answer, kind FROM dquestions WHERE test_id=?",
                     (a["test_id"],)).fetchall()
+    kinds = {r["id"]: r["kind"] for r in db.execute(
+        "SELECT id, kind FROM dquestions WHERE test_id=?", (a["test_id"],))}
     score = 0
     for q in qs:
         letter = (given.get(q["id"]) or "").strip() or None
-        ok = 1 if (letter and q["answer"] and letter == q["answer"]) else 0
+        if kinds.get(q["id"]) == "typed":
+            ok = 1 if answer_matches(letter, q["answer"]) else 0
+        else:
+            ok = 1 if (letter and q["answer"] and letter == q["answer"]) else 0
         score += ok
         db.execute("INSERT INTO dresponses (attempt_id, question_id, given, correct)"
                    " VALUES (?,?,?,?) ON CONFLICT(attempt_id, question_id) DO UPDATE"

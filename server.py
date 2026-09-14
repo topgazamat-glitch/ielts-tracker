@@ -2100,6 +2100,10 @@ def portal_tests(db, s, token, query):
             mark = ('<span class="pill good">correct</span>' if ok
                     else '<span class="pill risk">wrong</span>')
             lines = ""
+            if q["kind"] == "typed" or not opts:
+                lines = f'<div class="opt right"><b>answer</b> {E(q["answer"] or "")}</div>'
+                if not ok:
+                    lines += f'<div class="opt chosen"><b>you put</b> {E(mine or "—")}</div>'
             for o in opts:
                 cls = ""
                 if o["letter"] == q["answer"]:
@@ -2122,10 +2126,15 @@ def portal_tests(db, s, token, query):
                if t["passage"] else "")
     rows = ""
     for q, opts in qs:
-        picks = "".join(
-            f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
-            f' value="{E(o["letter"])}" required><span><b>{E(o["letter"])}</b> '
-            f'{E(o["text"])}</span></label>' for o in opts)
+        if q["kind"] == "typed" or not opts:
+            picks = (f'<input class="typedin" name="q{q["id"]}" autocomplete="off"'
+                     f' autocapitalize="off" spellcheck="false"'
+                     f' placeholder="your answer">')
+        else:
+            picks = "".join(
+                f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
+                f' value="{E(o["letter"])}" required><span><b>{E(o["letter"])}</b> '
+                f'{E(o["text"])}</span></label>' for o in opts)
         pic = (f'<img class="passageimg" src="/testimg/{E(q["image"])}" alt="">'
                if q["image"] else "")
         rows += (f'{pic}<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
@@ -4500,11 +4509,16 @@ def view_test(req, db, tid):
 
     rows = ""
     for q, opts in qs:
-        picks = "".join(
-            f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
-            f' value="{E(o["letter"])}"{" checked" if q["answer"] == o["letter"] else ""}>'
-            f'<span><b>{E(o["letter"])}</b> {E(o["text"][:90])}</span></label>'
-            for o in opts)
+        if q["kind"] == "typed" or not opts:
+            picks = (f'<input class="typedin" name="q{q["id"]}"'
+                     f' value="{E(q["answer"] or "")}"'
+                     f' placeholder="the answer, or two of them separated by /">')
+        else:
+            picks = "".join(
+                f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
+                f' value="{E(o["letter"])}"{" checked" if q["answer"] == o["letter"] else ""}>'
+                f'<span><b>{E(o["letter"])}</b> {E(o["text"][:90])}</span></label>'
+                for o in opts)
         missing = "" if q["answer"] else ' <span class="pill risk">no answer</span>'
         pic = (f'<img class="passageimg" src="/testimg/{E(q["image"])}" alt="">'
                if q["image"] else "")

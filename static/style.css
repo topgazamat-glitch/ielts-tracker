@@ -1326,3 +1326,12 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
   .qbody { margin-top: var(--sp-2); }
   #answer { min-height: 46vh; }
 }
+
+/* a question the student types the answer to, rather than choosing one */
+.typedin {
+  width: 100%; max-width: 340px; font-size: 15px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+}
+.typedin:focus { outline: 2px solid var(--accent-line); outline-offset: 1px; }

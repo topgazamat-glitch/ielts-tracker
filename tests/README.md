@@ -47,6 +47,7 @@ site or the real database, and they can run in any order.
 | `mobile_test` | viewport, scrolling, 44px tap targets, no zoom on focus |
 | `writing_test` | typed answers: set, write, autosave, hand in, mark |
 | `prompts_test` | the writing-question bank, suggesting and adding |
+| `booklet_test` | a handout plus its answer key becomes a digital test |
 | `accumulate_test` | points are awarded per fixture and add up |
 
 ## Writing another
