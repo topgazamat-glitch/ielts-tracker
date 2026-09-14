@@ -1858,6 +1858,10 @@ def championship(db, cfg=None):
             r["rank"] = None
     return {"started": True, "season": season_no(db), "start": lo, "rows": rows,
             "paused": is_paused(db), "paused_at": meta_get(db, "season_paused_at"),
+            # a pause quietly removes the lessons and homework inside it, so the
+            # page has to be able to say which stretches are not being counted
+            "pauses": windows,
+            "start_day": local_day(parse(lo), cfg),
             "eligible": sum(1 for r in rows if r["eligible"]),
             "finished": sum(1 for r in rows if r["done"])}
 

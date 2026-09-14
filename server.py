@@ -3690,6 +3690,16 @@ long the rest of the school takes to catch up.</p>
     total = len(standing["rows"])
     done = standing["finished"]
     settled = sum(1 for r in standing["rows"] if r.get("final"))
+    # a resumed pause leaves no mark on the page, and silently drops the lessons
+    # and homework that fell inside it - so say so plainly
+    cfgx = core.load_config()
+    gaps = []
+    for a, b in (standing.get("pauses") or []):
+        first = core.local_day(core.parse(a), cfgx)
+        last = ("still paused" if b == core.SEASON_OPEN
+                else core.local_day(core.parse(b), cfgx))
+        gaps.append("%s to %s" % (first, last))
+    skipped = (" &middot; <strong>not counting %s</strong>" % E("; ".join(gaps))) if gaps else ""
     if standing["paused"]:
         control = (f'<form method="post" action="/championship/resume">'
                    f'<button>Resume season {standing["season"]}</button></form>')
@@ -3707,7 +3717,8 @@ long the rest of the school takes to catch up.</p>
     rules = "".join(f'<li><strong>{E(l)}</strong> &mdash; up to {w:g} points</li>'
                     for _k, l, w in core.CHAMPIONSHIP)
     body_html = f"""<h1>Championship</h1>
-<p class="sub">Season {standing["season"]}, started {E(standing["start"][:10])}.
+<p class="sub">Season {standing["season"]}, counting from
+{E(standing.get("start_day") or standing["start"][:10])}{skipped}.
 {core.SEASON_LESSONS} lessons each, {core.CHAMPIONSHIP_MAX:g} points, everyone in the school.
 Homework is the average over every piece you set: marked on time it scores what you gave
 it, late or never handed in it scores nought, and anything still waiting to be marked is
