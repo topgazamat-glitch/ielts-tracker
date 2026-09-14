@@ -451,7 +451,8 @@ def grade_page(db, sub, regrade=False):
             f'{st["graded_count"]} graded &middot; {st["missed"]} missed')
     head = ("<h1>Change a mark</h1>" if regrade else "<h1>Grading queue</h1>")
     hint = ("" if regrade else
-            f'<p class="sub">{remaining} waiting &middot; keys <span class="kbd">1</span>&ndash;'
+            f'<p class="sub"><a href="/queue/grid">Grade a whole task at once</a> '
+            f'&middot; {remaining} waiting &middot; keys <span class="kbd">1</span>&ndash;'
             f'<span class="kbd">9</span> <span class="kbd">0</span>=10, hold '
             f'<span class="kbd">Shift</span> for a half, <span class="kbd">Enter</span> '
             f'to save, <span class="kbd">s</span> to skip.</p>')
@@ -478,6 +479,130 @@ def grade_page(db, sub, regrade=False):
 <div id="gradedata" hidden data-skip="{sub["id"]}"
      data-regrade="{1 if regrade else 0}" data-prefetch="{E(prefetch)}"></div>"""
     return html_response(page("Change a mark" if regrade else "Grade", body, "Grade"))
+
+
+def view_grade_grid(req, db):
+    """Everyone's work for one piece of homework, side by side.
+
+    One at a time means a page load between every student, and a page load is
+    long enough to lose the thread of what an eight looks like today. Seeing a
+    class together is faster and marks more consistently, because the comparison
+    is in front of you rather than in your memory.
+    """
+    core.seed_notes(db)
+    want = (req["query"].get("assignment", [""])[0] or "").strip()
+    aid = int(want) if want.isdigit() else None
+
+    sets = db.execute(
+        "SELECT a.id, a.title, g.name klass, COUNT(*) n FROM submissions s"
+        " JOIN assignments a ON a.id=s.assignment_id"
+        " JOIN groups g ON g.id=a.group_id"
+        " WHERE s.status='pending' AND s.draft=0"
+        " GROUP BY a.id ORDER BY g.name, a.title").fetchall()
+    loose = db.execute(
+        "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
+        " AND assignment_id IS NULL").fetchone()["c"]
+
+    if aid is None and sets:
+        aid = sets[0]["id"]
+
+    if aid:
+        subs = db.execute(
+            "SELECT s.*, st.name FROM submissions s JOIN students st ON st.id=s.student_id"
+            " WHERE s.status='pending' AND s.draft=0 AND s.assignment_id=?"
+            " ORDER BY st.name", (aid,)).fetchall()
+    else:
+        subs = db.execute(
+            "SELECT s.*, st.name FROM submissions s JOIN students st ON st.id=s.student_id"
+            " WHERE s.status='pending' AND s.draft=0 AND s.assignment_id IS NULL"
+            " ORDER BY st.name").fetchall()
+
+    tabs = "".join(
+        f'<a class="tab{" on" if r["id"] == aid else ""}"'
+        f' href="/queue/grid?assignment={r["id"]}">{E(r["klass"])} &middot; '
+        f'{E(r["title"][:26])} <span class="sub">{r["n"]}</span></a>' for r in sets)
+    if loose:
+        tabs += (f'<a class="tab{" on" if aid is None else ""}"'
+                 f' href="/queue/grid?assignment=0">No homework <span class="sub">'
+                 f'{loose}</span></a>')
+
+    assignment = (db.execute("SELECT * FROM assignments WHERE id=?", (aid,)).fetchone()
+                  if aid else None)
+    rubric = bool(assignment and assignment["rubric"])
+
+    cards = ""
+    for sub in subs:
+        files = db.execute("SELECT * FROM files WHERE submission_id=? ORDER BY ord, id"
+                           " LIMIT 4", (sub["id"],)).fetchall()
+        shots = ""
+        for f in files:
+            n = screen_name(f)
+            if is_audio(n):
+                shots += (f'<audio controls preload="none" class="voice"'
+                          f' src="/media/{E(n)}"></audio>')
+            else:
+                full = (' data-full="/media/%s"' % E(f["filename"])
+                        if n != f["filename"] else "")
+                shots += (f'<img src="/media/{E(n)}" loading="lazy" alt=""'
+                          f' onclick="zoom(this)"{full}>')
+        late = '<span class="pill risk">late</span>' if sub["late"] else ""
+        cards += f"""<div class="gradecard" data-sub="{sub["id"]}">
+  <div class="gchead"><strong>{E(sub["name"])}</strong> {late}</div>
+  <div class="gcshots">{shots or '<span class="sub">nothing attached</span>'}</div>
+  <input type="hidden" name="score_{sub["id"]}" id="f_score_{sub["id"]}" value="">
+  {scorepad("score_%d" % sub["id"], None, small=True)}
+  <input class="gcnote" name="note_{sub["id"]}" placeholder="note (optional)">
+</div>"""
+
+    head = "<h1>Grade a whole task</h1>"
+    if not sets and not loose:
+        return html_response(page("Grade", head + '<div class="card"><p style="margin:0">'
+                                  'Nothing waiting.</p></div>', "Grade"))
+    warn = ('<div class="card paused">This homework is marked on the four criteria, so it'
+            ' needs the one-at-a-time page. <a href="/queue">Open the queue</a>.</div>'
+            if rubric else "")
+    body = f"""{head}
+<p class="sub">Everyone's work for one task at a time. Tap a mark under each, then save the
+lot &mdash; no page load between students, and you can see what an eight looks like today.
+<a href="/queue">One at a time instead</a>.</p>
+<div class="tabs">{tabs}</div>
+{warn}
+<form method="post" action="/grade/many" id="gridform">
+<input type="hidden" name="assignment" value="{aid or 0}">
+<div class="gradegrid">{cards or '<p class="sub">Nothing waiting for this one.</p>'}</div>
+<div class="markbar" style="margin-top:14px;border:0">
+  <button>Save the marked ones</button>
+  <span class="sub" id="gridcount" style="margin:0"></span>
+</div></form>"""
+    return html_response(page("Grade", body, "Grade"))
+
+
+def act_grade_many(req, db):
+    """Save every mark that was given, leave the rest waiting."""
+    f = req["form"]
+    done = 0
+    for key, values in list(f.items()):
+        m = re.match(r"^score_(\d+)$", key)
+        if not m or not values or not values[0].strip():
+            continue
+        sid = int(m.group(1))
+        sub = db.execute("SELECT * FROM submissions WHERE id=? AND status='pending'",
+                         (sid,)).fetchone()
+        if not sub:
+            continue
+        one = {"score": [values[0]],
+               "note": f.get("note_%d" % sid, [""]),
+               "tag": []}
+        if save_grade(db, sub, one) is None:
+            continue
+        done += 1
+        try:
+            notify_graded(db, sid)
+        except Exception:
+            # the mark is saved either way; telling the student is best effort
+            traceback.print_exc()
+    back = (f.get("assignment", ["0"])[0] or "0").strip()
+    return redirect("/queue/grid?assignment=%s" % back)
 
 
 def view_queue(req, db):
@@ -4760,6 +4885,8 @@ ROUTES = [
     ("POST", r"^/groups/new$", act_new_group),
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
     ("POST", r"^/groups/(\d+)/repeat$", act_repeat_homework),
+    ("GET",  r"^/queue/grid$", view_grade_grid),
+    ("POST", r"^/grade/many$", act_grade_many),
     ("GET",  r"^/championship$", view_championship),
     ("POST", r"^/championship/start$", act_start_season),
     ("POST", r"^/championship/close$", act_close_season),

@@ -1186,3 +1186,27 @@ button.mk.one { min-width: 28px; padding: 3px 7px; font-size: 12px; }
   content: " ·split"; color: var(--brand); font-size: 11px; font-weight: 400;
 }
 .mnote { width: 100%; font-size: 13px; }
+
+/* ------------------------------- grading a whole task at once */
+.gradegrid {
+  display: grid; gap: 14px; margin-top: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.gradecard {
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; background: var(--surface);
+}
+.gchead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.gcshots { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 10px; }
+.gcshots img {
+  height: 150px; width: auto; border-radius: 6px; cursor: zoom-in;
+  border: 1px solid var(--line-soft);
+}
+.gcshots img.zoom {
+  position: fixed; inset: 3vh 3vw; height: 94vh; width: auto; max-width: 94vw;
+  object-fit: contain; z-index: 90; background: var(--surface);
+  box-shadow: 0 10px 60px rgba(0,0,0,.5); cursor: zoom-out;
+}
+.gcnote { width: 100%; font-size: 12px; margin-top: 8px; }
+.gradecard .scorepad { gap: 3px; }
+.gradecard .scorepad button { padding: 4px 8px; font-size: 12px; min-width: 26px; }

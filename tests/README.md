@@ -41,6 +41,7 @@ site or the real database, and they can run in any order.
 | `migrate_test` | a column added after a deploy reaches an existing database |
 | `peek_test` | a student's page opens beside the teacher's, not on top of it |
 | `marks_test` | marking a lesson is taps, presets and last lesson's marks |
+| `gridgrade_test` | a whole task marked on one page, halves and notes included |
 
 ## Writing another
 

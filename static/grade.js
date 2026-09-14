@@ -26,6 +26,7 @@
       pads[i].classList.toggle("sel", Math.abs(v - value) < 1e-9);
     }
     recalc();
+    gridCount();
     var save = document.getElementById("save");
     if (save) save.disabled = !ready();
   }
@@ -116,8 +117,22 @@
     return fields.length ? fields[fields.length - 1].id.slice(2) : "score";
   }
 
+  // ---- the grid: everyone's work for one task on one page
+  function gridCount() {
+    var cards = document.querySelectorAll(".gradecard");
+    if (!cards.length) return;
+    var done = 0;
+    cards.forEach(function (c) {
+      var f = c.querySelector('input[type="hidden"]');
+      if (f && f.value !== "") done++;
+    });
+    var el = document.getElementById("gridcount");
+    if (el) el.textContent = done + " of " + cards.length + " marked";
+  }
+
   function boot() {
     recalc();
+    gridCount();
     var save = document.getElementById("save");
     if (save && ready()) save.disabled = false;
     (G().prefetch || []).forEach(function (u) { new Image().src = u; });
