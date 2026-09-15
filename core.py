@@ -2370,6 +2370,43 @@ def close_session(db, token):
     db.commit()
 
 
+def report_breakage(where, exc):
+    """Tell the teacher the site broke, rather than letting a student do it.
+
+    At most one message an hour for the same page, because a broken page that
+    everybody reloads would otherwise send the same message forty times. The
+    text is the error, never the student's work.
+    """
+    try:
+        cfg = load_config()
+        token = cfg.get("telegram_token")
+        if not token:
+            return
+        db = connect()
+        try:
+            ids = json.loads(meta_get(db, "teachers", "[]"))
+            if not ids:
+                return
+            key = "broke:%s" % where
+            last = meta_get(db, key, "")
+            if last and parse(last) > now() - timedelta(hours=1):
+                return
+            meta_set(db, key, iso(now()))
+        finally:
+            db.close()
+        import bot
+        text = ("Something broke on the site.\n\n%s\n%s: %s\n\n"
+                "Students will have seen an error page here."
+                % (where, type(exc).__name__, str(exc)[:300]))
+        for tid in ids:
+            try:
+                bot.send(token, tid, text)
+            except Exception:
+                pass
+    except Exception:
+        pass            # a failure to report must never take the site down
+
+
 def save_progress(db, attempt_id, given):
     """Keep what has been typed so far, without handing it in.
 

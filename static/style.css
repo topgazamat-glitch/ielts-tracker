@@ -801,22 +801,7 @@ button.ghost:hover { background: var(--surface-2); filter: none;
 button.ghost.danger { color: var(--warn); border-color: var(--warn-line); }
 button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 
-/* the four figures, each in its own colour */
-.grid .stat {
-  border: 0; box-shadow: none; color: #fff; padding: var(--sp-4) var(--sp-4);
-  background: var(--brand);
-}
-.grid .stat .k { color: rgba(255,255,255,.78); letter-spacing: .08em; }
-.grid .stat .v { color: #fff; font-weight: 700; }
-.grid .stat .v small { color: rgba(255,255,255,.72); }
-.grid .stat:nth-child(2) { background: var(--info); }
-.grid .stat:nth-child(3) { background: var(--violet); }
-.grid .stat:nth-child(4) { background: var(--amber); color: #2b2000; }
-.grid .stat:nth-child(4) .k { color: rgba(43,32,0,.68); }
-.grid .stat:nth-child(4) .v { color: #2b2000; }
-.grid .stat:nth-child(5) { background: var(--ok); color: #fff; }
-.grid .stat:nth-child(5) .k { color: rgba(255,255,255,.78); }
-.grid .stat:nth-child(5) .v { color: #fff; }
+
 
 /* today: soft blocks, tinted by how much they matter */
 .todo {
@@ -1437,3 +1422,19 @@ main.portal:has(.booksheet) { max-width: 940px; }
   .booklet .bk-blank.right { border-color: #2E9E5B; }
   .booklet .bk-blank.wrong { border-color: #D35; }
 }
+
+/* The figures on Overview were four saturated colours assigned by position,
+   which told the reader nothing: "active students" is not blue and "groups"
+   is not magenta. They are quiet now, and the only one that takes a colour is
+   the queue, when it has grown enough to be worth looking at. */
+.grid .stat { background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); box-shadow: var(--shadow-1); }
+.grid .stat .k { color: var(--ink-3); letter-spacing: .07em; }
+.grid .stat .v { color: var(--ink); font-weight: 620; }
+.grid .stat .note { color: var(--ink-3); font-size: 12.5px; margin-top: var(--sp-1); }
+.grid .stat.busy { border-color: var(--warn-line); background: var(--warn-soft); }
+.grid .stat.busy .v { color: var(--warn); }
+.grid .stat.busy .note { color: var(--warn); }
+
+/* the coursebook track, where the booklet asks for it */
+.booklet .bkaudio { width: 100%; max-width: 420px; margin: var(--sp-2) 0; }

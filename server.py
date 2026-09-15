@@ -75,9 +75,13 @@ def page(title, body, active="", music=False):
 </body></html>"""
 
 
-def stat(k, v, sub=""):
-    s = f" <small>{E(sub)}</small>" if sub else ""
-    return f'<div class="stat"><div class="k">{E(k)}</div><div class="v">{v}{s}</div></div>'
+def stat(k, v, sub="", busy=False):
+    """One figure. Colour means something here or it is not used: the only
+    tile that changes is the queue, and only when it has grown."""
+    s = f'<div class="note">{E(sub)}</div>' if sub else ""
+    cls = "stat busy" if busy else "stat"
+    return (f'<div class="{cls}"><div class="k">{E(k)}</div>'
+            f'<div class="v">{v}</div>{s}</div>')
 
 
 def fmt(v, dash="—"):
@@ -123,6 +127,9 @@ def view_overview(req, db):
     pending = db.execute(
         "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
     ).fetchone()["c"]
+    oldest = db.execute(
+        "SELECT MIN(created_at) c FROM submissions WHERE status='pending'"
+        " AND draft=0").fetchone()["c"]
     students = db.execute("SELECT * FROM students WHERE active=1").fetchall()
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
 
@@ -136,16 +143,45 @@ def view_overview(req, db):
     risky.sort(key=lambda p: (-p[1]["consecutive_misses"], p[1]["trend"] or 0))
 
     avg = round(sum(all_avg) / len(all_avg), 2) if all_avg else None
+    # The average is of the students who have a graded score, which on a day
+    # with a queue is not all of them. Saying so stops it reading as a claim
+    # about the class while half of it sits ungraded below.
+    from_who = ("from %d of %d students" % (len(all_avg), len(students))
+                if all_avg else "nothing graded yet")
     cards = (
         '<div class="grid">'
-        + stat("Awaiting grading", pending)
-        + stat("Active students", len(students))
-        + stat("Groups", len(groups))
-        + stat("Average score", fmt(avg), "/10" if avg else "")
+        + stat("Awaiting grading", pending, waited_for(oldest, pending),
+               busy=pending >= 20)
+        + stat("Active students", len(students), "in %d classes" % len(groups))
+        + stat("Average score", fmt(avg), from_who)
         + "</div>"
     )
 
+    # "Needs attention" firing for nearly everybody is not a warning, it is
+    # wallpaper. The reasons are counted, the worst are shown, and the rest are
+    # left to the Progress page rather than filling the screen.
+    SHOW = 10
+    why_counts = {}
+    for _s, st in risky:
+        if st["consecutive_misses"] >= 2:
+            why_counts["misses in a row"] = why_counts.get("misses in a row", 0) + 1
+        if st["trend"] is not None and st["trend"] <= -1.0:
+            why_counts["a falling trend"] = why_counts.get("a falling trend", 0) + 1
+    summary = ""
     if risky:
+        parts = ", ".join("%d for %s" % (n, w)
+                          for w, n in sorted(why_counts.items(), key=lambda p: -p[1]))
+        more = (" Showing the %d worst." % SHOW) if len(risky) > SHOW else ""
+        summary = (f'<p class="sub" style="margin-top:0">'
+                   f'<strong>{len(risky)} of {len(students)}</strong> students '
+                   f'flagged &mdash; {parts}.{more}</p>')
+        if pending:
+            summary += (f'<p class="sub">{pending} submissions are still waiting '
+                        f'to be marked, and unmarked work counts as a miss, so '
+                        f'some of these will clear themselves when you grade.</p>')
+
+    if risky:
+        risky = risky[:SHOW]
         rows = "".join(
             f'<tr><td><a href="/students/{s["id"]}">{E(s["name"])}</a></td>'
             f'<td>{E(group_name(db, s["group_id"]))}</td>'
@@ -155,7 +191,8 @@ def view_overview(req, db):
             for s, st in risky
         )
         risk_html = (
-            '<div class="tablewrap"><table><tr><th>Student</th><th>Group</th>'
+            summary
+            + '<div class="tablewrap"><table><tr><th>Student</th><th>Group</th>'
             "<th>Last 3</th><th>Completion</th><th>Why flagged</th></tr>"
             f"{rows}</table></div>"
         )
@@ -237,6 +274,18 @@ def today_block(db, pending):
                 'Nothing is waiting. Everything is graded and every class is up to '
                 'date.</p></div>')
     return f'<h1>Today</h1><div class="todos">{items}</div>'
+
+
+def waited_for(oldest, pending):
+    """How long the queue's oldest piece has been sitting there."""
+    if not pending:
+        return "nothing waiting"
+    if not oldest:
+        return ""
+    days = (core.now() - core.parse(oldest)).days
+    if days >= 1:
+        return "oldest waiting %d day%s" % (days, "" if days == 1 else "s")
+    return "all arrived today"
 
 
 def reason(st):
@@ -2100,26 +2149,37 @@ BLANK_AT = re.compile(r'<input class="bk-blank" data-q="(\d+)"')
 # The booklets say which track a listening section needs - "this is track
 # 10.02" - and the coursebook names its files the same way, so the player can
 # be put in the right place without anybody typing a filename.
-TRACK_AT = re.compile(r"(track\s+(\d{1,2}\.\d{2}))", re.I)
+TRACK_AT = re.compile(r"track\s*(\d{1,2}\.\d{2})", re.I)
+PARA = re.compile(r"<p\b[^>]*>.*?</p>", re.S)
 
 
 def add_players(html, level):
-    """Put a player where the booklet says which track to listen to."""
+    """Put a player after the paragraph that names a track.
+
+    Word splits a run wherever it likes, so "track 10.02" arrives as
+    "track 1" in one span and "0.02" in the next, and a regex over the markup
+    finds nothing. The paragraph's text is read with the tags taken out, and
+    the player is added after the paragraph that mentions it.
+    """
     if not level:
         return html
     seen = set()
 
-    def player(m):
-        track = m.group(2)
-        if track in seen:
-            return m.group(0)
-        seen.add(track)
-        src = "/audio/%s/%s.mp3" % (urllib.parse.quote(level), track)
-        return (m.group(0) + '</span></p>'
-                '<p><audio class="bkaudio" controls preload="none" '
-                'src="%s"></audio></p><p><span>' % src)
+    def after(m):
+        block = m.group(0)
+        text = re.sub(r"<[^>]+>", "", block)
+        found = [t for t in TRACK_AT.findall(text) if t not in seen]
+        if not found:
+            return block
+        players = ""
+        for track in found:
+            seen.add(track)
+            players += ('<p><audio class="bkaudio" controls preload="none" '
+                        'src="/audio/%s/%s.mp3"></audio></p>'
+                        % (urllib.parse.quote(level), track))
+        return block + players
 
-    return TRACK_AT.sub(player, html)
+    return PARA.sub(after, html)
 
 
 def fill_layout(layout, qs, given=None, marks=None, level=None):
@@ -6137,6 +6197,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     import traceback
                     traceback.print_exc()
+                    core.report_breakage(path, exc)
                     return self._send(*html_response(
                         page("Error", "<h1>Something broke</h1><div class='card'>"
                              "<p style='margin:0'>The details are in the server log."
