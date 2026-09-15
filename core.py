@@ -15,6 +15,7 @@ DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(ROOT, "data")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 MATERIAL_DIR = os.path.join(DATA_DIR, "materials")
 MUSIC_DIR = os.path.join(DATA_DIR, "music")
+AUDIO_DIR = os.path.join(DATA_DIR, "audio")      # the coursebook's own tracks
 DB_PATH = os.path.join(DATA_DIR, "app.db")
 CONFIG_PATH = os.path.join(ROOT, "config.json")
 

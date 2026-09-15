@@ -2097,9 +2097,32 @@ def portal_materials(db, s, token, query):
 
 
 BLANK_AT = re.compile(r'<input class="bk-blank" data-q="(\d+)"')
+# The booklets say which track a listening section needs - "this is track
+# 10.02" - and the coursebook names its files the same way, so the player can
+# be put in the right place without anybody typing a filename.
+TRACK_AT = re.compile(r"(track\s+(\d{1,2}\.\d{2}))", re.I)
 
 
-def fill_layout(layout, qs, given=None, marks=None):
+def add_players(html, level):
+    """Put a player where the booklet says which track to listen to."""
+    if not level:
+        return html
+    seen = set()
+
+    def player(m):
+        track = m.group(2)
+        if track in seen:
+            return m.group(0)
+        seen.add(track)
+        src = "/audio/%s/%s.mp3" % (urllib.parse.quote(level), track)
+        return (m.group(0) + '</span></p>'
+                '<p><audio class="bkaudio" controls preload="none" '
+                'src="%s"></audio></p><p><span>' % src)
+
+    return TRACK_AT.sub(player, html)
+
+
+def fill_layout(layout, qs, given=None, marks=None, level=None):
     """Put the student's own boxes into the booklet's blanks.
 
     The booklet was rendered with `data-q="7"` where its seventh blank is, so
@@ -2122,7 +2145,7 @@ def fill_layout(layout, qs, given=None, marks=None):
         return (f'<input class="{cls}" name="q{q["id"]}"{attr}{ro}'
                 f' data-q="{m.group(1)}"')
 
-    return BLANK_AT.sub(box, layout)
+    return add_players(BLANK_AT.sub(box, layout), level)
 
 
 def portal_tests(db, s, token, query):
@@ -2201,7 +2224,7 @@ def portal_tests(db, s, token, query):
             return f"""<h2>{E(t["title"])}</h2>
 <div class="card champ-hero"><div class="sub">You scored</div>
 <div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
-<div class="booksheet">{fill_layout(layout, qs, mine, marks)}</div>
+<div class="booksheet">{fill_layout(layout, qs, mine, marks, level=core.level_name(db, t["level_id"]))}</div>
 {f'<h2 class="gap-4">The ones to look at again</h2><ul class="attn">{wrong}</ul>'
  if wrong else ''}
 <p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
@@ -2243,7 +2266,7 @@ can stop and come back. The {marked} answers with a key are marked as soon as
 you hand it in.{back}</p>
 <form method="post" action="/s/{E(token)}/test/{tid}"
  data-save="/s/{E(token)}/test/{tid}/save">
-<div class="booksheet">{fill_layout(layout, qs, sofar)}</div>
+<div class="booksheet">{fill_layout(layout, qs, sofar, level=core.level_name(db, t["level_id"]))}</div>
 <div class="gap-3"><button>Hand it in</button>
 <span class="sub" id="booksaved"></span></div>
 </form>"""
@@ -3324,6 +3347,38 @@ def act_answer_question(req, db, qid):
         import bot
         bot.send(token, st["telegram_id"], bot.t(st["lang"], "ask_answer", answer=answer))
     return redirect("/questions")
+
+
+def serve_track(req, db, level, track):
+    """One coursebook track, for the booklet that asked for it."""
+    safe = re.fullmatch(r"\d{1,2}\.\d{2}", track)
+    if not safe:
+        return not_found()
+    path = os.path.join(core.AUDIO_DIR, level, track + ".mp3")
+    if not os.path.isfile(os.path.abspath(path)) or \
+            not os.path.abspath(path).startswith(os.path.abspath(core.AUDIO_DIR)):
+        return not_found()
+    data = open(path, "rb").read()
+    return (200, [("Content-Type", "audio/mpeg"),
+                  ("Content-Length", str(len(data))),
+                  ("Cache-Control", "public, max-age=86400")], data)
+
+
+def act_new_track(req, db):
+    """Put a coursebook track on the shelf its level reads from."""
+    fields, files = req["files"]
+    level = (fields.get("level", "") or "").strip()
+    if not files or not level:
+        return redirect("/tests")
+    name, blob = files[0][0], files[0][1]
+    track = os.path.splitext(os.path.basename(name))[0]
+    if not re.fullmatch(r"\d{1,2}\.\d{2}", track):
+        return redirect("/tests")
+    folder = os.path.join(core.AUDIO_DIR, level)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, track + ".mp3"), "wb") as fh:
+        fh.write(blob)
+    return redirect("/tests")
 
 
 def view_backup(req, db):
@@ -4726,6 +4781,38 @@ def act_test_league(req, db, tid):
     return redirect(f"/tests/{tid}")
 
 
+def serve_track(req, db, level, track):
+    """One coursebook track, for the booklet that asked for it."""
+    safe = re.fullmatch(r"\d{1,2}\.\d{2}", track)
+    if not safe:
+        return not_found()
+    path = os.path.join(core.AUDIO_DIR, level, track + ".mp3")
+    if not os.path.isfile(os.path.abspath(path)) or \
+            not os.path.abspath(path).startswith(os.path.abspath(core.AUDIO_DIR)):
+        return not_found()
+    data = open(path, "rb").read()
+    return (200, [("Content-Type", "audio/mpeg"),
+                  ("Content-Length", str(len(data))),
+                  ("Cache-Control", "public, max-age=86400")], data)
+
+
+def act_new_track(req, db):
+    """Put a coursebook track on the shelf its level reads from."""
+    fields, files = req["files"]
+    level = (fields.get("level", "") or "").strip()
+    if not files or not level:
+        return redirect("/tests")
+    name, blob = files[0][0], files[0][1]
+    track = os.path.splitext(os.path.basename(name))[0]
+    if not re.fullmatch(r"\d{1,2}\.\d{2}", track):
+        return redirect("/tests")
+    folder = os.path.join(core.AUDIO_DIR, level)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, track + ".mp3"), "wb") as fh:
+        fh.write(blob)
+    return redirect("/tests")
+
+
 def view_backup(req, db):
     """Hand the newest backup to the teacher, so a copy can leave the server.
 
@@ -5459,6 +5546,7 @@ ROUTES = [
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
     ("GET",  r"^/assignments/unit\.json$", unit_plan_json),
     ("GET",  r"^/backup$", view_backup),
+    ("GET",  r"^/audio/([^/]+)/([0-9.]+)\.mp3$", serve_track),
     ("GET",  r"^/prompts$", view_prompts),
     ("GET",  r"^/prompts/suggest$", suggest_json),
     ("GET",  r"^/prompts/units$", units_json),
@@ -5844,6 +5932,18 @@ class Handler(BaseHTTPRequestHandler):
             db = core.connect()
             try:
                 return self._send(*act_new_material(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        if path == "/audio/new":
+            if not self._session():
+                return self._send(*redirect("/login"))
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_new_track(
                     {"query": {}, "form": {}, "files": (fields, files)}, db))
             finally:
                 db.close()
