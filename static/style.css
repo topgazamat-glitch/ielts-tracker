@@ -1359,3 +1359,42 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
   background: var(--surface); color: var(--ink);
 }
 .typedin:focus { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+
+/* ------------------------------------------------------------- the booklet
+ * The handout as the student's own page: its own teal, its own boxes, its own
+ * layout, with a box to type in where the paper has a dotted line. The rules
+ * below are the booklet's, not the site's, and are scoped to .booklet so they
+ * cannot leak into the rest of the dashboard.
+ */
+.booksheet {
+  background: #fff; color: #1A1A1A;
+  padding: var(--sp-6) var(--sp-5); border-radius: var(--r-sm);
+  border: 1px solid var(--line); overflow-x: auto;
+}
+@media (max-width: 720px) { .booksheet { padding: var(--sp-4) var(--sp-3); } }
+
+.booklet { --ink:#1A1A1A; --teal:#127D80; --deep:#0B5456; --soft:#F2F8F8;
+  color:var(--ink); font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,
+  'Helvetica Neue',Arial,sans-serif; line-height:1.5; }
+.booklet p { margin:0 0 6px; }
+.booklet p.sp { margin:0; height:8px; }
+.booklet table.bk { border-collapse:collapse; width:100%; margin:10px 0;
+  table-layout:fixed; }
+.booklet table.bk td { padding:8px 10px; word-wrap:break-word; }
+.booklet .tab { display:inline-block; width:22px; }
+.booklet table.bk table.bk { margin:0; }
+.booklet .bk-blank { font:inherit; color:#0B5456; background:#F2F8F8;
+  border:0; border-bottom:1.5px solid #9CC; border-radius:3px 3px 0 0;
+  padding:1px 6px; min-height:24px; }
+.booklet .bk-blank:focus { outline:0; background:#E6F2F2;
+  border-bottom-color:#127D80; }
+.booklet .bk-blank.right { background:#E7F6EC; border-bottom-color:#2E9E5B; }
+.booklet .bk-blank.wrong { background:#FDECEC; border-bottom-color:#D35; }
+.booklet .bk-was { color:#2E9E5B; font-weight:600; white-space:nowrap; }
+
+/* The student's page is a narrow column, which is right for a list of
+   homework and wrong for a handout: the booklet's two-column exercises were
+   being squeezed into half the width they were drawn for. It widens only for
+   the pages that hold one. */
+main.portal { max-width: 600px; }
+main.portal:has(.booksheet) { max-width: 940px; }

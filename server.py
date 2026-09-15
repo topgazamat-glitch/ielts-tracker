@@ -1822,7 +1822,7 @@ def student_page(title, body, music=True):
 <link rel="stylesheet" href="/static/style.css"></head>
 <body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 {bar}</header>
-<main style="max-width:600px">{body}</main>
+<main class="portal">{body}</main>
 {tune}{player}
 <script src="/static/nav.js" defer></script>
 <script src="/static/write.js" defer></script></body></html>"""
@@ -2059,6 +2059,35 @@ def portal_materials(db, s, token, query):
     return f'<p class="sub">{crumb}</p><div class="filelist">{rows}</div>'
 
 
+BLANK_AT = re.compile(r'<input class="bk-blank" data-q="(\d+)"')
+
+
+def fill_layout(layout, qs, given=None, marks=None):
+    """Put the student's own boxes into the booklet's blanks.
+
+    The booklet was rendered with `data-q="7"` where its seventh blank is, so
+    the page is joined to the database by that number and nothing has to be
+    guessed from the text around it.
+    """
+    by_num = {q["num"]: q for q, _o in qs}
+
+    def box(m):
+        q = by_num.get(int(m.group(1)))
+        if not q:
+            return m.group(0)
+        val = (given or {}).get(q["id"])
+        cls = "bk-blank"
+        if marks is not None:
+            got = marks.get(q["id"])
+            cls += " right" if got == 1 else " wrong" if got == 0 else ""
+        attr = (f' value="{E(val)}"' if val else "")
+        ro = " readonly" if marks is not None else ""
+        return (f'<input class="{cls}" name="q{q["id"]}"{attr}{ro}'
+                f' data-q="{m.group(1)}"')
+
+    return BLANK_AT.sub(box, layout)
+
+
 def portal_tests(db, s, token, query):
     """Sit a test on the phone and see the score the moment it is handed in."""
     level_id = core.level_of(db, s["group_id"])
@@ -2121,6 +2150,25 @@ def portal_tests(db, s, token, query):
                           f'{E(o["text"])}</div>')
             rows += (f'<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
                      f'{E(q["prompt"])} {mark}</div>{lines}</div>')
+        layout = t["layout"] if "layout" in t.keys() else None
+        if layout:
+            mine = {q["id"]: (given[q["id"]]["given"] or "")
+                    for q, _o in qs if q["id"] in given}
+            marks = {q["id"]: given[q["id"]]["correct"]
+                     for q, _o in qs if q["id"] in given}
+            wrong = "".join(
+                f'<li>{E(q["prompt"][:90])} &mdash; <b class="bk-was">'
+                f'{E(q["answer"] or "")}</b></li>'
+                for q, _o in qs
+                if given.get(q["id"]) and given[q["id"]]["correct"] == 0)
+            return f"""<h2>{E(t["title"])}</h2>
+<div class="card champ-hero"><div class="sub">You scored</div>
+<div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
+<div class="booksheet">{fill_layout(layout, qs, mine, marks)}</div>
+{f'<h2 class="gap-4">The ones to look at again</h2><ul class="attn">{wrong}</ul>'
+ if wrong else ''}
+<p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
+<a class="tab" href="{base}&amp;t={tid}&amp;again=1">Try it again</a></p>"""
         return f"""<h2>{E(t["title"])}</h2>
 <div class="card champ-hero"><div class="sub">You scored</div>
 <div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
@@ -2146,6 +2194,16 @@ def portal_tests(db, s, token, query):
                if q["image"] else "")
         rows += (f'{pic}<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
                  f'{E(q["prompt"])}</div>{picks}</div>')
+    layout = t["layout"] if "layout" in t.keys() else None
+    if layout:
+        marked = sum(1 for q, _o in qs if q["kind"] != "open")
+        return f"""<h2>{E(t["title"])}</h2>
+<p class="sub">Your booklet. Fill it in here - everything you type is kept, and
+the {marked} answers with a key are marked as soon as you hand it in.</p>
+<form method="post" action="/s/{E(token)}/test/{tid}">
+<div class="booksheet">{fill_layout(layout, qs)}</div>
+<div class="gap-3"><button>Hand it in</button></div>
+</form>"""
     return f"""<h2>{E(t["title"])}</h2>
 <p class="sub">{len(qs)} questions. It is marked as soon as you hand it in.</p>
 {passage}

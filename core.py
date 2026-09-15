@@ -375,6 +375,10 @@ def migrate(db):
         db.execute("ALTER TABLE dquestions ADD COLUMN image TEXT")
 
     tcols = {r["name"] for r in db.execute("PRAGMA table_info(dtests)")}
+    if tcols and "layout" not in tcols:
+        # the booklet itself, as the student's own page, with its blanks
+        # marked up so their boxes go back in the right holes
+        db.execute("ALTER TABLE dtests ADD COLUMN layout TEXT")
     if tcols and "in_league" not in tcols:
         # a test can be published for practice without deciding the table
         db.execute("ALTER TABLE dtests ADD COLUMN in_league"
@@ -518,6 +522,7 @@ def migrate(db):
         passage TEXT,                      -- the gap-fill text, when there is one
         published INTEGER NOT NULL DEFAULT 0,
         in_league INTEGER NOT NULL DEFAULT 1,
+        layout TEXT,                       -- the booklet as a page, when there is one
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS dquestions (
@@ -2217,11 +2222,12 @@ def load_test(db, data):
     level = db.execute("SELECT id FROM levels WHERE name=?",
                        (data.get("level", ""),)).fetchone()
     tid = db.execute(
-        "INSERT INTO dtests (level_id, number, title, passage, published, created_at)"
-        " VALUES (?,?,?,?,0,?)",
+        "INSERT INTO dtests (level_id, number, title, passage, published, layout,"
+        " created_at) VALUES (?,?,?,?,0,?,?)",
         (level["id"] if level else None, data.get("number"),
          data.get("title") or "Practice test",
-         (data.get("passages") or {}).get("gap") or None, iso(now()))).lastrowid
+         (data.get("passages") or {}).get("gap") or None,
+         data.get("layout"), iso(now()))).lastrowid
     for i, q in enumerate(data.get("questions") or []):
         # a reading passage printed as a picture travels inside the file, and is
         # written out here so the page can simply point at it
@@ -2279,9 +2285,19 @@ def set_answer_key(db, test_id, answers):
 
 
 def test_ready(db, test_id):
-    r = db.execute("SELECT COUNT(*) n, SUM(answer IS NOT NULL) k FROM dquestions"
+    """Can it be published?
+
+    A booklet has boxes the key cannot mark - a conversation to complete, a
+    discussion to answer in your own words. Those are still the student's work
+    and are still saved, but they are not questions waiting for an answer key,
+    so they do not hold up publishing. A test with nothing *but* those is not
+    ready, because nothing in it could be marked at all.
+    """
+    r = db.execute("SELECT COUNT(*) n, SUM(answer IS NOT NULL) k,"
+                   " SUM(answer IS NULL AND kind='open') o FROM dquestions"
                    " WHERE test_id=?", (test_id,)).fetchone()
-    return bool(r["n"]) and r["n"] == (r["k"] or 0)
+    marked = r["k"] or 0
+    return bool(marked) and r["n"] == marked + (r["o"] or 0)
 
 
 def start_attempt(db, test_id, student_id):
@@ -2304,22 +2320,28 @@ def submit_attempt(db, attempt_id, given):
                     (a["test_id"],)).fetchall()
     kinds = {r["id"]: r["kind"] for r in db.execute(
         "SELECT id, kind FROM dquestions WHERE test_id=?", (a["test_id"],))}
-    score = 0
+    score, out_of = 0, 0
     for q in qs:
         letter = (given.get(q["id"]) or "").strip() or None
-        if kinds.get(q["id"]) == "typed":
+        kind = kinds.get(q["id"])
+        if kind == "open":
+            # kept, shown back, never right or wrong
+            ok = None
+        elif kind == "typed":
             ok = 1 if answer_matches(letter, q["answer"]) else 0
         else:
             ok = 1 if (letter and q["answer"] and letter == q["answer"]) else 0
-        score += ok
+        if ok is not None:
+            score += ok
+            out_of += 1
         db.execute("INSERT INTO dresponses (attempt_id, question_id, given, correct)"
                    " VALUES (?,?,?,?) ON CONFLICT(attempt_id, question_id) DO UPDATE"
                    " SET given=excluded.given, correct=excluded.correct",
                    (attempt_id, q["id"], letter, ok))
     db.execute("UPDATE dattempts SET finished_at=?, score=?, total=? WHERE id=?",
-               (iso(now()), score, len(qs), attempt_id))
+               (iso(now()), score, out_of, attempt_id))
     db.commit()
-    return score, len(qs)
+    return score, out_of
 
 
 def attempts_for_test(db, test_id):

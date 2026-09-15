@@ -177,22 +177,36 @@ class Ctx:
         self.label = None
         self.num = None
         self.seen = 0          # blanks so far inside this item
-        self.blanks = []       # (label, num, ordinal within the item)
+        self.blanks = []       # (label, num, ordinal within the item, text)
+        self.loose = {}        # label -> blanks seen in it with no item number
+        self.text = ""
 
     def enter(self, plain):
         m = LABEL_AT.match(plain)
         if m:
             self.label, self.num, self.seen = m.group(1), None, 0
+            self.loose.pop(m.group(1), None)
+            self.text = plain.strip()
             return
         m = ITEM_AT.match(plain)
         if m and self.label:
             self.num, self.seen = int(m.group(1)), 0
+            self.text = plain.strip()
 
     def blank(self, dots):
         if not self.fillable or self.label is None:
             return None
+        num, nth = self.num, self.seen + 1
+        if num is None:
+            # Some exercises are a conversation or an advert rather than a
+            # numbered list, so the page has no "1", "2", "3" to hang the key
+            # on. The key numbers them anyway, in the order they are read, so
+            # the blanks are counted the same way.
+            self.loose[self.label] = self.loose.get(self.label, 0) + 1
+            num, nth = self.loose[self.label], 1
         self.seen += 1
-        self.blanks.append((self.label, self.num, self.seen))
+        self.blanks.append({"label": self.label, "num": num,
+                            "nth": nth, "text": self.text})
         return len(self.blanks) - 1
 
 
@@ -358,3 +372,61 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ------------------------------------------------ joining page to answer key
+
+def split_for(answer, n):
+    """One key answer, n blanks on the page.
+
+    An item with two gaps carries both answers in one line of the key -
+    "heat / melts", "was / were, would definitely do" - which is unusable as a
+    single box but exactly right once the sentence has two boxes in it. The
+    comma is tried first because a slash can belong inside one of the halves.
+    """
+    if n == 1:
+        return [answer]
+    for sep in (",", "/"):
+        parts = [p.strip() for p in answer.split(sep)]
+        if len(parts) == n and all(parts):
+            return parts
+    return None
+
+
+def to_test(booklet, key_path, level, title, number=1):
+    """A fillable booklet plus the questions the key can mark."""
+    import convert_booklet as cb
+    inner, blanks = render(booklet, fillable=True)
+    key = cb.read_key(key_path)
+
+    # how many blanks each item has, so a two-gap sentence is recognised
+    counts = {}
+    for b in blanks:
+        counts[(b["label"], b["num"])] = counts.get((b["label"], b["num"]), 0) + 1
+
+    questions, layout, unmarked = [], inner, 0
+    for i, b in enumerate(blanks):
+        answers = key.get(b["label"]) or {}
+        want = answers.get(b["num"])
+        parts = split_for(cb.tidy_answer(want), counts[(b["label"], b["num"])]) \
+            if want else None
+        chosen = parts[b["nth"] - 1] if parts else None
+        markable = bool(chosen) and cb.typeable(chosen, prompt="")
+        if not markable:
+            unmarked += 1
+        # every blank becomes a question, so everything the student types is
+        # kept; the ones the key cannot judge are "open" and score nothing
+        questions.append({"num": len(questions) + 1,
+                          "kind": "typed" if markable else "open",
+                          "prompt": "%s  %s" % (b["label"], b["text"][:160]),
+                          "answer": chosen if markable else None,
+                          "options": [], "blank": i})
+    # the layout points at its questions by number, so the page can put the
+    # student's own box back in the right hole
+    for q in questions:
+        layout = layout.replace('data-blank="%d"' % q["blank"],
+                                'data-q="%d"' % q["num"])
+    for q in questions:
+        q.pop("blank", None)
+    return {"level": level, "number": number, "title": title,
+            "passages": {}, "layout": layout, "questions": questions}, unmarked

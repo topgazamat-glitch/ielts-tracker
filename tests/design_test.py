@@ -21,14 +21,18 @@ print("   %d used, %d defined, missing: %s" % (len(used), len(defined), missing 
 assert not missing
 
 print("\n2. SPACING COMES FROM THE SCALE")
+# The booklet block is exempt on purpose: it reproduces a printed handout, and
+# its measurements are Word's, in the document's own units. Forcing them onto
+# the site's spacing scale would move the boxes off the page they came from.
+site_css = css.split("/* ------------------------------------------------------------- the booklet")[0]
 raw = [int(x) for x in re.findall(
-    r"\b(?:margin|padding|gap)[a-z-]*:\s*[^;{}]*?(\d+)px", css)]
+    r"\b(?:margin|padding|gap)[a-z-]*:\s*[^;{}]*?(\d+)px", site_css)]
 stray = sorted(n for n in set(raw) if n and n <= 60)
 print("   raw spacing values between 1 and 60px:", stray or "none")
 assert not stray, "spacing should use --sp-*, not bare pixels"
 
 print("\n3. THE TYPE SCALE IS SMALL")
-sizes = sorted(set(float(x) for x in re.findall(r"font-size:\s*([0-9.]+)px", css)))
+sizes = sorted(set(float(x) for x in re.findall(r"font-size:\s*([0-9.]+)px", site_css)))
 print("   sizes in use:", ", ".join("%g" % s for s in sizes))
 assert len(sizes) <= 12, "a type scale should be a handful of sizes, not a spectrum"
 assert not [s for s in sizes if s != int(s)], "no half pixels"
