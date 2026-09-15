@@ -1398,3 +1398,39 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
    the pages that hold one. */
 main.portal { max-width: 600px; }
 main.portal:has(.booksheet) { max-width: 940px; }
+
+/* ---------------------------------------------------- the booklet on a phone
+ * The handout was drawn for A4 and most of these students read it on a
+ * phone. Word's side-by-side cells became two 150px columns wrapping every
+ * three words, so on a narrow screen the table rows stack into one column and
+ * the printed widths are dropped. The boxes also have to be tappable: below
+ * 16px iOS zooms the whole page in the moment a field is focused, and a 24px
+ * target is a poor thing to hit with a thumb.
+ */
+@media (max-width: 720px) {
+  .booklet table.bk,
+  .booklet table.bk tbody,
+  .booklet table.bk tr,
+  .booklet table.bk td {
+    display: block;
+    width: auto !important;
+  }
+  .booklet table.bk td { padding: 6px 8px; }
+  .booklet table.bk td:empty { display: none; }
+  .booklet p { margin-bottom: 8px; }
+}
+@media (pointer: coarse) {
+  .booklet .bk-blank {
+    font-size: 16px;
+    min-height: 44px;
+    width: 100% !important;
+    max-width: 320px;
+    display: block;
+    margin: 4px 0;
+    border: 1px solid #9CC;
+    border-radius: 6px;
+    padding: 0 10px;
+  }
+  .booklet .bk-blank.right { border-color: #2E9E5B; }
+  .booklet .bk-blank.wrong { border-color: #D35; }
+}
