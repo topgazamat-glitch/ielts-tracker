@@ -128,6 +128,11 @@ def load_config():
         "draft_hours": 2,        # send an unfinished draft after this long
         "late_window_hours": 0,  # how long past a deadline students may still send
 
+        # the daily backup is also sent to the teacher in Telegram, which puts
+        # the whole student database in a chat history: a fair trade against
+        # losing everything, but it should be a choice
+        "backup_to_telegram": True,
+
         "timezone_offset_hours": 5,  # Tashkent
     }
     # config.json lives beside the source, but a run pointed at its own data
@@ -158,6 +163,7 @@ def load_config():
     env("TEACHER_PASSWORD", "teacher_password")
     env("PORT", "port", int)
     env("AUTOMATION", "automation", bool)
+    env("BACKUP_TO_TELEGRAM", "backup_to_telegram", bool)
     env("TIMEZONE_OFFSET_HOURS", "timezone_offset_hours", int)
     env("MIN_PHOTO_WIDTH", "min_photo_width", int)
     env("CHASE_HOURS", "chase_hours", int)
@@ -697,6 +703,40 @@ def last_homework_batch(db, group_id):
         "SELECT * FROM assignments WHERE group_id=?"
         " AND substr(COALESCE(due_at, created_at), 1, 10)=? ORDER BY id",
         (group_id, newest["k"][:10])).fetchall()
+
+
+def password_worry(cfg=None):
+    """Say so when the one key to everything is a weak one.
+
+    One password opens the whole dashboard: every student's name, their
+    photographs, their scores, and a download of the entire database. It is
+    never printed here, only measured.
+    """
+    cfg = cfg or load_config()
+    pw = cfg.get("teacher_password") or ""
+    if pw == "changeme" or not pw:
+        return "The teacher password is still the example one."
+    if len(pw) < 12:
+        return ("The teacher password is %d characters. Three or four "
+                "unrelated words would be far harder to guess and easier to "
+                "type." % len(pw))
+    if not os.environ.get("TEACHER_PASSWORD"):
+        return ("The password is in config.json rather than the host's own "
+                "settings, so changing it needs a deploy.")
+    return ""
+
+
+def reissue_token(db, student_id):
+    """Give a student a new private link, and make the old one dead.
+
+    A link is a password that never changes and gets forwarded. Until now
+    there was no way to take one back: a student who shared theirs had shared
+    their work and their scores for good.
+    """
+    token = secrets.token_urlsafe(16)
+    db.execute("UPDATE students SET token=? WHERE id=?", (token, student_id))
+    db.commit()
+    return token
 
 
 def student_token(db, student_id):

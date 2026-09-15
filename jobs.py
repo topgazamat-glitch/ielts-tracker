@@ -304,6 +304,10 @@ def send_backup_off_the_volume(db, cfg, path):
     day's copy is compressed and sent to the teacher in Telegram, which is the
     one place a copy already reaches a person.
     """
+    if not cfg.get("backup_to_telegram", True):
+        # the whole student database in a chat history is a real trade, and
+        # not everybody wants it; the download link on Overview still works
+        return "off (backup_to_telegram is false)"
     token = cfg.get("telegram_token")
     ids = json.loads(core.meta_get(db, "teachers", "[]"))
     if not token or not ids:

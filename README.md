@@ -208,6 +208,29 @@ then commit.
 - **Back up `/data`.** It holds the database and every photo. A monthly download
   is enough at this size.
 
+## Keeping it safe
+
+- **The repository should be private.** Nothing secret has ever been committed
+  - `config.json` is untracked and no token appears anywhere in the history -
+  but a public repo hands out every route, including the one that downloads
+  the whole database.
+- **The password lives in the host's settings, not the file.** Set
+  `TEACHER_PASSWORD` in Railway's Variables: changing it there needs no deploy,
+  and the file on your laptop stops being the thing that matters. The Overview
+  page says so if it is short or still in the file.
+- **One password opens everything** - every student's name, their photographs,
+  their scores, and a copy of the database. Three or four unrelated words beat
+  nine characters.
+- **A student's link can be reissued.** A link is a password that never
+  changes and does get forwarded; the button is on their page, and the old
+  link stops working at once.
+- **The daily backup is sent to you in Telegram.** That puts the student
+  database in a chat history, which is a fair trade against losing everything
+  but should be a choice: `"backup_to_telegram": false` turns it off and
+  leaves the download link on Overview.
+- **Coursebook audio needs a link.** A track is served to a signed-in teacher
+  or to somebody holding a student's own link, not to the open web.
+
 ## Before this leaves your laptop
 
 - Set a strong `teacher_password`; sessions are in-memory and reset on restart.

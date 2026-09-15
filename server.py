@@ -202,6 +202,8 @@ def view_overview(req, db):
 
     body = f"""{today_block(db, pending)}
 <h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}
+{f'<p class="flash err gap-5">{E(core.password_worry())}</p>'
+  if core.password_worry() else ''}
 <p class="sub gap-5">Everything here lives on one disk.
 <a class="linky" href="/backup">Download a copy of the database</a> and keep it
 somewhere else &mdash; the bot sends you one every day as well.</p>"""
@@ -1254,7 +1256,12 @@ upload page — no password, and it shows nobody else's work.</p>
      href="/s/{E(core.student_token(db, s['id']))}">Open their page</a>
 </div>
 <p class="sub gap-2">It opens in a separate window, so this one stays
-where it is &mdash; useful when you are showing the class what they will see.</p></div>
+where it is &mdash; useful when you are showing the class what they will see.</p>
+<form method="post" action="/students/{s['id']}/newlink" class="gap-2"
+ onsubmit="return confirm('Give {E(s["name"])} a new link? The old one stops working, and they will need the new one.')">
+<button class="ghost">New link</button>
+<span class="sub">&nbsp;Use this if the link has been shared with somebody
+else. The old one stops working at once.</span></form></div>
 <script>
 const box = document.getElementById('plink');
 box.value = location.origin + box.value;
@@ -2153,7 +2160,7 @@ TRACK_AT = re.compile(r"track\s*(\d{1,2}\.\d{2})", re.I)
 PARA = re.compile(r"<p\b[^>]*>.*?</p>", re.S)
 
 
-def add_players(html, level):
+def add_players(html, level, who=""):
     """Put a player after the paragraph that names a track.
 
     Word splits a run wherever it likes, so "track 10.02" arrives as
@@ -2175,14 +2182,15 @@ def add_players(html, level):
         for track in found:
             seen.add(track)
             players += ('<p><audio class="bkaudio" controls preload="none" '
-                        'src="/audio/%s/%s.mp3"></audio></p>'
-                        % (urllib.parse.quote(level), track))
+                        'src="/audio/%s/%s.mp3%s"></audio></p>'
+                        % (urllib.parse.quote(level), track,
+                           "?s=" + urllib.parse.quote(who) if who else ""))
         return block + players
 
     return PARA.sub(after, html)
 
 
-def fill_layout(layout, qs, given=None, marks=None, level=None):
+def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
     """Put the student's own boxes into the booklet's blanks.
 
     The booklet was rendered with `data-q="7"` where its seventh blank is, so
@@ -2205,7 +2213,7 @@ def fill_layout(layout, qs, given=None, marks=None, level=None):
         return (f'<input class="{cls}" name="q{q["id"]}"{attr}{ro}'
                 f' data-q="{m.group(1)}"')
 
-    return add_players(BLANK_AT.sub(box, layout), level)
+    return add_players(BLANK_AT.sub(box, layout), level, who)
 
 
 def portal_tests(db, s, token, query):
@@ -2284,7 +2292,7 @@ def portal_tests(db, s, token, query):
             return f"""<h2>{E(t["title"])}</h2>
 <div class="card champ-hero"><div class="sub">You scored</div>
 <div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
-<div class="booksheet">{fill_layout(layout, qs, mine, marks, level=core.level_name(db, t["level_id"]))}</div>
+<div class="booksheet">{fill_layout(layout, qs, mine, marks, level=core.level_name(db, t["level_id"]), who=token)}</div>
 {f'<h2 class="gap-4">The ones to look at again</h2><ul class="attn">{wrong}</ul>'
  if wrong else ''}
 <p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
@@ -2326,7 +2334,7 @@ can stop and come back. The {marked} answers with a key are marked as soon as
 you hand it in.{back}</p>
 <form method="post" action="/s/{E(token)}/test/{tid}"
  data-save="/s/{E(token)}/test/{tid}/save">
-<div class="booksheet">{fill_layout(layout, qs, sofar, level=core.level_name(db, t["level_id"]))}</div>
+<div class="booksheet">{fill_layout(layout, qs, sofar, level=core.level_name(db, t["level_id"]), who=token)}</div>
 <div class="gap-3"><button>Hand it in</button>
 <span class="sub" id="booksaved"></span></div>
 </form>"""
@@ -4896,6 +4904,12 @@ def view_backup(req, db):
                   ("Content-Length", str(len(data)))], data)
 
 
+def act_new_link(req, db, sid):
+    """A fresh private link; the old one is dead from this moment."""
+    core.reissue_token(db, sid)
+    return redirect(f"/students/{sid}?relink=1")
+
+
 def act_attempt_delete(req, db, tid, aid):
     """One sitting removed - a trial run, or a student who opened it by
     mistake. The league forgets it with the row."""
@@ -5620,6 +5634,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
+    ("POST", r"^/students/(\d+)/newlink$", act_new_link),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
@@ -5952,6 +5967,18 @@ class Handler(BaseHTTPRequestHandler):
                 db.close()
         m = re.match(r"^/audio/([^/]+)/(\d{1,2}\.\d{2})\.mp3$", path)
         if m:
+            # a track is for the class, not for the open web: either a signed-in
+            # teacher, or somebody holding a student's own link
+            who = (query.get("s", [""])[0] or "").strip()
+            allowed = self._session()
+            if not allowed and who:
+                db = core.connect()
+                try:
+                    allowed = bool(core.student_by_token(db, who))
+                finally:
+                    db.close()
+            if not allowed:
+                return self._send(*not_found())
             # the route table turns every captured group into an int, which a
             # level name is not, so this one is answered here
             db = core.connect()
