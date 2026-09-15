@@ -3367,7 +3367,8 @@ def serve_track(req, db, level, track):
 def act_new_track(req, db):
     """Put a coursebook track on the shelf its level reads from."""
     fields, files = req["files"]
-    level = (fields.get("level", "") or "").strip()
+    # parse_multipart hands back a list per field, the way a query string does
+    level = (fields.get("level", [""])[0] or "").strip()
     if not files or not level:
         return redirect("/tests")
     name, blob = files[0][0], files[0][1]
@@ -4799,7 +4800,8 @@ def serve_track(req, db, level, track):
 def act_new_track(req, db):
     """Put a coursebook track on the shelf its level reads from."""
     fields, files = req["files"]
-    level = (fields.get("level", "") or "").strip()
+    # parse_multipart hands back a list per field, the way a query string does
+    level = (fields.get("level", [""])[0] or "").strip()
     if not files or not level:
         return redirect("/tests")
     name, blob = files[0][0], files[0][1]
