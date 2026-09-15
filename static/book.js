@@ -65,5 +65,19 @@
     if (document.visibilityState === "hidden") save(true);
   });
   window.addEventListener("pagehide", () => save(true));
-  form.addEventListener("submit", () => { dirty = false; });
+  // Handing in an empty paper spends the sitting that counts. A student who
+  // opened the booklet to look at it, and pressed the button to see what it
+  // did, had a nought against their name for the season.
+  form.addEventListener("submit", (e) => {
+    const empty = boxes.filter((b) => !(b.value || "").trim()).length;
+    if (empty > boxes.length / 2) {
+      const ok = window.confirm(
+        empty === boxes.length
+          ? "You have not answered anything yet. Hand it in blank?"
+          : empty + " of " + boxes.length + " boxes are still empty. "
+            + "Hand it in anyway?");
+      if (!ok) { e.preventDefault(); return; }
+    }
+    dirty = false;
+  });
 })();
