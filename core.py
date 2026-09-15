@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS assignments (
     group_id INTEGER NOT NULL REFERENCES groups(id),
     title TEXT NOT NULL,
     task_type TEXT NOT NULL DEFAULT 'task2',
+    test_id INTEGER REFERENCES dtests(id),   -- when the homework is a booklet
     due_at TEXT,
     created_at TEXT NOT NULL,
     closed INTEGER NOT NULL DEFAULT 0,
@@ -395,6 +396,11 @@ def migrate(db):
     if pcols and "unit" not in pcols:
         for col in ("unit INTEGER", "lesson TEXT", "topic TEXT"):
             db.execute("ALTER TABLE prompts ADD COLUMN %s" % col)
+    if "test_id" not in acols:
+        # a piece of homework can *be* the digital booklet, rather than a line
+        # of text telling the student to go and find it
+        db.execute("ALTER TABLE assignments ADD COLUMN test_id INTEGER"
+                   " REFERENCES dtests(id)")
     if "in_league" not in acols:
         # homework can be set, marked and seen by students without counting
         # towards the league - a leftover set, or one that was only practice
@@ -1319,6 +1325,15 @@ def set_progress(db, student_id, items):
         [student_id] + ids,
     ).fetchall()
     done_ids = {r["assignment_id"] for r in rows}
+    # a booklet is handed in by sitting it, not by sending a photograph, so
+    # its tick comes from the attempt
+    for a in items:
+        tid = a["test_id"] if "test_id" in a.keys() else None
+        if tid and a["id"] not in done_ids and db.execute(
+                "SELECT 1 FROM dattempts WHERE test_id=? AND student_id=?"
+                " AND finished_at IS NOT NULL LIMIT 1",
+                (tid, student_id)).fetchone():
+            done_ids.add(a["id"])
     remaining = [a for a in items if a["id"] not in done_ids]
     return {
         "done": len(done_ids),
@@ -1848,7 +1863,7 @@ def homework_marks(db, student, lo, hi, windows):
     # the homework was written
     was_set = db.execute(
         "SELECT id, due_at FROM assignments WHERE group_id=? AND published=1"
-        " AND in_league=1"
+        " AND in_league=1 AND test_id IS NULL"
         " AND created_at < ? AND (created_at >= ? OR (due_at IS NOT NULL AND due_at >= ?))"
         " ORDER BY due_at IS NULL, due_at",
         (student["group_id"], hi, lo, lo)).fetchall()
@@ -2890,6 +2905,58 @@ def units_with_writing(db, level):
         "SELECT unit, topic, lesson FROM prompts WHERE level=? AND unit IS NOT NULL"
         " GROUP BY unit ORDER BY unit", (level,)).fetchall()
     return rows
+
+
+# The shape a unit's homework always takes, in the order it is always given.
+# Written down here because it was being retyped every week, and because the
+# writing task was then typed a second time to make it digital.
+UNIT_PLAN = [
+    ("workbook", "Workbook unit {unit} {pair}"),
+    ("booklet", "12-page handout \u2014 unit {unit}"),
+    ("writing", "Writing \u2014 {kind}"),
+    ("practice", "Practice test {test}"),
+]
+
+
+def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice=""):
+    """Everything a unit's homework needs, found rather than retyped.
+
+    The booklet and the writing question already exist in the system: one is a
+    digital test on that level's shelf, the other is in the question bank
+    against that unit. This joins them to the lines the teacher would have
+    written by hand, so setting a unit's homework is one form rather than two.
+    """
+    level_id = level_of(db, group_id)
+    level = level_name(db, level_id) if level_id else ""
+    out = {"level": level, "unit": unit, "items": []}
+
+    out["items"].append({"kind": "workbook", "test_id": None,
+                         "title": "Workbook unit %s %s" % (unit, pair)})
+
+    booklet = None
+    if level_id:
+        booklet = db.execute(
+            "SELECT id, title FROM dtests WHERE level_id=? AND number=?"
+            " AND layout IS NOT NULL ORDER BY published DESC, id DESC LIMIT 1",
+            (level_id, unit)).fetchone()
+    out["items"].append({
+        "kind": "booklet",
+        "test_id": booklet["id"] if booklet else None,
+        "title": (booklet["title"].replace(" (booklet)", "") if booklet
+                  else "12-page handout \u2014 unit %s" % unit)})
+
+    row = suggest_prompt(db, level, kind, unit) if level else None
+    out["items"].append({
+        "kind": "writing", "test_id": None,
+        "title": "Writing \u2014 %s" % (row["topic"] if row and row["topic"]
+                                    else kind),
+        "prompt": row["text"] if row else "",
+        "minutes": row["minutes"] if row and "minutes" in row.keys() else None})
+
+    if practice:
+        out["items"].append({"kind": "practice", "test_id": None,
+                             "title": "Practice test %s" % practice})
+    return out
 
 
 def seed_prompts(db):

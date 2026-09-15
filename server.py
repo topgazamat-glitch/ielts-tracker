@@ -1343,6 +1343,26 @@ def view_assignments(req, db):
     body = f"""<h1>Assignments</h1>
 <p class="sub">Open assignments are what the bot offers students when they send a photo.</p>
 <h2>Set homework</h2>
+<div class="card gap-3" id="unitbuild">
+<p style="margin-top:0"><strong>A unit\u2019s homework, in one go.</strong></p>
+<p class="sub">The workbook, the handout, the writing and an optional practice
+test &mdash; filled in below, ready to edit. The handout is found on this
+group\u2019s shelf and the question comes from the bank for that unit, so
+neither has to be typed twice.</p>
+<div class="inline gap-2">
+<label class="f">Group<select id="u_group">{opts}</select></label>
+<label class="f">Unit<input type="number" id="u_unit" min="1" max="20"
+ style="width:80px"></label>
+<label class="f">Lessons<select id="u_pair">
+<option value="A&amp;C">A &amp; C</option><option value="B&amp;D">B &amp; D</option>
+<option value="ASRP">Academic Skills + Reading Plus</option></select></label>
+<label class="f">Writing<select id="u_kind">{sug_kinds}</select></label>
+<label class="f">Practice test<input id="u_practice" placeholder="optional"
+ style="width:110px"></label>
+<label class="f pushed">&nbsp;<button type="button" id="u_build">Build it</button></label>
+</div>
+<p class="sub gap-2" id="u_note"></p>
+</div>
 <div class="card"><form method="post" action="/assignments/list">
 <div class="inline" style="margin-bottom:10px">
 <label class="f">Group<select name="group_id">{opts}</select></label>
@@ -1874,9 +1894,23 @@ def portal_home(db, s, token, flash):
         rows = ""
         for a in items:
             done = a["id"] in prog["done_ids"]
+            link = ""
+            tid = a["test_id"] if "test_id" in a.keys() else None
+            if tid:
+                # the handout is on the site, so the homework opens it rather
+                # than telling the student to go and find it
+                sat = db.execute(
+                    "SELECT score, total FROM dattempts WHERE test_id=? AND"
+                    " student_id=? AND finished_at IS NOT NULL"
+                    " ORDER BY finished_at LIMIT 1", (tid, s["id"])).fetchone()
+                done = bool(sat)
+                link = (f' <span class="pill good">{sat["score"]} of '
+                        f'{sat["total"]}</span>' if sat else
+                        f' <a class="linky" href="/s/{E(token)}?tab=tests&amp;'
+                        f't={tid}">open it &rarr;</a>')
             rows += (f'<li class="{"done" if done else ""}">'
                      f'<span class="box">{"&#10003;" if done else ""}</span>'
-                     f'{E(a["title"])}</li>')
+                     f'{E(a["title"])}{link}</li>')
         pct = prog["percent"] or 0
         lists += f"""<div class="card">
   <div class="rowline"><strong>{E(when)}</strong>
@@ -5151,6 +5185,22 @@ def act_batch_edit(req, db):
     return redirect("/assignments")
 
 
+def unit_plan_json(req, db):
+    """What a unit's homework is, so the teacher does not retype it."""
+    q = req["query"]
+    gid = (q.get("group_id", [""])[0] or "").strip()
+    unit = (q.get("unit", [""])[0] or "").strip()
+    if not gid.isdigit() or not unit.isdigit():
+        return json_response({"items": []})
+    core.seed_prompts(db)
+    plan = core.unit_homework(
+        db, int(gid), int(unit),
+        pair=(q.get("pair", ["A&C"])[0] or "A&C"),
+        kind=(q.get("kind", ["essay"])[0] or "essay"),
+        practice=(q.get("practice", [""])[0] or "").strip())
+    return json_response(plan)
+
+
 def act_new_list(req, db):
     f = req["form"]
     gid = f.get("group_id", [None])[0]
@@ -5167,18 +5217,40 @@ def act_new_list(req, db):
         v = (f.get(key, [""])[0] or "").strip()
         return int(v) if v.isdigit() and int(v) > 0 else None
     minutes, min_words = whole("minutes"), whole("min_words")
+
+    # The question belongs to the writing line, not to all of them. Setting
+    # four things at once used to turn every one of them into the same writing
+    # paper, because the prompt was handed to each row in the loop.
+    writing_at = 0
+    for i, t in enumerate(items):
+        if t.lower().startswith("writing"):
+            writing_at = i
+            break
+
+    # A line naming a booklet on this group's level *is* that booklet: the
+    # homework links to it instead of telling the student to go and find it.
+    booklets = {}
+    level_id = core.level_of(db, int(gid))
+    if level_id:
+        for r in db.execute(
+                "SELECT id, title FROM dtests WHERE level_id=? AND layout IS NOT NULL",
+                (level_id,)):
+            booklets[r["title"].replace(" (booklet)", "").strip().lower()] = r["id"]
+
     created = []
-    for title in items:
+    for i, title in enumerate(items):
         if already_set(db, int(gid), title, due_iso):
             continue
+        mine = prompt if (prompt and i == writing_at) else None
         created.append(db.execute(
             "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
-            " published, rubric, prompt, minutes, min_words)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " published, rubric, prompt, minutes, min_words, test_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (int(gid), title, f.get("task_type", ["other"])[0], due_iso,
              core.iso(core.now()), 1 if publish_now else 0,
              1 if f.get("rubric", [""])[0] == "1" else 0,
-             prompt, minutes, min_words),
+             mine, minutes if mine else None, min_words if mine else None,
+             booklets.get(title.strip().lower())),
         ).lastrowid)
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":
@@ -5337,6 +5409,7 @@ ROUTES = [
     ("POST", r"^/questions/(\d+)/answer$", act_answer_question),
     ("GET", r"^/materials$", view_materials),
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
+    ("GET",  r"^/assignments/unit\.json$", unit_plan_json),
     ("GET",  r"^/prompts$", view_prompts),
     ("GET",  r"^/prompts/suggest$", suggest_json),
     ("GET",  r"^/prompts/units$", units_json),

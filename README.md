@@ -47,6 +47,30 @@ while the CSS said, correctly, that it was allowed to scroll.
 
 Demo data to see the charts populated: `python3 seed_demo.py --reset`.
 
+## A unit's homework, in one go
+
+Four things are set for every unit, in the same order every week:
+
+1. the workbook, unit N, A&C or B&D
+2. the 12-page handout for that unit
+3. a writing task, on that unit's topic
+4. a practice test, sometimes
+
+**Assignments → A unit's homework** asks for the group, the unit and which
+lessons, and fills the form in. It finds the handout on that group's level
+shelf and the writing question in the bank for that unit, so neither is typed
+twice - the writing task used to be written once in the homework list and
+again to make it digital.
+
+A line naming a booklet *is* that booklet: the student's homework list opens
+it, and sitting it ticks the item and scores it. That item is not counted as
+homework in the league as well - the test already scores on its own - and it
+cannot be "missed", because there is no photograph to wait for.
+
+The question goes on the writing line only. It used to be handed to every item
+in the posting, so setting four things at once turned all four into the same
+writing paper.
+
 ## Daily flow
 
 - **Groups** → create a group. Once the bot has connected once, this page shows a

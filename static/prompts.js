@@ -80,3 +80,59 @@
   document.addEventListener("pageswap", wire);
   wire();
 })();
+
+/* ------------------------------------------------- a unit's homework, in one go
+ * The four things a unit always needs were being typed by hand every week, and
+ * the writing question was then typed a second time to make it digital. This
+ * asks the server what that unit's homework is - the booklet is already on the
+ * shelf, the question is already in the bank - and fills the form in.
+ */
+(function () {
+  const build = document.getElementById("u_build");
+  if (!build) return;
+  const $ = (id) => document.getElementById(id);
+
+  build.addEventListener("click", async () => {
+    const unit = ($("u_unit").value || "").trim();
+    const note = $("u_note");
+    if (!unit) { note.textContent = "Which unit?"; return; }
+    build.disabled = true;
+    note.textContent = "Looking…";
+    try {
+      const q = new URLSearchParams({
+        group_id: $("u_group").value, unit: unit,
+        pair: $("u_pair").value, kind: $("u_kind").value,
+        practice: ($("u_practice").value || "").trim(),
+      });
+      const r = await fetch("/assignments/unit.json?" + q.toString());
+      const plan = await r.json();
+      const items = plan.items || [];
+      if (!items.length) { note.textContent = "Nothing found for that unit."; return; }
+
+      const form = document.querySelector('form[action="/assignments/list"]');
+      form.querySelector('select[name=group_id]').value = $("u_group").value;
+      form.querySelector('textarea[name=items]').value =
+        items.map((i) => i.title).join("\n");
+
+      const writing = items.find((i) => i.kind === "writing");
+      const promptBox = form.querySelector('textarea[name=prompt]');
+      if (writing && writing.prompt && promptBox) {
+        promptBox.value = writing.prompt;
+        const details = promptBox.closest("details");
+        if (details) details.open = true;
+        if (writing.minutes) {
+          const m = form.querySelector('input[name=minutes]');
+          if (m && !m.value) m.value = writing.minutes;
+        }
+      }
+      const booklet = items.find((i) => i.kind === "booklet");
+      note.textContent = booklet && booklet.test_id
+        ? "Ready. The handout is on the site, so that line opens the booklet itself."
+        : "Ready. No digital handout for that unit yet — that line is just a note.";
+    } catch (e) {
+      note.textContent = "Could not build it.";
+    } finally {
+      build.disabled = false;
+    }
+  });
+})();

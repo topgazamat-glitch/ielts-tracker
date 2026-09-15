@@ -324,12 +324,15 @@ td a:hover { color: var(--accent); }
 
 /* ------------------------------------------------------------------- forms */
 
-form.inline { display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: flex-end; }
+/* A row of fields is a row whether or not a <form> is the thing holding
+   them. Ten of these are plain divs, and every one of them had been
+   stacking one field per line since the class was written. */
+.inline { display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: flex-end; }
 /* A flex item refuses to shrink below its content unless told it may,
    and a file picker's content is a whole filename. Without this the
    upload forms hung over the edge of their card on a phone. */
-form.inline > * { min-width: 0; max-width: 100%; }
-form.inline input[type=file] { width: 100%; }
+.inline > * { min-width: 0; max-width: 100%; }
+.inline input[type=file] { width: 100%; }
 label.f { display: flex; flex-direction: column; gap: var(--sp-1); font-size: 13px;
   font-weight: 540; color: var(--ink-3); }
 

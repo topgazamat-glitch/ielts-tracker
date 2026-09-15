@@ -34,7 +34,22 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SHOT_DIR = os.path.join(ROOT, "shots")
-DEBUG_PORT = 9222
+def _free_port():
+    """A port nobody else is on.
+
+    Chrome was always started on 9222, and a Chrome left over from an earlier
+    run is still listening there: the new one fails to bind, the check that it
+    came up succeeds against the *old* one, and every screenshot after that is
+    of a stale page with a stale stylesheet. That is a hard bug to see, because
+    the pictures look plausible.
+    """
+    import socket as _s
+    with _s.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+DEBUG_PORT = _free_port()
 SERVER_PORT = 8097
 PASSWORD = "look-at-the-pages"
 
