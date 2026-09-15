@@ -374,6 +374,12 @@ def migrate(db):
     if qcols and "image" not in qcols:
         db.execute("ALTER TABLE dquestions ADD COLUMN image TEXT")
 
+    tcols = {r["name"] for r in db.execute("PRAGMA table_info(dtests)")}
+    if tcols and "in_league" not in tcols:
+        # a test can be published for practice without deciding the table
+        db.execute("ALTER TABLE dtests ADD COLUMN in_league"
+                   " INTEGER NOT NULL DEFAULT 1")
+
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "prompt" not in acols:
         # a writing task carries its question, so the student can see it beside
@@ -511,6 +517,7 @@ def migrate(db):
         title TEXT NOT NULL,
         passage TEXT,                      -- the gap-fill text, when there is one
         published INTEGER NOT NULL DEFAULT 0,
+        in_league INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS dquestions (
@@ -1877,6 +1884,43 @@ def homework_marks(db, student, lo, hi, windows):
     return scores, late, missing, waiting, pending, batches
 
 
+def test_marks(db, student, lo, hi, windows):
+    """Digital tests sat this season, each one its own fixture.
+
+    A test is homework that marks itself, so it earns its points the same way
+    a marked set does: the score out of ten, worth up to three points, added to
+    the running total.
+
+    Only the *first* finished attempt counts. Students may sit a test again as
+    often as they like - that is what it is for - but if the best of nine tries
+    decided the table, the table would measure persistence at retaking rather
+    than what anyone knows, which is the fault that took the vocabulary streak
+    out of the scoring.
+
+    A test carries no deadline, so a student who never sat one is not given a
+    nought: in a table where points accumulate, the missed points are the loss.
+    """
+    level_id = level_of(db, student["group_id"])
+    if level_id is None:
+        return {}
+    rows = db.execute(
+        "SELECT a.test_id, a.score, a.total, a.finished_at"
+        "  FROM dattempts a JOIN dtests t ON t.id = a.test_id"
+        " WHERE a.student_id=? AND a.finished_at IS NOT NULL"
+        "   AND t.published=1 AND t.in_league=1 AND t.level_id=?"
+        "   AND a.finished_at >= ? AND a.finished_at < ?"
+        " ORDER BY a.finished_at",
+        (student["id"], level_id, lo, hi)).fetchall()
+    first = {}
+    for r in rows:
+        if r["test_id"] in first or not r["total"]:
+            continue                      # a later retake, or a test with no questions
+        if paused_at(r["finished_at"], windows):
+            continue                      # the league was off when they sat it
+        first[r["test_id"]] = [round(r["score"] * 10.0 / r["total"], 2)]
+    return first
+
+
 def championship(db, cfg=None):
     """Everyone's standing for the running season, best first."""
     cfg = cfg or load_config()
@@ -1893,6 +1937,12 @@ def championship(db, cfg=None):
 
         counted, late, missing, waiting, pending, batches = homework_marks(
             db, st, lo, hi, windows)
+        # a test that marks itself is a piece of homework like any other, and
+        # is keyed so it can never collide with a set of handed-in work
+        sat = test_marks(db, st, lo, hi, windows)
+        for test_id, marks in sat.items():
+            batches["test:%d" % test_id] = marks
+            counted.extend(marks)
         graded = len(counted)
         parts = {}
         # each set of homework is its own fixture: the average of the marks in

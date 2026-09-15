@@ -3944,7 +3944,8 @@ long the rest of the school takes to catch up.</p>
 {core.SEASON_LESSONS} lessons each, everyone in the school. It runs like a football league:
 every piece of homework you set is worth up to {core.HOMEWORK_PER_SET:g} points and every
 lesson up to {core.CONDUCT_PER_LESSON:g}, and those points are added to the running total
-and never taken away. Late or never handed in scores nought; anything still waiting to be
+and never taken away. A digital test counts as a piece of homework, marked the moment it is
+handed in. Late or never handed in scores nought; anything still waiting to be
 marked is left out until you mark it.</p>
 {top}
 {paused}
@@ -3981,8 +3982,11 @@ homework marked 10, 8 and 7 averages 8.3, which is 2.5 of the 3 it was worth. Th
 marked 10, 9 and 8 averages 9, which is 2.7. That student now has 5.2 for homework, and it
 keeps climbing all season.</p>
 <p class="sub gap-3">Homework is the average mark out of ten, scaled to
-3; a piece handed in after its deadline is a nought in that average. Words count up to
-{core.VOCAB_TARGET}. In the lesson is the average of punctuality, behaviour and taking
+3; a piece handed in after its deadline is a nought in that average. A digital test scores
+the same way - its result out of ten, worth up to {core.HOMEWORK_PER_SET:g} - and only the
+first sitting counts, so retaking a test to learn from it never moves the table. A test
+that carries no deadline cannot be missed, so not sitting one is no points rather than a
+nought. In the lesson is the average of punctuality, behaviour and taking
 part, and each lesson is worth up to five. Both add up across the season rather than
 averaging out: full marks means {core.SEASON_LESSONS} pieces of homework at ten and
 {core.SEASON_LESSONS} lessons at five. A deadline that passed with nothing against it is a
@@ -4549,9 +4553,23 @@ def view_test(req, db, tid):
 
     pub = ""
     if ready:
-        pub = (f'<form method="post" action="/tests/{tid}/publish">'
+        counts = t["in_league"] if "in_league" in t.keys() else 1
+        # a test marks itself, so a sat test is a piece of homework in the
+        # league - unless this is practice, and the teacher says otherwise
+        league = (f'<form method="post" action="/tests/{tid}/league"'
+                  f' style="display:inline">'
+                  f'<button class="ghost">'
+                  f'{"Leave out of the league" if counts else "Count in the league"}'
+                  f'</button></form>')
+        note = ('It counts towards the league: a sat test is worth up to '
+                f'{core.HOMEWORK_PER_SET:g} points, like a set of homework. '
+                'Only the first sitting counts.' if counts else
+                'It does not count towards the league.')
+        pub = (f'<form method="post" action="/tests/{tid}/publish"'
+               f' style="display:inline">'
                f'<button>{"Unpublish" if t["published"] else "Publish to students"}'
-               f'</button></form>')
+               f'</button></form> {league}'
+               f'<p class="sub gap-3" style="margin-bottom:0">{note}</p>')
     else:
         pub = ('<p class="sub">Set every answer before publishing.</p>')
 
@@ -4570,6 +4588,17 @@ def view_test(req, db, tid):
 <div class="card gap-4">{pub}</div>
 {results}"""
     return html_response(page(t["title"], body, "Tests"))
+
+
+def act_test_league(req, db, tid):
+    """In or out of the league, without touching whether students can see it."""
+    row = db.execute("SELECT in_league FROM dtests WHERE id=?", (tid,)).fetchone()
+    if not row:
+        return not_found()
+    db.execute("UPDATE dtests SET in_league=? WHERE id=?",
+               (0 if row["in_league"] else 1, tid))
+    db.commit()
+    return redirect(f"/tests/{tid}")
 
 
 def act_new_test(req, db):
@@ -5247,6 +5276,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/key$", act_test_key),
     ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
+    ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
