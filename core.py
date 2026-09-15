@@ -506,6 +506,10 @@ def migrate(db):
         ms INTEGER,
         UNIQUE (game_id, question_id, student_id)
     );
+    CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS prompts (
         id INTEGER PRIMARY KEY,
         level TEXT NOT NULL,               -- Beginner ... IELTS Standard
@@ -2321,9 +2325,82 @@ def start_attempt(db, test_id, student_id):
         (test_id, student_id)).fetchone()
     if row:
         return row["id"]
-    return db.execute(
+    new_id = db.execute(
         "INSERT INTO dattempts (test_id, student_id, started_at) VALUES (?,?,?)",
         (test_id, student_id, iso(now()))).lastrowid
+    # Without this the row dies with the request that made it. Nothing noticed
+    # while a paper was only ever handed in whole; the moment the page began
+    # saving as it was typed, there was no attempt left to save against.
+    db.commit()
+    return new_id
+
+
+SESSION_DAYS = 30
+
+
+def open_session(db):
+    """A signed-in session that outlives a restart.
+
+    Sessions were a dictionary in memory, so every deploy - and every time the
+    host restarted the app - signed the teacher out, often in the middle of
+    marking. They live in the database now, and are swept when they expire.
+    """
+    token = secrets.token_urlsafe(24)
+    db.execute("INSERT INTO sessions (token, created_at) VALUES (?,?)",
+               (token, iso(now())))
+    db.execute("DELETE FROM sessions WHERE created_at < ?",
+               (iso(now() - timedelta(days=SESSION_DAYS)),))
+    db.commit()
+    return token
+
+
+def session_live(db, token):
+    if not token:
+        return False
+    row = db.execute(
+        "SELECT created_at FROM sessions WHERE token=?", (token,)).fetchone()
+    if not row:
+        return False
+    return parse(row["created_at"]) > now() - timedelta(days=SESSION_DAYS)
+
+
+def close_session(db, token):
+    db.execute("DELETE FROM sessions WHERE token=?", (token,))
+    db.commit()
+
+
+def save_progress(db, attempt_id, given):
+    """Keep what has been typed so far, without handing it in.
+
+    A booklet is a hundred boxes and it is filled in on a phone, where a call,
+    a flat battery or a closed tab is ordinary. Nothing is marked here -
+    `correct` stays NULL until the paper is handed in - so this is only the
+    student's work being held on to.
+    """
+    row = db.execute("SELECT test_id FROM dattempts WHERE id=? AND"
+                     " finished_at IS NULL", (attempt_id,)).fetchone()
+    if not row:
+        return 0
+    ours = {r["id"] for r in db.execute(
+        "SELECT id FROM dquestions WHERE test_id=?", (row["test_id"],))}
+    n = 0
+    for qid, text in given.items():
+        if qid not in ours:
+            continue
+        db.execute(
+            "INSERT INTO dresponses (attempt_id, question_id, given, correct)"
+            " VALUES (?,?,?,NULL) ON CONFLICT(attempt_id, question_id)"
+            " DO UPDATE SET given=excluded.given", (attempt_id, qid, text or None))
+        n += 1
+    db.commit()
+    return n
+
+
+def attempt_answers(db, attempt_id):
+    """What is already in the boxes of an unfinished paper."""
+    return {r["question_id"]: r["given"] for r in db.execute(
+        "SELECT question_id, given FROM dresponses WHERE attempt_id=?",
+        (attempt_id,)) if r["given"]}
 
 
 def submit_attempt(db, attempt_id, given):

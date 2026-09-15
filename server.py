@@ -18,7 +18,6 @@ import core
 import uploads
 
 CFG = core.load_config()
-SESSIONS = {}
 LOGIN_ATTEMPTS = {}          # client -> [timestamps of recent failures]
 MAX_ATTEMPTS, LOCKOUT = 6, 900
 
@@ -165,7 +164,10 @@ def view_overview(req, db):
         risk_html += "Students appear here after two consecutive misses or a falling trend.</p></div>"
 
     body = f"""{today_block(db, pending)}
-<h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}"""
+<h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}
+<p class="sub gap-5">Everything here lives on one disk.
+<a class="linky" href="/backup">Download a copy of the database</a> and keep it
+somewhere else &mdash; the bot sends you one every day as well.</p>"""
     return html_response(page("Overview", body, "Overview"))
 
 
@@ -1845,7 +1847,8 @@ def student_page(title, body, music=True):
 <main class="portal">{body}</main>
 {tune}{player}
 <script src="/static/nav.js" defer></script>
-<script src="/static/write.js" defer></script></body></html>"""
+<script src="/static/write.js" defer></script>
+<script src="/static/book.js" defer></script></body></html>"""
 
 
 def student_shell(s, db, token, tab, body):
@@ -2210,7 +2213,7 @@ def portal_tests(db, s, token, query):
 <p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
 <a class="tab" href="{base}&amp;t={tid}&amp;again=1">Try it again</a></p>"""
 
-    core.start_attempt(db, tid, s["id"])
+    attempt = core.start_attempt(db, tid, s["id"])
     passage = (f'<div class="card"><div class="passage">{E(t["passage"])}</div></div>'
                if t["passage"] else "")
     rows = ""
@@ -2231,12 +2234,18 @@ def portal_tests(db, s, token, query):
     layout = t["layout"] if "layout" in t.keys() else None
     if layout:
         marked = sum(1 for q, _o in qs if q["kind"] != "open")
+        sofar = core.attempt_answers(db, attempt)
+        back = (' <span class="pill">picked up where you left off</span>'
+                if sofar else "")
         return f"""<h2>{E(t["title"])}</h2>
-<p class="sub">Your booklet. Fill it in here - everything you type is kept, and
-the {marked} answers with a key are marked as soon as you hand it in.</p>
-<form method="post" action="/s/{E(token)}/test/{tid}">
-<div class="booksheet">{fill_layout(layout, qs)}</div>
-<div class="gap-3"><button>Hand it in</button></div>
+<p class="sub">Your booklet. Fill it in here &mdash; it saves as you type, so you
+can stop and come back. The {marked} answers with a key are marked as soon as
+you hand it in.{back}</p>
+<form method="post" action="/s/{E(token)}/test/{tid}"
+ data-save="/s/{E(token)}/test/{tid}/save">
+<div class="booksheet">{fill_layout(layout, qs, sofar)}</div>
+<div class="gap-3"><button>Hand it in</button>
+<span class="sub" id="booksaved"></span></div>
 </form>"""
     return f"""<h2>{E(t["title"])}</h2>
 <p class="sub">{len(qs)} questions. It is marked as soon as you hand it in.</p>
@@ -2245,6 +2254,24 @@ the {marked} answers with a key are marked as soon as you hand it in.</p>
 <div class="card">{rows}</div>
 <div class="gap-3"><button>Hand it in</button></div>
 </form>"""
+
+
+def act_book_save(req, db, token, tid):
+    """Hold on to what has been typed, without handing the paper in."""
+    s = core.student_by_token(db, token)
+    if not s:
+        return json_response({"ok": False})
+    row = db.execute(
+        "SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+        " AND finished_at IS NULL", (tid, s["id"])).fetchone()
+    if not row:
+        return json_response({"ok": False, "why": "handed in"})
+    given = {}
+    for key, vals in req["form"].items():
+        if key.startswith("q") and key[1:].isdigit():
+            given[int(key[1:])] = (vals[0] or "").strip()
+    return json_response({"ok": True,
+                          "kept": core.save_progress(db, row["id"], given)})
 
 
 def act_student_write(req, db, token, sub_id, quiet=False):
@@ -4699,6 +4726,27 @@ def act_test_league(req, db, tid):
     return redirect(f"/tests/{tid}")
 
 
+def view_backup(req, db):
+    """Hand the newest backup to the teacher, so a copy can leave the server.
+
+    The scheduler sends one to Telegram every day, but that needs the bot and
+    a teacher registered with it. This is the path that always works: press
+    it, and the file is on your own machine.
+    """
+    import jobs
+    folder = os.path.join(core.DATA_DIR, "backups")
+    files = sorted(f for f in os.listdir(folder)) if os.path.isdir(folder) else []
+    if not files:
+        jobs.backup()
+        files = sorted(os.listdir(folder))
+    newest = os.path.join(folder, files[-1])
+    data = open(newest, "rb").read()
+    return (200, [("Content-Type", "application/octet-stream"),
+                  ("Content-Disposition",
+                   'attachment; filename="%s"' % files[-1]),
+                  ("Content-Length", str(len(data)))], data)
+
+
 def act_attempt_delete(req, db, tid, aid):
     """One sitting removed - a trial run, or a student who opened it by
     mistake. The league forgets it with the row."""
@@ -5410,6 +5458,7 @@ ROUTES = [
     ("GET", r"^/materials$", view_materials),
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
     ("GET",  r"^/assignments/unit\.json$", unit_plan_json),
+    ("GET",  r"^/backup$", view_backup),
     ("GET",  r"^/prompts$", view_prompts),
     ("GET",  r"^/prompts/suggest$", suggest_json),
     ("GET",  r"^/prompts/units$", units_json),
@@ -5485,10 +5534,39 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _same_origin(self):
+        """Refuse a POST that another site asked the browser to make.
+
+        The session cookie is already SameSite=Lax, which stops a browser
+        sending it on a cross-site POST at all, so this is a second lock on
+        the same door rather than the first. It reads Origin, falling back to
+        Referer, and only refuses when one of them is present and points
+        somewhere else - a request with neither is a script or the bot, not a
+        browser being steered by a hostile page.
+        """
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        for name in ("Origin", "Referer"):
+            raw = self.headers.get(name)
+            if not raw or raw == "null":
+                continue
+            where = urllib.parse.urlsplit(raw).hostname or ""
+            return where.lower() == host
+        return True
+
+    def _token(self):
+        m = re.search(r"ta_session=([A-Za-z0-9_-]+)",
+                      self.headers.get("Cookie", ""))
+        return m.group(1) if m else None
+
     def _session(self):
-        cookie = self.headers.get("Cookie", "")
-        m = re.search(r"ta_session=([A-Za-z0-9_-]+)", cookie)
-        return bool(m and m.group(1) in SESSIONS)
+        token = self._token()
+        if not token:
+            return False
+        db = core.connect()
+        try:
+            return core.session_live(db, token)
+        finally:
+            db.close()
 
     def _serve_static(self, path):
         name = os.path.basename(path)
@@ -5726,6 +5804,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/login":
             return self._send(*view_login(None))
         if path == "/logout":
+            token = self._token()
+            if token:
+                db = core.connect()
+                try:
+                    core.close_session(db, token)
+                finally:
+                    db.close()
             return self._send(*redirect("/login", [("Set-Cookie", "ta_session=; Max-Age=0; Path=/")]))
         if not self._session():
             return self._send(*redirect("/login"))
@@ -5744,6 +5829,12 @@ class Handler(BaseHTTPRequestHandler):
                 student_page("Too large", "<h1>Those photos are too large</h1>"
                              "<p class='sub'>Send fewer pages at a time.</p>"), 413))
         body = self.rfile.read(length) if length else b""
+
+        if not self._same_origin():
+            return self._send(*html_response(
+                student_page("Not allowed", "<h1>That request came from "
+                             "somewhere else</h1><p class='sub'>Open the site "
+                             "itself and try again.</p>"), 403))
 
         if path == "/materials/new":
             if not self._session():
@@ -5825,6 +5916,17 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 db.close()
 
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/test/(\d+)/save$", path)
+        if m:
+            saved = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                          keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_book_save(
+                    {"query": {}, "form": saved}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
+
         m = re.match(r"^/s/([A-Za-z0-9_-]+)/write/(\d+)(/save)?$", path)
         if m:
             form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
@@ -5893,8 +5995,11 @@ class Handler(BaseHTTPRequestHandler):
             expected = core.load_config()["teacher_password"]
             if secrets.compare_digest(form.get("password", [""])[0], expected):
                 LOGIN_ATTEMPTS.pop(client, None)
-                token = secrets.token_urlsafe(24)
-                SESSIONS[token] = True
+                db = core.connect()
+                try:
+                    token = core.open_session(db)
+                finally:
+                    db.close()
                 return self._send(
                     *redirect("/", [("Set-Cookie",
                                      f"ta_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")])

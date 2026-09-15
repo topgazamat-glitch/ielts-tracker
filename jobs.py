@@ -4,6 +4,8 @@ Runs on a background thread inside app.py: deadline reminders, nudges after a
 missed assignment, weekly summaries, and database backups. Every message is
 recorded in `notifications` first, so nothing is ever sent twice.
 """
+import gzip
+import json
 import os
 import shutil
 import sqlite3
@@ -293,6 +295,42 @@ def _phrase_fmt(lang, kind, **kw):
     return bot.t(lang, "hw_" + kind, **kw)
 
 
+def send_backup_off_the_volume(db, cfg, path):
+    """Put a copy somewhere the volume cannot take with it.
+
+    Fourteen daily copies in /data/backups protect against a bad migration or
+    a mistaken delete. They do not protect against the disk they are on: if
+    the volume goes, the database and every backup of it go together. So the
+    day's copy is compressed and sent to the teacher in Telegram, which is the
+    one place a copy already reaches a person.
+    """
+    token = cfg.get("telegram_token")
+    ids = json.loads(core.meta_get(db, "teachers", "[]"))
+    if not token or not ids:
+        return "nobody to send it to"
+    gz = path + ".gz"
+    with open(path, "rb") as src, gzip.open(gz, "wb", compresslevel=6) as dst:
+        shutil.copyfileobj(src, dst)
+    size = os.path.getsize(gz)
+    if size > 45 * 1024 * 1024:          # Telegram refuses a bot upload at 50MB
+        os.remove(gz)
+        return "too big to send (%.1f MB)" % (size / 1024 / 1024)
+    import bot
+    sent = 0
+    for tid in ids:
+        try:
+            bot.send_document(token, tid, gz, os.path.basename(gz),
+                              caption="Backup %s — %.1f MB. Keep it somewhere "
+                                      "that is not this server."
+                                      % (core.local_day(core.now(), cfg),
+                                         size / 1024 / 1024))
+            sent += 1
+        except Exception as exc:
+            print("backup send failed:", exc)
+    os.remove(gz)
+    return "sent to %d" % sent if sent else "send failed"
+
+
 def backup(db_path=None):
     """A consistent copy of the database, even while it is being written to."""
     db_path = db_path or core.DB_PATH
@@ -358,7 +396,9 @@ def tick(cfg):
         if core.already_sent(db, "backup", core.now().strftime("%Y-%m-%d")):
             done["backup"] = "already today"
         else:
-            done["backup"] = os.path.basename(backup())
+            made = backup()
+            done["backup"] = os.path.basename(made)
+            done["backup_off_site"] = send_backup_off_the_volume(db, cfg, made)
             core.mark_sent(db, "backup", core.now().strftime("%Y-%m-%d"))
         if core.already_sent(db, "offload", core.now().strftime("%Y-%m-%d")):
             done["offload"] = "already today"
