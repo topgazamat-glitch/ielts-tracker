@@ -910,8 +910,24 @@ def record_answer(db, student_id, word_id, was_correct):
     ).fetchone()
     seen = (row["seen"] if row else 0) + 1
     correct = (row["correct"] if row else 0) + (1 if was_correct else 0)
-    streak = ((row["streak"] if row else 0) + 1) if was_correct else 0
-    days = INTERVALS[min(streak, len(INTERVALS) - 1)] if was_correct else 1
+
+    # A word answered before it was due does not advance the streak. Spacing is
+    # the whole method: remembering a word you saw a minute ago proves nothing,
+    # and a student who kept pressing practise could walk a word to "known" in
+    # an afternoon. Getting it wrong still counts, and still resets it.
+    due = row and row["next_due"] and parse(row["next_due"]) <= now()
+    early = bool(row) and not due
+    if not was_correct:
+        streak = 0
+    elif early:
+        streak = row["streak"]
+    else:
+        streak = (row["streak"] if row else 0) + 1
+
+    if was_correct and early:
+        days = None                       # leave the date alone; it is not due yet
+    else:
+        days = INTERVALS[min(streak, len(INTERVALS) - 1)] if was_correct else 1
     db.execute(
         "INSERT INTO word_progress (student_id, word_id, seen, correct, streak,"
         " next_due, last_seen) VALUES (?,?,?,?,?,?,?)"
@@ -919,7 +935,8 @@ def record_answer(db, student_id, word_id, was_correct):
         " correct=excluded.correct, streak=excluded.streak,"
         " next_due=excluded.next_due, last_seen=excluded.last_seen",
         (student_id, word_id, seen, correct, streak,
-         iso(now() + timedelta(days=days)), iso(now())),
+         iso(now() + timedelta(days=days)) if days is not None
+         else row["next_due"], iso(now())),
     )
     db.commit()
 
