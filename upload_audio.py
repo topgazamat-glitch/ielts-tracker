@@ -18,6 +18,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
+import time
 import uuid
 
 SITE = "https://ielts-tracker-production.up.railway.app"
@@ -132,7 +133,20 @@ def main():
             if not args.upload:
                 print("   would send %s  for %s" % (track, asked_by))
                 continue
-            status = post_track(opener, args.site, level, path, track)
+            status = None
+            for attempt in range(4):
+                try:
+                    status = post_track(opener, args.site, level, path, track)
+                    break
+                except Exception as exc:
+                    # a deploy restarting mid-upload answers 502; wait it out
+                    print("   retry     %s  (%s)" % (track, type(exc).__name__))
+                    time.sleep(15)
+                    opener = ub.sign_in(args.site, password)
+            if status is None:
+                print("   FAILED    %s" % track)
+                missing += 1
+                continue
             print("   sent      %s  (%s)" % (track, status))
             sent += 1
     print()

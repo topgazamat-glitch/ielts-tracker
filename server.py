@@ -5546,7 +5546,6 @@ ROUTES = [
     ("GET", r"^/materials/(\d+)/file$", view_material_file),
     ("GET",  r"^/assignments/unit\.json$", unit_plan_json),
     ("GET",  r"^/backup$", view_backup),
-    ("GET",  r"^/audio/([^/]+)/([0-9.]+)\.mp3$", serve_track),
     ("GET",  r"^/prompts$", view_prompts),
     ("GET",  r"^/prompts/suggest$", suggest_json),
     ("GET",  r"^/prompts/units$", units_json),
@@ -5889,6 +5888,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_file(status, headers, path, start, length)
             finally:
                 db.close()
+        m = re.match(r"^/audio/([^/]+)/(\d{1,2}\.\d{2})\.mp3$", path)
+        if m:
+            # the route table turns every captured group into an int, which a
+            # level name is not, so this one is answered here
+            db = core.connect()
+            try:
+                return self._send(*serve_track(
+                    {"query": {}, "form": {}}, db,
+                    urllib.parse.unquote(m.group(1)), m.group(2)))
+            finally:
+                db.close()
+
         if path == "/login":
             return self._send(*view_login(None))
         if path == "/logout":

@@ -179,6 +179,7 @@ class Ctx:
         self.seen = 0          # blanks so far inside this item
         self.blanks = []       # (label, num, ordinal within the item, text)
         self.loose = {}        # label -> blanks seen in it with no item number
+        self.items = {}        # (label, num) -> how many blanks it ended up with
         self.text = ""
 
     def enter(self, plain):
@@ -207,6 +208,7 @@ class Ctx:
         self.seen += 1
         self.blanks.append({"label": self.label, "num": num,
                             "nth": nth, "text": self.text})
+        self.items[(self.label, num)] = self.items.get((self.label, num), 0) + 1
         return len(self.blanks) - 1
 
 
@@ -306,16 +308,20 @@ def render_blocks(container, ctx=None):
         if block.startswith("<w:tbl"):
             out.append(render_table(block, ctx))
             continue
+        tag = ""
         if ctx:
             ctx.enter(plain_text(block))
+            if ctx.label and ctx.num is not None:
+                tag = ' data-item="%s:%s"' % (ctx.label, ctx.num)
+                ctx.items.setdefault((ctx.label, ctx.num), 0)
         inner = render_runs(block, ctx)
         style = para_style(block)
         if not inner.strip():
             out.append(f'<p class="sp" style="{style}"></p>' if style
                        else '<p class="sp"></p>')
         else:
-            out.append(f'<p style="{style}">{inner}</p>' if style
-                       else f"<p>{inner}</p>")
+            out.append(f'<p{tag} style="{style}">{inner}</p>' if style
+                       else f"<p{tag}>{inner}</p>")
     return "".join(out)
 
 
@@ -348,6 +354,7 @@ def render(path, fillable=False):
     body = re.sub(r"<w:sectPr\b.*?</w:sectPr>", "", body, flags=re.S)
     ctx = Ctx(fillable) if fillable else None
     inner = render_blocks(body, ctx)
+    render._last_items = ctx.items if ctx else {}
     return f'<div class="booklet">{inner}</div>', (ctx.blanks if ctx else [])
 
 
@@ -393,6 +400,34 @@ def split_for(answer, n):
     return None
 
 
+ITEM_P = re.compile(r'<p data-item="([^"]+):(\d+)"[^>]*>(.*?)</p>', re.S)
+
+
+def add_missing_boxes(layout, ctx_items, key, blanks):
+    """Give a box to an item that prints its choices and offers nowhere to write.
+
+    Forty-five exercises across the thirty booklets say "Choose the best
+    answer: A, B or C" and print the options inside the sentence, with no
+    dotted line anywhere - on paper you circle one. On screen that left the
+    student looking at a question they could not answer at all.
+    """
+    made = []
+
+    def box(m):
+        label, num, guts = m.group(1), int(m.group(2)), m.group(3)
+        if ctx_items.get((label, num)):
+            return m.group(0)                 # it already has somewhere to write
+        want = (key.get(label) or {}).get(num)
+        if not want or not re.fullmatch(r"[A-Za-z]", str(want).strip()):
+            return m.group(0)
+        made.append({"label": label, "num": num, "nth": 1,
+                     "text": re.sub(r"<[^>]+>", " ", guts)[:150].strip()})
+        return ('<p data-item="%s:%s">%s {{addbox:%d}}</p>'
+                % (label, num, guts, len(made) - 1))
+
+    return ITEM_P.sub(box, layout), made
+
+
 def to_test(booklet, key_path, level, title, number=1):
     """A fillable booklet plus the questions the key can mark."""
     import convert_booklet as cb
@@ -404,12 +439,18 @@ def to_test(booklet, key_path, level, title, number=1):
     for b in blanks:
         counts[(b["label"], b["num"])] = counts.get((b["label"], b["num"]), 0) + 1
 
+    # the render kept a count of how many blanks each item ended up with
+    counts_by_item = getattr(render, "_last_items", {})
+    inner, added = add_missing_boxes(inner, counts_by_item, key, blanks)
+    for extra in added:
+        blanks.append(extra)
     questions, layout, unmarked = [], inner, 0
     for i, b in enumerate(blanks):
         answers = key.get(b["label"]) or {}
         want = answers.get(b["num"])
-        parts = split_for(cb.tidy_answer(want), counts[(b["label"], b["num"])]) \
-            if want else None
+        # an added box is the only one on its item, so it takes the whole answer
+        how_many = counts.get((b["label"], b["num"]), 1)
+        parts = split_for(cb.tidy_answer(want), how_many) if want else None
         chosen = parts[b["nth"] - 1] if parts else None
         markable = bool(chosen) and cb.typeable(chosen, prompt="")
         if not markable:
@@ -426,6 +467,18 @@ def to_test(booklet, key_path, level, title, number=1):
     for q in questions:
         layout = layout.replace('data-blank="%d"' % q["blank"],
                                 'data-q="%d"' % q["num"])
+    # the items that had nowhere to write get their box here
+    for k, extra in enumerate(added):
+        num = next((q["num"] for q in questions
+                    if q["blank"] == len(blanks) - len(added) + k), None)
+        if num is None:
+            continue
+        layout = layout.replace(
+            "{{addbox:%d}}" % k,
+            '<input class="bk-blank" data-q="%d" style="width:80px" '
+            'autocomplete="off" autocapitalize="characters" '
+            'spellcheck="false">' % num)
+    layout = re.sub(r"\{\{addbox:\d+\}\}", "", layout)
     for q in questions:
         q.pop("blank", None)
     return {"level": level, "number": number, "title": title,
