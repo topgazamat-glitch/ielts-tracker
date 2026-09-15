@@ -2351,6 +2351,24 @@ def attempts_for_test(db, test_id):
         " ORDER BY a.score DESC, a.finished_at", (test_id,)).fetchall()
 
 
+def drop_attempt(db, attempt_id):
+    """Rub out one sitting, and the answers that went with it.
+
+    A teacher opening a test to see what it looks like leaves a real attempt
+    behind, and because only the first sitting counts, that trial run is the
+    one the league would keep forever. Removing it is the honest fix; there is
+    nothing else in the system that can put it right.
+    """
+    row = db.execute("SELECT test_id, student_id FROM dattempts WHERE id=?",
+                     (attempt_id,)).fetchone()
+    if not row:
+        return None
+    db.execute("DELETE FROM dresponses WHERE attempt_id=?", (attempt_id,))
+    db.execute("DELETE FROM dattempts WHERE id=?", (attempt_id,))
+    db.commit()
+    return row["test_id"]
+
+
 def student_attempts(db, student_id):
     return db.execute(
         "SELECT a.*, t.title FROM dattempts a JOIN dtests t ON t.id=a.test_id"

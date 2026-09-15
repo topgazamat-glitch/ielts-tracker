@@ -122,4 +122,29 @@ db.commit()
 print("   a perfect test sat while paused -> homework %s" % points("Ali"))
 assert points("Ali") == core.HOMEWORK_PER_SET * 2, "the pause should swallow it"
 
+
+
+print("\n8. A TRIAL SITTING CAN BE RUBBED OUT")
+gid = student("Gul")
+att = sit(gid, t1, 10, start + timedelta(days=5))  # before the pause
+db.commit()
+print("   sat it perfectly -> homework %s" % points("Gul"))
+assert points("Gul") == core.HOMEWORK_PER_SET
+left = db.execute("SELECT COUNT(*) c FROM dresponses WHERE attempt_id=?",
+                  (att,)).fetchone()["c"]
+core.drop_attempt(db, att)
+after = db.execute("SELECT COUNT(*) c FROM dresponses WHERE attempt_id=?",
+                   (att,)).fetchone()["c"]
+db.commit()
+print("   removed: %d answers before, %d after -> homework %s"
+      % (left, after, points("Gul")))
+assert after == 0, "the answers go with the sitting"
+assert points("Gul") == 0.0, "the league forgets it"
+
+# and the first-sitting rule now applies to whatever they do next
+sit(gid, t1, 5, start + timedelta(days=9))   # after the pause of step 7
+db.commit()
+print("   sits it again, 5 of 10 -> homework %s" % points("Gul"))
+assert points("Gul") == round(core.HOMEWORK_PER_SET / 2, 2)
+
 print("\nALL GOOD")

@@ -4602,11 +4602,17 @@ def view_test(req, db, tid):
     results = ""
     if sat:
         results = "<h2>Who has sat it</h2><div class='tablewrap'><table>" \
-                  "<tr><th>Student</th><th>Score</th><th>When</th></tr>"
+                  "<tr><th>Student</th><th>Score</th><th>When</th><th></th></tr>"
         for a in sat:
-            results += (f'<tr><td>{E(a["name"])}</td>'
-                        f'<td><strong>{a["score"]}</strong> of {a["total"]}</td>'
-                        f'<td class="sub">{E((a["finished_at"] or "")[:16].replace("T", " "))}</td></tr>')
+            results += (
+                f'<tr><td>{E(a["name"])}</td>'
+                f'<td><strong>{a["score"]}</strong> of {a["total"]}</td>'
+                f'<td class="sub">{E((a["finished_at"] or "")[:16].replace("T", " "))}</td>'
+                f'<td class="right"><form method="post" '
+                f'action="/tests/{tid}/attempt/{a["id"]}/delete" '
+                f'onsubmit="return confirm(\'Remove this sitting? '
+                f'It is the one the league counts.\')">'
+                f'<button class="ghost small">Remove</button></form></td></tr>')
         results += "</table></div>"
 
     pub = ""
@@ -4656,6 +4662,13 @@ def act_test_league(req, db, tid):
     db.execute("UPDATE dtests SET in_league=? WHERE id=?",
                (0 if row["in_league"] else 1, tid))
     db.commit()
+    return redirect(f"/tests/{tid}")
+
+
+def act_attempt_delete(req, db, tid, aid):
+    """One sitting removed - a trial run, or a student who opened it by
+    mistake. The league forgets it with the row."""
+    core.drop_attempt(db, aid)
     return redirect(f"/tests/{tid}")
 
 
@@ -5335,6 +5348,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
+    ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
