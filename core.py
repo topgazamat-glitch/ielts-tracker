@@ -134,6 +134,10 @@ def load_config():
         # losing everything, but it should be a choice
         "backup_to_telegram": True,
 
+        # how long a graded page keeps its full-resolution photograph on the
+        # disk; after this it is fetched back from Telegram when opened
+        "photo_keep_days": 21,
+
         "timezone_offset_hours": 5,  # Tashkent
     }
     # config.json lives beside the source, but a run pointed at its own data

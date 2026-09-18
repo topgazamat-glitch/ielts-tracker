@@ -354,30 +354,64 @@ def backup(db_path=None):
     return dest
 
 
-def offload_old_photos(db, cfg):
-    """Let go of page photos that have been graded for months.
+VERIFY_PER_PASS = 40          # getFile calls per pass, to stay polite
 
-    Only pages that still have their screen-sized copy on disk are let go, so
-    the submission always stays readable; the full-resolution file is fetched
-    back from Telegram the moment anyone zooms in. That rule also keeps us off
-    the photos sent to an earlier bot token, whose file_ids this bot cannot
-    resolve. Without this the disk grows by roughly 150 MB a day and never
-    shrinks.
+
+def telegram_has(token, file_id):
+    """Will Telegram still give this file back?"""
+    try:
+        import bot
+        info = bot.call(token, "getFile", file_id=file_id)
+        return bool(info.get("ok"))
+    except Exception:
+        return False
+
+
+def offload_old_photos(db, cfg):
+    """Let go of page photos that have been graded and are no longer new.
+
+    The full-resolution file comes back from Telegram the moment anyone opens
+    it, so letting go costs a moment's wait and nothing else.
+
+    A page with a screen-sized copy on disk can go straight away - there is
+    always something to look at. A page without one can go too, but only after
+    Telegram has confirmed it will hand the file back: the photos sent to an
+    earlier bot token cannot be resolved, and deleting one of those would lose
+    a student's work for good.
+
+    This matters more than it looks. Two weeks of homework is 2,564 photos and
+    about 2.8 GB - roughly 200 MB a day - and until this runs, none of it ever
+    goes away.
     """
-    days = cfg.get("photo_keep_days") or 90
+    days = cfg.get("photo_keep_days") or 21
     if days <= 0:
         return "off"
     cutoff = core.iso(core.now() - timedelta(days=days))
     freed = gone = 0
+    checked = 0
+    token = cfg.get("telegram_token")
     for f in db.execute(
-        "SELECT f.id, f.filename, f.preview FROM files f"
+        "SELECT f.id, f.filename, f.preview, f.telegram_file_id FROM files f"
         " JOIN submissions s ON s.id=f.submission_id"
         " WHERE f.offloaded=0 AND f.telegram_file_id IS NOT NULL"
-        " AND f.preview IS NOT NULL AND s.status='graded' AND s.created_at < ?",
+        " AND s.status='graded' AND s.created_at < ?"
+        " ORDER BY s.created_at",
         (cutoff,)
     ).fetchall():
-        if not os.path.isfile(os.path.join(core.UPLOAD_DIR, f["preview"])):
-            continue                      # no readable copy left, so keep the big one
+        if f["preview"]:
+            if not os.path.isfile(os.path.join(core.UPLOAD_DIR, f["preview"])):
+                continue                  # no readable copy left, so keep the big one
+        else:
+            # No screen-sized copy, so letting this one go means trusting
+            # Telegram to hand it back. Most of these do come back, but the
+            # photos sent to an earlier bot token do not, and deleting one of
+            # those loses a student's work for good. So the id is checked
+            # first, a few each pass rather than sixteen hundred at once.
+            if not token or checked >= VERIFY_PER_PASS:
+                continue
+            checked += 1
+            if not telegram_has(token, f["telegram_file_id"]):
+                continue
         path = os.path.join(core.UPLOAD_DIR, f["filename"])
         try:
             if os.path.isfile(path):
