@@ -400,10 +400,18 @@ def tick(cfg):
         if core.already_sent(db, "backup", core.now().strftime("%Y-%m-%d")):
             done["backup"] = "already today"
         else:
-            made = backup()
-            done["backup"] = os.path.basename(made)
-            done["backup_off_site"] = send_backup_off_the_volume(db, cfg, made)
-            core.mark_sent(db, "backup", core.now().strftime("%Y-%m-%d"))
+            done["disk"] = core.make_room()
+            free, _total = core.disk_room()
+            if free is not None and free < 150 * 1024 * 1024:
+                # a backup is a whole copy of the database; taking one now
+                # would spend the last of the room the site needs to work
+                done["backup"] = "skipped, disk nearly full"
+                core.mark_sent(db, "backup", core.now().strftime("%Y-%m-%d"))
+            else:
+                made = backup()
+                done["backup"] = os.path.basename(made)
+                done["backup_off_site"] = send_backup_off_the_volume(db, cfg, made)
+                core.mark_sent(db, "backup", core.now().strftime("%Y-%m-%d"))
         if core.already_sent(db, "offload", core.now().strftime("%Y-%m-%d")):
             done["offload"] = "already today"
         else:

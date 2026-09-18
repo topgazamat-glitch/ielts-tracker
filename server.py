@@ -202,6 +202,7 @@ def view_overview(req, db):
 
     body = f"""{today_block(db, pending)}
 <h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}
+{disk_note()}
 {f'<p class="flash err gap-5">{E(core.password_worry())}</p>'
   if core.password_worry() else ''}
 <p class="sub gap-5">Everything here lives on one disk.
@@ -276,6 +277,21 @@ def today_block(db, pending):
                 'Nothing is waiting. Everything is graded and every class is up to '
                 'date.</p></div>')
     return f'<h1>Today</h1><div class="todos">{items}</div>'
+
+
+def disk_note():
+    """Warn before the volume fills, not after - once it is full, the site
+    still reads and nobody can sign in."""
+    free, total = core.disk_room()
+    if not free or not total:
+        return ""
+    share = free / total
+    if share > 0.12:
+        return ""
+    return ('<p class="flash err gap-5">Only %.0f MB of %.1f GB left on the '
+            'disk. When it fills, the site keeps loading pages but nobody can '
+            'sign in. Delete some materials, or give the volume more room.'
+            '</p>' % (free / 1048576, total / 1073741824))
 
 
 def waited_for(oldest, pending):
@@ -6253,6 +6269,10 @@ class Server(ThreadingHTTPServer):
 
 def main():
     core.init_db()
+    # A full volume does not announce itself: pages still read, and only
+    # writing fails. Say it at startup, and clear the oldest backups if the
+    # site is about to be unable to write at all.
+    print("Disk:", core.make_room())
     if CFG["teacher_password"] == "changeme":
         print("!! Set a real teacher_password in config.json before sharing this URL.")
     port = CFG["port"]

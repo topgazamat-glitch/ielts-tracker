@@ -6,6 +6,7 @@ import random
 import re
 import sqlite3
 import secrets
+import shutil
 from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -703,6 +704,50 @@ def last_homework_batch(db, group_id):
         "SELECT * FROM assignments WHERE group_id=?"
         " AND substr(COALESCE(due_at, created_at), 1, 10)=? ORDER BY id",
         (group_id, newest["k"][:10])).fetchall()
+
+
+def disk_room():
+    """How much room is left where the data lives.
+
+    Returns (free_bytes, total_bytes). Everything - the database, the uploaded
+    photographs, a thousand course files and the daily backups - shares one
+    volume, and when it fills, SQLite stops being able to write: the site
+    still reads, so pages load, and every attempt to sign in fails with
+    "database or disk is full".
+    """
+    try:
+        usage = shutil.disk_usage(DATA_DIR)
+        return usage.free, usage.total
+    except Exception:
+        return None, None
+
+
+def make_room(keep=2):
+    """Throw away the oldest backups when the volume is nearly full.
+
+    The backups are the first thing to go because they are the one thing on
+    the volume that is reproducible on demand, and because a backup is no use
+    at all if it is the reason the site cannot write.
+    """
+    free, total = disk_room()
+    if free is None or total is None:
+        return "cannot tell"
+    if free > 250 * 1024 * 1024:
+        return "%.0f MB free" % (free / 1048576)
+    folder = os.path.join(DATA_DIR, "backups")
+    if not os.path.isdir(folder):
+        return "%.0f MB free, no backups to remove" % (free / 1048576)
+    files = sorted(f for f in os.listdir(folder) if f.endswith(".db"))
+    removed = 0
+    for old in files[:-keep] if len(files) > keep else []:
+        try:
+            os.remove(os.path.join(folder, old))
+            removed += 1
+        except OSError:
+            pass
+    after, _t = disk_room()
+    return ("only %.0f MB free - removed %d old backup(s), %.0f MB free now"
+            % (free / 1048576, removed, (after or 0) / 1048576))
 
 
 def password_worry(cfg=None):

@@ -49,4 +49,28 @@ print("   %d -> %d bytes, smaller: %s"
 assert small
 os.remove(gz)
 
+
+
+print("\n5. WHEN THE DISK IS NEARLY FULL, THE OLDEST BACKUPS GO")
+folder = os.path.join(core.DATA_DIR, "backups")
+for day in ("2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"):
+    open(os.path.join(folder, "app-%s.db" % day), "wb").write(b"x" * 1024)
+before = sorted(f for f in os.listdir(folder) if f.endswith(".db"))
+print("   backups before:", len(before))
+real = core.disk_room
+core.disk_room = lambda: (10 * 1024 * 1024, 1024 * 1024 * 1024)   # 10 MB left
+said = core.make_room(keep=2)
+core.disk_room = real
+after = sorted(f for f in os.listdir(folder) if f.endswith(".db"))
+print("   ", said)
+print("   backups after:", len(after), "->", after)
+assert len(after) == 2, "the newest two are kept"
+assert after == before[-2:], "the newest are the ones kept"
+
+print("\n6. WITH ROOM TO SPARE, NOTHING IS REMOVED")
+kept = sorted(os.listdir(folder))
+said = core.make_room(keep=2)
+print("   ", said)
+assert sorted(os.listdir(folder)) == kept
+
 print("\nALL GOOD")
