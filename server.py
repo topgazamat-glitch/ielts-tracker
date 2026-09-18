@@ -6195,11 +6195,23 @@ class Handler(BaseHTTPRequestHandler):
             expected = core.load_config()["teacher_password"]
             if secrets.compare_digest(form.get("password", [""])[0], expected):
                 LOGIN_ATTEMPTS.pop(client, None)
-                db = core.connect()
+                # Signing in had no error handling at all, so anything that
+                # went wrong here dropped the connection and the host answered
+                # 502 - no page, no log line, nothing to work from. A teacher
+                # locked out of their own site deserves better than a blank.
                 try:
-                    token = core.open_session(db)
-                finally:
-                    db.close()
+                    db = core.connect()
+                    try:
+                        token = core.open_session(db)
+                    finally:
+                        db.close()
+                except Exception as exc:
+                    import traceback
+                    traceback.print_exc()
+                    core.report_breakage("/login", exc)
+                    return self._send(*view_login(
+                        None, err="Could not start a session: %s: %s"
+                                  % (type(exc).__name__, str(exc)[:160])))
                 return self._send(
                     *redirect("/", [("Set-Cookie",
                                      f"ta_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")])
