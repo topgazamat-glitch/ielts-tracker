@@ -732,6 +732,33 @@ def disk_room():
         return None, None
 
 
+def disk_breakdown():
+    """What is actually using the volume, biggest first.
+
+    Worth measuring rather than assuming: the photographs were reckoned at
+    1.3 MB each from a subtraction, and turned out to be nearer 300 KB, which
+    made every estimate built on it wrong.
+    """
+    out = []
+    try:
+        for name in sorted(os.listdir(DATA_DIR)):
+            path = os.path.join(DATA_DIR, name)
+            if os.path.isfile(path):
+                out.append((name, os.path.getsize(path)))
+                continue
+            total = 0
+            for root, _dirs, files in os.walk(path):
+                for f in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+            out.append((name + "/", total))
+    except OSError:
+        return []
+    return sorted(out, key=lambda p: -p[1])
+
+
 def make_room(keep=2):
     """Throw away the oldest backups when the volume is nearly full.
 

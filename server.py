@@ -201,7 +201,7 @@ def view_overview(req, db):
         risk_html += "Students appear here after two consecutive misses or a falling trend.</p></div>"
 
     body = f"""{today_block(db, pending)}
-{cleanup_button(db)}
+{cleanup_button(db)}{disk_breakdown_note()}
 <h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}
 {disk_note()}
 {f'<p class="flash err gap-5">{E(core.password_worry())}</p>'
@@ -278,6 +278,19 @@ def today_block(db, pending):
                 'Nothing is waiting. Everything is graded and every class is up to '
                 'date.</p></div>')
     return f'<h1>Today</h1><div class="todos">{items}</div>'
+
+
+def disk_breakdown_note():
+    """Where the volume actually went - shown only when room is short."""
+    free, total = core.disk_room()
+    if not free or not total or free / total > 0.25:
+        return ""
+    rows = core.disk_breakdown()[:6]
+    if not rows:
+        return ""
+    bits = " &middot; ".join("%s %s" % (E(n), core.human_size(b))
+                             for n, b in rows if b)
+    return '<p class="sub gap-2">On the disk: %s</p>' % bits
 
 
 def cleanup_button(db):
