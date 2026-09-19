@@ -201,6 +201,7 @@ def view_overview(req, db):
         risk_html += "Students appear here after two consecutive misses or a falling trend.</p></div>"
 
     body = f"""{today_block(db, pending)}
+{cleanup_button(db)}
 <h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}
 {disk_note()}
 {f'<p class="flash err gap-5">{E(core.password_worry())}</p>'
@@ -279,6 +280,17 @@ def today_block(db, pending):
     return f'<h1>Today</h1><div class="todos">{items}</div>'
 
 
+def cleanup_button(db):
+    last = core.meta_get(db, "last_cleanup", "")
+    return ('<form method="post" action="/cleanup" class="gap-2">'
+            '<button class="ghost">Free up space now</button>'
+            '<span class="sub">&nbsp;Lets go of the full-size photographs of '
+            'work marked more than %s days ago; they come back from Telegram '
+            'when opened.%s</span></form>'
+            % (core.load_config().get("photo_keep_days", 10),
+               ("<br>Last run: " + E(last)) if last else ""))
+
+
 def disk_note():
     """Warn before the volume fills, not after - once it is full, the site
     still reads and nobody can sign in."""
@@ -288,10 +300,10 @@ def disk_note():
     share = free / total
     if share > 0.12:
         return ""
-    return ('<p class="flash err gap-5">Only %.0f MB of %.1f GB left on the '
+    return ('<div class="flash err gap-5">Only %.0f MB of %.1f GB left on the '
             'disk. When it fills, the site keeps loading pages but nobody can '
             'sign in. Delete some materials, or give the volume more room.'
-            '</p>' % (free / 1048576, total / 1073741824))
+            '</div>' % (free / 1048576, total / 1073741824))
 
 
 def waited_for(oldest, pending):
@@ -3448,6 +3460,28 @@ def serve_track(req, db, level, track):
                   ("Cache-Control", "public, max-age=86400")], data)
 
 
+def act_free_space(req, db):
+    """Run the photograph cleanup now, rather than waiting for tomorrow.
+
+    The job is deduplicated to once a day, which is right when it is working
+    and wrong the moment the setting changes: after lowering how long photos
+    are kept, the site would sit full until the next morning.
+    """
+    import jobs
+    cfg = core.load_config()
+    before, _total = core.disk_room()
+    freed = jobs.offload_old_photos(db, cfg)
+    core.make_room()
+    after, _t = core.disk_room()
+    gained = (after or 0) - (before or 0)
+    core.meta_set(db, "last_cleanup",
+                  "%s - %s, %s freed" % (core.iso(core.now())[:16],
+                                         freed or "nothing to let go",
+                                         core.human_size(max(0, gained))))
+    db.commit()
+    return redirect("/")
+
+
 def act_new_track(req, db):
     """Put a coursebook track on the shelf its level reads from."""
     fields, files = req["files"]
@@ -4881,6 +4915,28 @@ def serve_track(req, db, level, track):
                   ("Cache-Control", "public, max-age=86400")], data)
 
 
+def act_free_space(req, db):
+    """Run the photograph cleanup now, rather than waiting for tomorrow.
+
+    The job is deduplicated to once a day, which is right when it is working
+    and wrong the moment the setting changes: after lowering how long photos
+    are kept, the site would sit full until the next morning.
+    """
+    import jobs
+    cfg = core.load_config()
+    before, _total = core.disk_room()
+    freed = jobs.offload_old_photos(db, cfg)
+    core.make_room()
+    after, _t = core.disk_room()
+    gained = (after or 0) - (before or 0)
+    core.meta_set(db, "last_cleanup",
+                  "%s - %s, %s freed" % (core.iso(core.now())[:16],
+                                         freed or "nothing to let go",
+                                         core.human_size(max(0, gained))))
+    db.commit()
+    return redirect("/")
+
+
 def act_new_track(req, db):
     """Put a coursebook track on the shelf its level reads from."""
     fields, files = req["files"]
@@ -5651,6 +5707,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
     ("POST", r"^/students/(\d+)/newlink$", act_new_link),
+    ("POST", r"^/cleanup$", act_free_space),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
