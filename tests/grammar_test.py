@@ -29,7 +29,34 @@ jar = http.cookiejar.CookieJar()
 op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 op.open(B + "/login", urllib.parse.urlencode({"password": "testpw123"}).encode()).read()
 
-txt = open(os.environ["CLAUDE_JOB_DIR"] + "/tmp/comparatives.txt").read()
+# Twenty grammar questions, written here. This used to read a file from the
+# scratch directory of the session that wrote the test, so it passed only
+# while that directory survived and failed once it was cleaned up.
+txt = "\n".join(
+    "%s is ……… than %s. = %s | %s | %s | %s"
+    % (a, b, right, w1, w2, w3)
+    for a, b, right, w1, w2, w3 in [
+        ("Ali", "Bek", "taller", "more tall", "tallest", "the taller"),
+        ("This book", "that one", "better", "gooder", "more good", "the best"),
+        ("Today", "yesterday", "hotter", "hoter", "more hot", "the hottest"),
+        ("My bag", "yours", "heavier", "heavyer", "more heavy", "the heaviest"),
+        ("This road", "that one", "narrower", "more narrow", "narrowest", "narrow"),
+        ("Winter", "autumn", "colder", "more cold", "coldest", "the colder"),
+        ("A car", "a bicycle", "faster", "more fast", "fastest", "the faster"),
+        ("This test", "the last one", "easier", "easyer", "more easy", "the easiest"),
+        ("Her hair", "mine", "longer", "more long", "longest", "the longer"),
+        ("This shop", "that one", "cheaper", "more cheap", "cheapest", "the cheaper"),
+        ("My phone", "his", "newer", "more new", "newest", "the newer"),
+        ("This room", "the kitchen", "bigger", "biger", "more big", "the biggest"),
+        ("The film", "the book", "worse", "badder", "more bad", "the worst"),
+        ("This chair", "that one", "older", "more old", "oldest", "the older"),
+        ("Her flat", "ours", "smaller", "more small", "smallest", "the smaller"),
+        ("This box", "that one", "lighter", "more light", "lightest", "the lighter"),
+        ("The river", "the lake", "deeper", "more deep", "deepest", "the deeper"),
+        ("This street", "that one", "busier", "busyer", "more busy", "the busiest"),
+        ("My brother", "me", "stronger", "more strong", "strongest", "the stronger"),
+        ("The train", "the bus", "quicker", "more quick", "quickest", "the quicker"),
+    ])
 op.open(B + "/vocab/new", urllib.parse.urlencode({
     "title": "Comparatives & Superlatives", "source": "Grammar", "unit": "",
     "group_id": "", "kind": "grammar", "words": txt}).encode()).read()

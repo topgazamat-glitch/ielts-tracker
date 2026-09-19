@@ -34,7 +34,46 @@ def post(u, d, o=None):
     return (o or op).open(B + u, urllib.parse.urlencode(d, doseq=True).encode()).read().decode("utf-8")
 
 # --- load the extracted json through the real upload form
-data = open(os.environ["CLAUDE_JOB_DIR"] + "/tmp/test01_full.json", "rb").read()
+# Fifteen questions with a passage, built here. This used to read a file from
+# the scratch directory of the session that wrote the test, which meant the
+# test only passed while that directory happened to still exist.
+import json as _json
+_qs = []
+for i in range(11, 23):
+    _qs.append({"num": i, "kind": "mcq",
+                "prompt": "Question %d about the passage" % i,
+                "answer": "B",
+                "options": [{"letter": "A", "text": "first"},
+                            {"letter": "B", "text": "second"},
+                            {"letter": "C", "text": "third"},
+                            {"letter": "D", "text": "fourth"}]})
+for i in range(23, 26):
+    _qs.append({"num": i, "kind": "typed",
+                "prompt": "Write one word for question %d" % i,
+                "answer": "answer%d" % i, "options": []})
+
+
+def _png(shade):
+    """A real one-pixel PNG, so the image path is exercised for real."""
+    import binascii, struct, zlib
+    raw = zlib.compress(b"\x00" + bytes([shade, shade, shade]))
+    def chunk(tag, body):
+        return (struct.pack(">I", len(body)) + tag + body
+                + struct.pack(">I", binascii.crc32(tag + body) & 0xFFFFFFFF))
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", raw) + chunk(b"IEND", b""))
+
+
+# two of them carry a picture of the page, as the real extractor produces
+import base64 as _b64
+for _n in (1, 2):
+    _qs[_n - 1]["image_b64"] = _b64.b64encode(_png(_n * 40)).decode()
+data = _json.dumps({
+    "level": "Pre-Intermediate", "number": 1,
+    "title": "Practice Test 1 \u2014 Reading",
+    "passages": {"gap": "A New Home \u2014 a short reading passage that the paper must show above the questions."},
+    "questions": _qs}).encode()
 bd = "----t" + uuid.uuid4().hex
 body = (("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"t.json\"\r\n"
          "Content-Type: application/json\r\n\r\n" % bd).encode() + data
