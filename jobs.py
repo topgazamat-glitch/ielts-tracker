@@ -383,7 +383,7 @@ def offload_old_photos(db, cfg):
     about 2.8 GB - roughly 200 MB a day - and until this runs, none of it ever
     goes away.
     """
-    days = cfg.get("photo_keep_days") or 21
+    days = cfg.get("photo_keep_days") or 10
     if days <= 0:
         return "off"
     cutoff = core.iso(core.now() - timedelta(days=days))

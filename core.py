@@ -134,9 +134,15 @@ def load_config():
         # losing everything, but it should be a choice
         "backup_to_telegram": True,
 
-        # how long a graded page keeps its full-resolution photograph on the
-        # disk; after this it is fetched back from Telegram when opened
-        "photo_keep_days": 21,
+        # How long a graded page keeps its full-resolution photograph on the
+        # disk; after that it is fetched back from Telegram when opened.
+        #
+        # Ten days, because the arithmetic decides it: sixty students send
+        # about 200 MB of photographs a day, so every day of keeping costs a
+        # fifth of a gigabyte. Ten days is a fortnight of marking within easy
+        # reach and about 2 GB of the volume - raise it and the disk fills,
+        # lower it and old work takes a moment to open.
+        "photo_keep_days": 10,
 
         "timezone_offset_hours": 5,  # Tashkent
     }

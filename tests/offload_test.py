@@ -67,8 +67,8 @@ print("\n5. UNGRADED AND RECENT WORK IS LEFT ALONE")
 print("   e.jpg (not graded):", here(e), "| f.jpg (sent today):", here(f))
 assert here(e) and here(f)
 
-print("\n6. THE DEFAULT IS THREE WEEKS, NOT THREE MONTHS")
+print("\n6. THE DEFAULT IS TEN DAYS, NOT THREE MONTHS")
 print("   default:", core.load_config()["photo_keep_days"], "days")
-assert core.load_config()["photo_keep_days"] == 21
+assert core.load_config()["photo_keep_days"] == 10
 
 print("\nALL GOOD")

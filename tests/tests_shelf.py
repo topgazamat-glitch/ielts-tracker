@@ -20,7 +20,13 @@ core.init_db()
 srv = server.Server(("127.0.0.1", 8821), server.Handler)
 threading.Thread(target=srv.serve_forever, daemon=True).start(); time.sleep(0.5)
 B = "http://127.0.0.1:8821"
-src = os.environ["CLAUDE_JOB_DIR"] + "/tmp/b1"
+# Twenty practice papers, made here. This used to point at a folder in a
+# scratch directory from the session that wrote the test, so it passed only
+# for as long as that directory happened to survive.
+src = tempfile.mkdtemp()
+for i in range(1, 21):
+    with open(os.path.join(src, "Test %02d.pdf" % i), "wb") as fh:
+        fh.write(b"%PDF-1.4\n" + bytes([i]) * 800 + b"\n%%EOF\n")
 env = dict(os.environ, DATA_DIR=tmp, TEACHER_PASSWORD="testpw123")
 R = ROOT
 
