@@ -149,9 +149,14 @@ header.top .brand .mark {
 }
 
 header.top nav {
+  /* On a desktop it wraps to a second line rather than scrolling: a strip
+     with no visible scrollbar reads as a bug, and adding a fifteenth section
+     was enough to cut the last one off again at 1280. A touch screen keeps
+     the swipe strip below, where fifteen wrapped links would be a header
+     taller than the page. */
   order: 3; flex-basis: 100%;
   display: flex; gap: var(--sp-1); align-items: center;
-  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  flex-wrap: wrap; row-gap: var(--sp-1);
   margin-inline: 0;
 }
 /* Where the row still cannot hold every link, the last one fades rather than
@@ -1269,6 +1274,13 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
     justify-content: center;
   }
   button.mk, button.mk.one { min-width: 44px; }
+
+  /* Fifteen sections wrapped would be a header taller than the page, so on a
+     touch screen the navigation stays one line and swipes. */
+  header.top nav {
+    flex-wrap: nowrap;
+    overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  }
   .chip, .tabs .tab { padding-left: var(--sp-3); padding-right: var(--sp-3); }
   .markpad, .scorepad, .chips { gap: var(--sp-2); }
 

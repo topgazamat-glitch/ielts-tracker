@@ -787,6 +787,159 @@ def make_room(keep=2):
             % (free / 1048576, removed, (after or 0) / 1048576))
 
 
+# ------------------------------------------------------------- what is stored
+
+def storage_summary(db):
+    """Everything the site keeps, what it costs, and what can safely go.
+
+    Written for the Settings page, where the teacher decides what to throw
+    away. Each row says how much room it takes and, where it matters, how much
+    of it exists nowhere else.
+    """
+    rows = []
+    free, total = disk_room()
+    sizes = dict(disk_breakdown())
+
+    photos = db.execute("SELECT COUNT(*) n FROM files").fetchone()["n"]
+    only = db.execute("SELECT COUNT(*) n FROM files"
+                      " WHERE telegram_file_id IS NULL").fetchone()["n"]
+    rows.append({
+        "key": "photos", "title": "Photographs of homework",
+        "count": photos, "bytes": sizes.get("uploads/", 0),
+        "note": ("%d of them were uploaded from the website and exist nowhere "
+                 "else; the rest can be fetched back from Telegram." % only)
+        if only else "All of them can be fetched back from Telegram.",
+        "danger": bool(only)})
+
+    mats = db.execute("SELECT COUNT(*) n FROM materials").fetchone()["n"]
+    rows.append({
+        "key": "materials", "title": "Course files on the shelves",
+        "count": mats, "bytes": sizes.get("materials/", 0),
+        "note": "Books, audio and papers you uploaded. All of it is still on "
+                "your own computer.", "danger": False})
+
+    rows.append({
+        "key": "audio", "title": "Coursebook tracks for the booklets",
+        "count": None, "bytes": sizes.get("audio/", 0),
+        "note": "The listening tracks the booklets play. Re-uploaded with one "
+                "command.", "danger": False})
+
+    rows.append({
+        "key": "music", "title": "Songs of the day",
+        "count": db.execute("SELECT COUNT(*) n FROM songs").fetchone()["n"]
+        if table_exists(db, "songs") else None,
+        "bytes": sizes.get("music/", 0),
+        "note": "One track a day. Removing them does not affect anybody's "
+                "work.", "danger": False})
+
+    rows.append({
+        "key": "backups", "title": "Database backups",
+        "count": None, "bytes": sizes.get("backups/", 0),
+        "note": "Daily copies of the database, kept on this same disk. Keep a "
+                "copy somewhere else as well.", "danger": True})
+
+    return {"rows": rows, "free": free, "total": total,
+            "database": sizes.get("app.db", 0)}
+
+
+def table_exists(db, name):
+    return bool(db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,)).fetchone())
+
+
+# The settings a teacher may change from the website. The password and the
+# bot token are deliberately not here: those belong in the host's own
+# settings, where changing one does not need a deploy and nothing prints it.
+EDITABLE = [
+    ("photo_keep_days", "Keep photographs for", "days",
+     "After this, a page is fetched back from Telegram when you open it. "
+     "Every day of keeping costs about 200 MB."),
+    ("min_photo_width", "Reject photographs narrower than", "pixels",
+     "A page photographed too small cannot be read, and is refused before it "
+     "reaches your queue."),
+    ("chase_hours", "Chase a missing photo after", "hours",
+     "How long the bot waits before reminding a student who has sent nothing."),
+    ("chase_threshold", "Only chase below", "%",
+     "Students already above this completion are left alone."),
+    ("chase_max", "Never chase more than", "times",
+     "A limit per student per piece of homework."),
+    ("timezone_offset_hours", "Hours ahead of UTC", "",
+     "Tashkent is 5. Deadlines and the day's date follow this."),
+]
+SWITCHES = [
+    ("automation", "Send reminders and digests",
+     "When off, the bot answers students but never messages them first."),
+    ("backup_to_telegram", "Send the daily backup to me in Telegram",
+     "Puts a copy of the whole database in your chat history - a fair trade "
+     "against losing it, but it is a copy of everybody's data."),
+]
+
+
+def save_settings(values, switches):
+    """Write the teacher's settings, keeping the secrets untouched."""
+    own = os.environ.get("DATA_DIR")
+    path = os.path.join(own, "config.json") if own else CONFIG_PATH
+    current = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            current = json.load(fh)
+    for key, _label, _unit, _help in EDITABLE:
+        if key in values and str(values[key]).strip().lstrip("-").isdigit():
+            current[key] = int(values[key])
+    for key, _label, _help in SWITCHES:
+        current[key] = bool(switches.get(key))
+    tmp = path + ".new"
+    with open(tmp, "w") as fh:
+        json.dump(current, fh, indent=2)
+    os.replace(tmp, path)          # never leave a half-written config behind
+    return current
+
+
+def purge(db, what, days=None):
+    """Throw something away, and say what went. Never touches the database."""
+    gone = freed = 0
+
+    def drop(path):
+        nonlocal gone, freed
+        try:
+            freed += os.path.getsize(path)
+            os.remove(path)
+            gone += 1
+        except OSError:
+            pass
+
+    if what == "audio":
+        for root, _d, files in os.walk(AUDIO_DIR):
+            for f in files:
+                drop(os.path.join(root, f))
+    elif what == "music":
+        for root, _d, files in os.walk(MUSIC_DIR):
+            for f in files:
+                drop(os.path.join(root, f))
+        db.execute("DELETE FROM songs") if table_exists(db, "songs") else None
+        db.commit()
+    elif what == "backups":
+        folder = os.path.join(DATA_DIR, "backups")
+        if os.path.isdir(folder):
+            for f in sorted(os.listdir(folder))[:-1]:     # keep the newest
+                drop(os.path.join(folder, f))
+    elif what == "photos":
+        # only ones that can be fetched back, and only when asked for a window
+        cutoff = iso(now() - timedelta(days=int(days or 30)))
+        for r in db.execute(
+                "SELECT f.id, f.filename FROM files f"
+                " JOIN submissions s ON s.id = f.submission_id"
+                " WHERE f.telegram_file_id IS NOT NULL AND f.offloaded = 0"
+                "   AND s.created_at < ?", (cutoff,)).fetchall():
+            drop(os.path.join(UPLOAD_DIR, r["filename"]))
+            db.execute("UPDATE files SET offloaded=1 WHERE id=?", (r["id"],))
+        db.commit()
+    else:
+        return "nothing to do"
+    return "%d file(s), %s freed" % (gone, human_size(freed))
+
+
 def password_worry(cfg=None):
     """Say so when the one key to everything is a weak one.
 
@@ -2998,8 +3151,8 @@ def human_size(n):
         return ""
     if n == 0:
         return "0 B"
-    for unit in ("B", "KB", "MB"):
-        if n < 1024 or unit == "MB":
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
             return ("%.0f %s" if unit == "B" else "%.1f %s") % (n, unit)
         n /= 1024.0
 

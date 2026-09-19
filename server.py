@@ -60,7 +60,8 @@ def page(title, body, active="", music=False):
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Progress')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
-{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}</nav>
+{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}
+{nav('/settings', 'Settings')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
   ' onclick="Music.toggle()" title="Music"></button>' if (music or tune) else ''}
 <a href="/logout">Sign out</a></span></header>
@@ -1945,7 +1946,8 @@ def student_page(title, body, music=True):
 {tune}{player}
 <script src="/static/nav.js" defer></script>
 <script src="/static/write.js" defer></script>
-<script src="/static/book.js" defer></script></body></html>"""
+<script src="/static/book.js" defer></script>
+<script src="/static/shrink.js" defer></script></body></html>"""
 
 
 def student_shell(s, db, token, tab, body):
@@ -3473,6 +3475,109 @@ def serve_track(req, db, level, track):
                   ("Cache-Control", "public, max-age=86400")], data)
 
 
+def view_settings(req, db):
+    """One page for the whole site: what it keeps, and how it behaves."""
+    cfg = core.load_config()
+    store = core.storage_summary(db)
+    saved = req["query"].get("saved", [""])[0] == "1"
+    did = (req["query"].get("did", [""])[0] or "").strip()
+
+    free, total = store["free"], store["total"]
+    bar = ""
+    if free and total:
+        used = 100 - int(free * 100 / total)
+        bar = (f'<div class="rowline"><strong>Disk</strong>'
+               f'<span class="sub">{core.human_size(total - free)} of '
+               f'{core.human_size(total)} used</span></div>'
+               f'<div class="pbar"><i style="width:{used}%"></i></div>')
+
+    rows = ""
+    for r in store["rows"]:
+        count = f'{r["count"]} item(s) &middot; ' if r["count"] is not None else ""
+        control = ""
+        if r["key"] == "photos":
+            control = (
+                '<form method="post" action="/settings/purge" class="inline"'
+                ' onsubmit="return confirm(\'Let go of the full-size photos '
+                'older than that? They come back from Telegram when opened.\')">'
+                '<input type="hidden" name="what" value="photos">'
+                '<label class="f">older than<input type="number" name="days"'
+                ' value="30" min="1" max="3650" style="width:80px"> days</label>'
+                '<label class="f pushed">&nbsp;<button class="ghost">'
+                'Let them go</button></label></form>')
+        elif r["key"] != "materials":
+            what = r["key"]
+            control = (
+                f'<form method="post" action="/settings/purge"'
+                f' onsubmit="return confirm(\'Delete {E(r["title"]).lower()}?'
+                f' This cannot be undone here.\')">'
+                f'<input type="hidden" name="what" value="{what}">'
+                f'<button class="ghost danger">Delete</button></form>')
+        else:
+            control = ('<p class="sub flush">Remove these from the '
+                       '<a class="linky" href="/materials">Materials</a> page, '
+                       'one shelf at a time.</p>')
+        rows += (f'<div class="card"><div class="rowline">'
+                 f'<strong>{E(r["title"])}</strong>'
+                 f'<span class="pill{" risk" if r["danger"] else ""}">'
+                 f'{core.human_size(r["bytes"])}</span></div>'
+                 f'<p class="sub">{count}{E(r["note"])}</p>{control}</div>')
+
+    fields = ""
+    for key, label, unit, help_ in core.EDITABLE:
+        fields += (f'<label class="f">{E(label)}'
+                   f'<input type="number" name="{key}" value="{E(str(cfg.get(key, "")))}"'
+                   f' style="width:110px"> {E(unit)}'
+                   f'<span class="sub">{E(help_)}</span></label>')
+    boxes = ""
+    for key, label, help_ in core.SWITCHES:
+        on = " checked" if cfg.get(key) else ""
+        boxes += (f'<label class="f"><span style="font-size:13px;color:var(--ink)">'
+                  f'<input type="checkbox" name="{key}" value="1"{on}> {E(label)}'
+                  f'</span><span class="sub">{E(help_)}</span></label>')
+
+    worry = core.password_worry()
+    body = f"""<h1>Settings</h1>
+<p class="sub">Everything the site keeps, and how it behaves. The password and
+the bot token are not here: those belong in the host's own settings, where
+changing one needs no deploy.</p>
+{f'<p class="flash">Saved.</p>' if saved else ''}
+{f'<p class="flash">{E(did)}</p>' if did else ''}
+{f'<p class="flash err">{E(worry)}</p>' if worry else ''}
+
+<h2>What is stored</h2>
+<div class="card">{bar}
+<p class="sub gap-2">The database itself is {core.human_size(store["database"])}.
+<a class="linky" href="/backup">Download a copy</a> and keep it somewhere that
+is not this server.</p></div>
+{rows}
+
+<h2>How the site behaves</h2>
+<div class="card"><form method="post" action="/settings">
+<div class="inline">{fields}</div>
+<div class="inline gap-3">{boxes}</div>
+<div class="gap-3"><button>Save</button></div>
+</form></div>"""
+    return html_response(page("Settings", body, "Settings"))
+
+
+def act_settings(req, db):
+    f = req["form"]
+    values = {k: f.get(k, [""])[0] for k, _l, _u, _h in core.EDITABLE}
+    switches = {k: f.get(k, [""])[0] == "1" for k, _l, _h in core.SWITCHES}
+    core.save_settings(values, switches)
+    return redirect("/settings?saved=1")
+
+
+def act_settings_purge(req, db):
+    f = req["form"]
+    what = (f.get("what", [""])[0] or "").strip()
+    days = (f.get("days", [""])[0] or "").strip()
+    said = core.purge(db, what, days or None)
+    core.make_room()
+    return redirect("/settings?did=" + urllib.parse.quote(said))
+
+
 def act_free_space(req, db):
     """Run the photograph cleanup now, rather than waiting for tomorrow.
 
@@ -4928,6 +5033,109 @@ def serve_track(req, db, level, track):
                   ("Cache-Control", "public, max-age=86400")], data)
 
 
+def view_settings(req, db):
+    """One page for the whole site: what it keeps, and how it behaves."""
+    cfg = core.load_config()
+    store = core.storage_summary(db)
+    saved = req["query"].get("saved", [""])[0] == "1"
+    did = (req["query"].get("did", [""])[0] or "").strip()
+
+    free, total = store["free"], store["total"]
+    bar = ""
+    if free and total:
+        used = 100 - int(free * 100 / total)
+        bar = (f'<div class="rowline"><strong>Disk</strong>'
+               f'<span class="sub">{core.human_size(total - free)} of '
+               f'{core.human_size(total)} used</span></div>'
+               f'<div class="pbar"><i style="width:{used}%"></i></div>')
+
+    rows = ""
+    for r in store["rows"]:
+        count = f'{r["count"]} item(s) &middot; ' if r["count"] is not None else ""
+        control = ""
+        if r["key"] == "photos":
+            control = (
+                '<form method="post" action="/settings/purge" class="inline"'
+                ' onsubmit="return confirm(\'Let go of the full-size photos '
+                'older than that? They come back from Telegram when opened.\')">'
+                '<input type="hidden" name="what" value="photos">'
+                '<label class="f">older than<input type="number" name="days"'
+                ' value="30" min="1" max="3650" style="width:80px"> days</label>'
+                '<label class="f pushed">&nbsp;<button class="ghost">'
+                'Let them go</button></label></form>')
+        elif r["key"] != "materials":
+            what = r["key"]
+            control = (
+                f'<form method="post" action="/settings/purge"'
+                f' onsubmit="return confirm(\'Delete {E(r["title"]).lower()}?'
+                f' This cannot be undone here.\')">'
+                f'<input type="hidden" name="what" value="{what}">'
+                f'<button class="ghost danger">Delete</button></form>')
+        else:
+            control = ('<p class="sub flush">Remove these from the '
+                       '<a class="linky" href="/materials">Materials</a> page, '
+                       'one shelf at a time.</p>')
+        rows += (f'<div class="card"><div class="rowline">'
+                 f'<strong>{E(r["title"])}</strong>'
+                 f'<span class="pill{" risk" if r["danger"] else ""}">'
+                 f'{core.human_size(r["bytes"])}</span></div>'
+                 f'<p class="sub">{count}{E(r["note"])}</p>{control}</div>')
+
+    fields = ""
+    for key, label, unit, help_ in core.EDITABLE:
+        fields += (f'<label class="f">{E(label)}'
+                   f'<input type="number" name="{key}" value="{E(str(cfg.get(key, "")))}"'
+                   f' style="width:110px"> {E(unit)}'
+                   f'<span class="sub">{E(help_)}</span></label>')
+    boxes = ""
+    for key, label, help_ in core.SWITCHES:
+        on = " checked" if cfg.get(key) else ""
+        boxes += (f'<label class="f"><span style="font-size:13px;color:var(--ink)">'
+                  f'<input type="checkbox" name="{key}" value="1"{on}> {E(label)}'
+                  f'</span><span class="sub">{E(help_)}</span></label>')
+
+    worry = core.password_worry()
+    body = f"""<h1>Settings</h1>
+<p class="sub">Everything the site keeps, and how it behaves. The password and
+the bot token are not here: those belong in the host's own settings, where
+changing one needs no deploy.</p>
+{f'<p class="flash">Saved.</p>' if saved else ''}
+{f'<p class="flash">{E(did)}</p>' if did else ''}
+{f'<p class="flash err">{E(worry)}</p>' if worry else ''}
+
+<h2>What is stored</h2>
+<div class="card">{bar}
+<p class="sub gap-2">The database itself is {core.human_size(store["database"])}.
+<a class="linky" href="/backup">Download a copy</a> and keep it somewhere that
+is not this server.</p></div>
+{rows}
+
+<h2>How the site behaves</h2>
+<div class="card"><form method="post" action="/settings">
+<div class="inline">{fields}</div>
+<div class="inline gap-3">{boxes}</div>
+<div class="gap-3"><button>Save</button></div>
+</form></div>"""
+    return html_response(page("Settings", body, "Settings"))
+
+
+def act_settings(req, db):
+    f = req["form"]
+    values = {k: f.get(k, [""])[0] for k, _l, _u, _h in core.EDITABLE}
+    switches = {k: f.get(k, [""])[0] == "1" for k, _l, _h in core.SWITCHES}
+    core.save_settings(values, switches)
+    return redirect("/settings?saved=1")
+
+
+def act_settings_purge(req, db):
+    f = req["form"]
+    what = (f.get("what", [""])[0] or "").strip()
+    days = (f.get("days", [""])[0] or "").strip()
+    said = core.purge(db, what, days or None)
+    core.make_room()
+    return redirect("/settings?did=" + urllib.parse.quote(said))
+
+
 def act_free_space(req, db):
     """Run the photograph cleanup now, rather than waiting for tomorrow.
 
@@ -5721,6 +5929,9 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
     ("POST", r"^/students/(\d+)/newlink$", act_new_link),
     ("POST", r"^/cleanup$", act_free_space),
+    ("GET",  r"^/settings$", view_settings),
+    ("POST", r"^/settings$", act_settings),
+    ("POST", r"^/settings/purge$", act_settings_purge),
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
