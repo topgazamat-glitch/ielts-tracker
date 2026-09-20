@@ -81,3 +81,65 @@
     dirty = false;
   });
 })();
+
+/* ------------------------------------------------------- sitting it as an exam
+ * A clock that does not stop, and a paper that hands itself in when the time
+ * is up. Where the teacher has asked for it, leaving the page hands it in too:
+ * that is the rule of the room, and the student is told before they start, on
+ * the page and again the moment they are about to break it.
+ *
+ * Everything typed is already being saved every few seconds, so a paper handed
+ * in by the clock is the paper as it stood, not an empty one.
+ */
+(function () {
+  const form = document.querySelector('form[data-minutes]');
+  if (!form) return;
+  const minutes = parseInt(form.getAttribute("data-minutes") || "0", 10);
+  if (!minutes) return;
+  const strict = form.getAttribute("data-strict") === "1";
+  const clock = document.getElementById("exclock");
+  let left = parseInt(form.getAttribute("data-left") || "", 10);
+  if (isNaN(left)) left = minutes * 60;
+  let over = false;
+
+  function handIn(why) {
+    if (over) return;
+    over = true;
+    let field = form.querySelector('input[name="ended"]');
+    if (!field) {
+      field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "ended";
+      form.appendChild(field);
+    }
+    field.value = why;
+    form.submit();
+  }
+
+  function paint() {
+    if (!clock) return;
+    const m = Math.floor(Math.max(0, left) / 60);
+    const s = Math.max(0, left) % 60;
+    clock.textContent = m + ":" + (s < 10 ? "0" : "") + s;
+    clock.classList.toggle("soon", left <= 300);
+    clock.classList.toggle("nearly", left <= 60);
+  }
+
+  paint();
+  setInterval(function () {
+    left -= 1;
+    paint();
+    if (left <= 0) handIn("time");
+  }, 1000);
+
+  if (strict) {
+    // A tap on a notification is not cheating, so say what is about to happen
+    // rather than ending the paper without a word.
+    window.addEventListener("blur", function () {
+      if (!over) handIn("left");
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden" && !over) handIn("left");
+    });
+  }
+})();

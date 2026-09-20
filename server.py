@@ -2233,6 +2233,56 @@ def add_players(html, level, who=""):
     return PARA.sub(after, html)
 
 
+MCQ_AT = re.compile(r'<span data-mcq="(\d+)"></span>')
+LONG_AT = re.compile(r'<span data-long="(\d+)"></span>')
+
+
+def fill_choices(layout, qs, given=None, marks=None):
+    """Turn the markers in an exam layout into real controls.
+
+    A Cambridge paper is answered by choosing A, B or C, not by typing the
+    letter, so the layout carries a marker where each set of options goes and
+    the radio buttons are put in here - where the question's own id, the
+    student's own answer and the marking are all known.
+    """
+    by_num = {q["num"]: (q, o) for q, o in qs}
+
+    def choices(m):
+        got = by_num.get(int(m.group(1)))
+        if not got:
+            return ""
+        q, opts = got
+        mine = (given or {}).get(q["id"])
+        shown = ""
+        for o in opts:
+            state = ""
+            if marks is not None:
+                if o["letter"] == q["answer"]:
+                    state = " right"
+                elif o["letter"] == mine:
+                    state = " wrong"
+            checked = " checked" if mine == o["letter"] else ""
+            lock = " disabled" if marks is not None else ""
+            shown += (f'<label class="exopt{state}">'
+                      f'<input type="radio" name="q{q["id"]}"'
+                      f' value="{E(o["letter"])}"{checked}{lock}>'
+                      f'<b>{E(o["letter"])}</b>'
+                      f'{" " + E(o["text"]) if o["text"] else ""}</label>')
+        return f'<span class="exopts">{shown}</span>'
+
+    def long_box(m):
+        got = by_num.get(int(m.group(1)))
+        if not got:
+            return ""
+        q, _o = got
+        mine = (given or {}).get(q["id"]) or ""
+        lock = " readonly" if marks is not None else ""
+        return (f'<textarea class="exwrite" name="q{q["id"]}" rows="12"'
+                f' placeholder="Write your email here."{lock}>{E(mine)}</textarea>')
+
+    return LONG_AT.sub(long_box, MCQ_AT.sub(choices, layout))
+
+
 def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
     """Put the student's own boxes into the booklet's blanks.
 
@@ -2256,7 +2306,8 @@ def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
         return (f'<input class="{cls}" name="q{q["id"]}"{attr}{ro}'
                 f' data-q="{m.group(1)}"')
 
-    return add_players(BLANK_AT.sub(box, layout), level, who)
+    filled = fill_choices(BLANK_AT.sub(box, layout), qs, given, marks)
+    return add_players(filled, level, who)
 
 
 def portal_tests(db, s, token, query):
@@ -2332,9 +2383,13 @@ def portal_tests(db, s, token, query):
                 f'{E(q["answer"] or "")}</b></li>'
                 for q, _o in qs
                 if given.get(q["id"]) and given[q["id"]]["correct"] == 0)
+            why = core.how_it_ended(db, prev["id"])
+            note = {"time": "The time ran out, so the paper was handed in as it was.",
+                    "left": "You left the page, so the paper was handed in."}.get(why, "")
             return f"""<h2>{E(t["title"])}</h2>
 <div class="card champ-hero"><div class="sub">You scored</div>
 <div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
+{f'<p class="flash err">{E(note)}</p>' if note else ''}
 <div class="booksheet">{fill_layout(layout, qs, mine, marks, level=core.level_name(db, t["level_id"]), who=token)}</div>
 {f'<h2 class="gap-4">The ones to look at again</h2><ul class="attn">{wrong}</ul>'
  if wrong else ''}
@@ -2371,12 +2426,34 @@ def portal_tests(db, s, token, query):
         sofar = core.attempt_answers(db, attempt)
         back = (' <span class="pill">picked up where you left off</span>'
                 if sofar else "")
+        minutes = t["minutes"] if "minutes" in t.keys() else None
+        strict = bool(t["strict"]) if "strict" in t.keys() else False
+        started = db.execute("SELECT started_at FROM dattempts WHERE id=?",
+                             (attempt,)).fetchone()["started_at"]
+        left = ""
+        if minutes:
+            used = (core.now() - core.parse(started)).total_seconds()
+            left = str(max(0, int(minutes * 60 - used)))
+        exam = ""
+        if minutes:
+            exam = (f'<div class="exambar"><span class="exclock" id="exclock"'
+                    f' data-left="{left}">--:--</span>'
+                    f'<span class="sub">{minutes} minutes'
+                    f'{" &middot; leaving this page hands it in" if strict else ""}'
+                    f'</span></div>')
+        intro = (f"An exam. You have {minutes} minutes, the clock does not stop, "
+                 f"and it hands itself in when the time is up."
+                 if minutes else
+                 f"Your booklet. Fill it in here &mdash; it saves as you type, "
+                 f"so you can stop and come back.")
         return f"""<h2>{E(t["title"])}</h2>
-<p class="sub">Your booklet. Fill it in here &mdash; it saves as you type, so you
-can stop and come back. The {marked} answers with a key are marked as soon as
+<p class="sub">{intro} The {marked} answers with a key are marked the moment
 you hand it in.{back}</p>
+{exam}
 <form method="post" action="/s/{E(token)}/test/{tid}"
- data-save="/s/{E(token)}/test/{tid}/save">
+ data-save="/s/{E(token)}/test/{tid}/save"
+ data-minutes="{minutes or ''}" data-strict="{1 if strict else 0}"
+ data-left="{left}">
 <div class="booksheet">{fill_layout(layout, qs, sofar, level=core.level_name(db, t["level_id"]), who=token)}</div>
 <div class="gap-3"><button>Hand it in</button>
 <span class="sub" id="booksaved"></span></div>
@@ -2388,6 +2465,16 @@ you hand it in.{back}</p>
 <div class="card">{rows}</div>
 <div class="gap-3"><button>Hand it in</button></div>
 </form>"""
+
+
+def note_ending(db, token, tid, why):
+    s = core.student_by_token(db, token)
+    if not s or not why:
+        return
+    row = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                     " ORDER BY id DESC LIMIT 1", (tid, s["id"])).fetchone()
+    if row:
+        core.finish_reason(db, row["id"], why)
 
 
 def act_book_save(req, db, token, tid):
@@ -2465,7 +2552,14 @@ def act_student_test(req, db, token, tid):
         if m and values:
             given[int(m.group(1))] = values[0]
     attempt = core.start_attempt(db, tid, s["id"])
-    core.submit_attempt(db, attempt, given)
+    # answers already saved as they typed must not be lost when the paper is
+    # handed in by the clock, which sends only what is on screen
+    kept = core.attempt_answers(db, attempt)
+    kept.update({k: v for k, v in given.items() if v})
+    core.submit_attempt(db, attempt, kept)
+    why = (req["form"].get("ended", [""])[0] or "").strip()
+    if why in ("time", "left"):
+        core.finish_reason(db, attempt, why)
     return redirect(f"/s/{token}?tab=tests&t={tid}")
 
 

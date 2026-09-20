@@ -394,6 +394,11 @@ def migrate(db):
         db.execute("ALTER TABLE dquestions ADD COLUMN image TEXT")
 
     tcols = {r["name"] for r in db.execute("PRAGMA table_info(dtests)")}
+    if tcols and "minutes" not in tcols:
+        # a test sat under exam conditions: the clock, and whether leaving the
+        # window ends it
+        db.execute("ALTER TABLE dtests ADD COLUMN minutes INTEGER")
+        db.execute("ALTER TABLE dtests ADD COLUMN strict INTEGER NOT NULL DEFAULT 0")
     if tcols and "layout" not in tcols:
         # the booklet itself, as the student's own page, with its blanks
         # marked up so their boxes go back in the right holes
@@ -551,6 +556,8 @@ def migrate(db):
         published INTEGER NOT NULL DEFAULT 0,
         in_league INTEGER NOT NULL DEFAULT 1,
         layout TEXT,                       -- the booklet as a page, when there is one
+        minutes INTEGER,                   -- a time limit, for an exam
+        strict INTEGER NOT NULL DEFAULT 0, -- leaving the window ends it
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS dquestions (
@@ -2535,11 +2542,12 @@ def load_test(db, data):
                        (data.get("level", ""),)).fetchone()
     tid = db.execute(
         "INSERT INTO dtests (level_id, number, title, passage, published, layout,"
-        " created_at) VALUES (?,?,?,?,0,?,?)",
+        " minutes, strict, created_at) VALUES (?,?,?,?,0,?,?,?,?)",
         (level["id"] if level else None, data.get("number"),
          data.get("title") or "Practice test",
          (data.get("passages") or {}).get("gap") or None,
-         data.get("layout"), iso(now()))).lastrowid
+         data.get("layout"), data.get("minutes"),
+         1 if data.get("strict") else 0, iso(now()))).lastrowid
     for i, q in enumerate(data.get("questions") or []):
         # a reading passage printed as a picture travels inside the file, and is
         # written out here so the page can simply point at it
@@ -2697,6 +2705,15 @@ def report_breakage(where, exc):
                 pass
     except Exception:
         pass            # a failure to report must never take the site down
+
+
+def finish_reason(db, attempt_id, why):
+    """Why a paper was handed in: the clock, or the student leaving it."""
+    meta_set(db, "ended:%d" % attempt_id, why)
+
+
+def how_it_ended(db, attempt_id):
+    return meta_get(db, "ended:%d" % attempt_id, "")
 
 
 def save_progress(db, attempt_id, given):

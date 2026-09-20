@@ -1450,3 +1450,42 @@ main.portal:has(.booksheet) { max-width: 940px; }
 
 /* the coursebook track, where the booklet asks for it */
 .booklet .bkaudio { width: 100%; max-width: 420px; margin: var(--sp-2) 0; }
+
+/* ------------------------------------------------------------- exam conditions
+ * The clock sits above the paper and stays there while it scrolls, because a
+ * student who has to hunt for the time is not thinking about the questions.
+ */
+.exambar {
+  position: sticky; top: 60px; z-index: 10;
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3); box-shadow: var(--shadow-1);
+}
+.exclock {
+  font-variant-numeric: tabular-nums; font-weight: 700; font-size: 20px;
+  letter-spacing: -.02em; color: var(--ink);
+}
+.exclock.soon { color: var(--amber); }
+.exclock.nearly { color: var(--warn); }
+
+/* A Cambridge answer is chosen, not typed. */
+.booklet .exopts { display: block; margin: var(--sp-1) 0 var(--sp-2); }
+.booklet .exopt {
+  display: inline-flex; align-items: baseline; gap: var(--sp-2);
+  margin: 0 var(--sp-4) var(--sp-1) 0; cursor: pointer;
+  font-size: 10.5pt;
+}
+.booklet .exopt b { color: #127D80; }
+.booklet .exopt.right { background: #E7F6EC; border-radius: 4px;
+  padding: 1px var(--sp-2); }
+.booklet .exopt.wrong { background: #FDECEC; border-radius: 4px;
+  padding: 1px var(--sp-2); }
+.booklet .exwrite {
+  width: 100%; font: inherit; line-height: 1.6; padding: var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: #fff; color: #1A1A1A;
+}
+@media (pointer: coarse) {
+  .booklet .exopt { min-height: 44px; align-items: center; }
+}
