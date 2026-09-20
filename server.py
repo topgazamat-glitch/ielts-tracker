@@ -4926,6 +4926,12 @@ def view_test(req, db, tid):
                 f'It is the one the league counts.\')">'
                 f'<button class="ghost small">Remove</button></form></td></tr>')
         results += "</table></div>"
+        written = sum(1 for p in core.written_answers(db, tid)
+                      for a in p["answers"] if a["text"])
+        if written:
+            results += (f'<p class="gap-3"><a class="tab" '
+                        f'href="/tests/{tid}/writing">Read the writing '
+                        f'({written})</a></p>')
 
     mins = t["minutes"] if "minutes" in t.keys() else None
     strict = bool(t["strict"]) if "strict" in t.keys() else False
@@ -5002,6 +5008,58 @@ type, never a blank page.</p>{busy}</div>"""
 {timing}
 {results}"""
     return html_response(page(t["title"], body, "Tests"))
+
+
+def view_test_writing(req, db, tid):
+    """Every student's writing on one paper, in one place, ready to read."""
+    t = db.execute("SELECT * FROM dtests WHERE id=?", (tid,)).fetchone()
+    if not t:
+        return not_found()
+    parts = core.written_answers(db, tid)
+    if not parts:
+        body = (f'<h1>Writing &mdash; {E(t["title"])}</h1>'
+                f'<p class="sub">This paper has nothing to write on: every '
+                f'question marks itself.</p>'
+                f'<p class="gap-3"><a class="tab" href="/tests/{tid}">'
+                f'Back to the test</a></p>')
+        return html_response(page("Writing", body, "Tests"))
+
+    blocks = ""
+    for part in parts:
+        q = part["question"]
+        written = [a for a in part["answers"] if a["text"]]
+        blank = [a for a in part["answers"] if not a["text"]]
+        counts = sorted(a["words"] for a in written)
+        middle = counts[len(counts) // 2] if counts else 0
+        head = (f'<h2>{E(q["prompt"])}</h2>'
+                f'<p class="sub">{len(written)} written &middot; '
+                f'{len(blank)} left blank &middot; '
+                f'{middle} words in the middle of the class</p>')
+        rows = ""
+        for a in written:
+            when = E((a["finished_at"] or "")[:16].replace("T", " "))
+            rows += (f'<div class="card writ">'
+                     f'<div class="rowline">'
+                     f'<strong><a href="/students/{a["student_id"]}">'
+                     f'{E(a["name"])}</a></strong>'
+                     f'<span class="sub">{a["words"]} words &middot; {when}</span>'
+                     f'</div>'
+                     f'<div class="passage gap-2">{E(a["text"])}</div></div>')
+        if blank:
+            rows += (f'<p class="sub gap-3">Nothing written by: '
+                     f'{E(", ".join(a["name"] for a in blank))}</p>')
+        if not part["answers"]:
+            rows = '<p class="sub">Nobody has sat this paper yet.</p>'
+        blocks += head + rows
+
+    body = (f'<h1>Writing &mdash; {E(t["title"])}</h1>'
+            f'<p class="sub">What students wrote, in their own words. Nothing '
+            f'here is marked by the system &mdash; the writing is yours to '
+            f'read.</p>'
+            f'{blocks}'
+            f'<p class="gap-4"><a class="tab" href="/tests/{tid}">'
+            f'Back to the test</a></p>')
+    return html_response(page("Writing", body, "Tests"))
 
 
 def act_test_timing(req, db, tid):
@@ -5944,6 +6002,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("POST", r"^/tests/(\d+)/timing$", act_test_timing),
+    ("GET",  r"^/tests/(\d+)/writing$", view_test_writing),
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
     ("POST", r"^/students/(\d+)/newlink$", act_new_link),
     ("POST", r"^/cleanup$", act_free_space),

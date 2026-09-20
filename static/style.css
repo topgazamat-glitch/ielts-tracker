@@ -1489,3 +1489,8 @@ main.portal:has(.booksheet) { max-width: 940px; }
 @media (pointer: coarse) {
   .booklet .exopt { min-height: 44px; align-items: center; }
 }
+
+/* A student's writing, read rather than skimmed: the paragraph is given its
+   own measure so a long email does not run the full width of a laptop. */
+.writ .passage { max-width: 62ch; }
+.writ + .writ { margin-top: var(--sp-3); }

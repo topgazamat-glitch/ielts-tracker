@@ -2804,6 +2804,34 @@ def submit_attempt(db, attempt_id, given):
     return score, out_of
 
 
+def written_answers(db, test_id):
+    """Every student's written answer on this paper, ready to be read.
+
+    The marked questions score themselves; the writing does not, and until
+    now it was saved where only the student who wrote it could see it. This
+    gathers it - one question at a time, one student at a time, newest
+    sitting first - so a teacher can read thirty-nine emails in one place
+    instead of thirty-nine.
+    """
+    out = []
+    for q in db.execute(
+            "SELECT * FROM dquestions WHERE test_id=? AND kind='open'"
+            " ORDER BY num", (test_id,)):
+        answers = []
+        for r in db.execute(
+                "SELECT s.id student_id, s.name, a.finished_at, r.given"
+                " FROM dattempts a JOIN students s ON s.id=a.student_id"
+                " LEFT JOIN dresponses r ON r.attempt_id=a.id AND r.question_id=?"
+                " WHERE a.test_id=? AND a.finished_at IS NOT NULL"
+                " ORDER BY s.name", (q["id"], test_id)):
+            text = (r["given"] or "").strip()
+            answers.append({"student_id": r["student_id"], "name": r["name"],
+                            "finished_at": r["finished_at"], "text": text,
+                            "words": len(text.split()) if text else 0})
+        out.append({"question": q, "answers": answers})
+    return out
+
+
 def attempts_for_test(db, test_id):
     return db.execute(
         "SELECT a.*, s.name FROM dattempts a JOIN students s ON s.id=a.student_id"
