@@ -2594,7 +2594,10 @@ def test_questions(db, test_id):
                     (test_id,)).fetchall()
     out = []
     for q in qs:
-        opts = db.execute("SELECT * FROM doptions WHERE question_id=? ORDER BY letter",
+        # in the order they were written, not alphabetically. A, B, C, D come
+        # out the same either way, but a YES / NO question sorted by letter
+        # reads NO / YES, which is backwards from the paper it copies.
+        opts = db.execute("SELECT * FROM doptions WHERE question_id=? ORDER BY id",
                           (q["id"],)).fetchall()
         out.append((q, opts))
     return out

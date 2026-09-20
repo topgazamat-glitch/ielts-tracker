@@ -91,6 +91,15 @@ for q, _o in qs:
 print("   questions:", kinds)
 assert kinds == {"mcq": 20, "typed": 5, "open": 2}, kinds
 
+# the options must reach the student in the order the paper prints them
+for q, opts in qs:
+    letters = [o["letter"] for o in opts]
+    if len(letters) == 4:
+        assert letters == ["A", "B", "C", "D"], letters
+    elif len(letters) == 2:
+        assert letters == ["YES", "NO"], letters
+print("   options keep their printed order, including YES before NO")
+
 attempt = core.start_attempt(db, tid, sid)
 given = {}
 for q, _o in qs:
