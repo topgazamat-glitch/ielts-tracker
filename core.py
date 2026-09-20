@@ -399,6 +399,9 @@ def migrate(db):
         # window ends it
         db.execute("ALTER TABLE dtests ADD COLUMN minutes INTEGER")
         db.execute("ALTER TABLE dtests ADD COLUMN strict INTEGER NOT NULL DEFAULT 0")
+    if tcols and "once" not in tcols:
+        # an exam is sat once; a practice test is sat as often as it helps
+        db.execute("ALTER TABLE dtests ADD COLUMN once INTEGER NOT NULL DEFAULT 0")
     if tcols and "layout" not in tcols:
         # the booklet itself, as the student's own page, with its blanks
         # marked up so their boxes go back in the right holes
@@ -558,6 +561,7 @@ def migrate(db):
         layout TEXT,                       -- the booklet as a page, when there is one
         minutes INTEGER,                   -- a time limit, for an exam
         strict INTEGER NOT NULL DEFAULT 0, -- leaving the window ends it
+        once INTEGER NOT NULL DEFAULT 0,   -- one sitting only: an exam, not practice
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS dquestions (
@@ -2542,12 +2546,13 @@ def load_test(db, data):
                        (data.get("level", ""),)).fetchone()
     tid = db.execute(
         "INSERT INTO dtests (level_id, number, title, passage, published, layout,"
-        " minutes, strict, created_at) VALUES (?,?,?,?,0,?,?,?,?)",
+        " minutes, strict, once, created_at) VALUES (?,?,?,?,0,?,?,?,?,?)",
         (level["id"] if level else None, data.get("number"),
          data.get("title") or "Practice test",
          (data.get("passages") or {}).get("gap") or None,
          data.get("layout"), data.get("minutes"),
-         1 if data.get("strict") else 0, iso(now()))).lastrowid
+         1 if data.get("strict") else 0, 1 if data.get("once") else 0,
+         iso(now()))).lastrowid
     for i, q in enumerate(data.get("questions") or []):
         # a reading passage printed as a picture travels inside the file, and is
         # written out here so the page can simply point at it
@@ -2618,6 +2623,22 @@ def test_ready(db, test_id):
                    " WHERE test_id=?", (test_id,)).fetchone()
     marked = r["k"] or 0
     return bool(marked) and r["n"] == marked + (r["o"] or 0)
+
+
+def sat_already(db, test_id, student_id):
+    """Has this student finished this paper, on a test that is sat once?
+
+    An exam is not practice. The same paper opened a second time would mean a
+    student who has seen the answers sitting it again, and because only the
+    first sitting counts in the league, a retake could also quietly replace
+    nothing while looking to them like a second chance.
+    """
+    t = db.execute("SELECT once FROM dtests WHERE id=?", (test_id,)).fetchone()
+    if not t or not (t["once"] if "once" in t.keys() else 0):
+        return False
+    return bool(db.execute(
+        "SELECT 1 FROM dattempts WHERE test_id=? AND student_id=?"
+        " AND finished_at IS NOT NULL LIMIT 1", (test_id, student_id)).fetchone())
 
 
 def start_attempt(db, test_id, student_id):

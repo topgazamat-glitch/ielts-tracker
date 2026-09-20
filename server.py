@@ -2347,7 +2347,12 @@ def portal_tests(db, s, token, query):
     prev = db.execute(
         "SELECT * FROM dattempts WHERE test_id=? AND student_id=? AND finished_at IS NOT NULL"
         " ORDER BY finished_at DESC LIMIT 1", (tid, s["id"])).fetchone()
-    if prev and query.get("again", [""])[0] != "1":
+    done_for_good = core.sat_already(db, tid, s["id"])
+    if prev and (done_for_good or query.get("again", [""])[0] != "1"):
+        again = ('<span class="sub">This paper is sat once, and you have sat '
+                 'it.</span>' if done_for_good else
+                 f'<a class="tab" href="{base}&amp;t={tid}&amp;again=1">'
+                 f'Try it again</a>')
         given = {r["question_id"]: r for r in db.execute(
             "SELECT * FROM dresponses WHERE attempt_id=?", (prev["id"],))}
         rows = ""
@@ -2394,13 +2399,13 @@ def portal_tests(db, s, token, query):
 {f'<h2 class="gap-4">The ones to look at again</h2><ul class="attn">{wrong}</ul>'
  if wrong else ''}
 <p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
-<a class="tab" href="{base}&amp;t={tid}&amp;again=1">Try it again</a></p>"""
+{again}</p>"""
         return f"""<h2>{E(t["title"])}</h2>
 <div class="card champ-hero"><div class="sub">You scored</div>
 <div class="champ-name">{prev["score"]} of {prev["total"]}</div></div>
 <div class="card">{rows}</div>
 <p class="gap-4"><a class="tab" href="{base}">Back to the tests</a>
-<a class="tab" href="{base}&amp;t={tid}&amp;again=1">Try it again</a></p>"""
+{again}</p>"""
 
     attempt = core.start_attempt(db, tid, s["id"])
     passage = (f'<div class="card"><div class="passage">{E(t["passage"])}</div></div>'
@@ -2546,6 +2551,10 @@ def act_student_test(req, db, token, tid):
     t = db.execute("SELECT id FROM dtests WHERE id=? AND published=1", (tid,)).fetchone()
     if not t:
         return redirect(f"/s/{token}?tab=tests")
+    if core.sat_already(db, tid, s["id"]):
+        # the page does not offer it, so this is a stale tab, a second phone,
+        # or the back button - never a reason to overwrite a sat exam
+        return redirect(f"/s/{token}?tab=tests&t={tid}")
     given = {}
     for key, values in req["form"].items():
         m = re.match(r"^q(\d+)$", key)
@@ -4920,6 +4929,7 @@ def view_test(req, db, tid):
 
     mins = t["minutes"] if "minutes" in t.keys() else None
     strict = bool(t["strict"]) if "strict" in t.keys() else False
+    once = bool(t["once"]) if "once" in t.keys() else False
     sitting = db.execute(
         "SELECT COUNT(*) c FROM dattempts WHERE test_id=? AND finished_at IS NULL",
         (tid,)).fetchone()["c"]
@@ -4927,7 +4937,7 @@ def view_test(req, db, tid):
             f'{sitting} student(s) have this open right now. Changing the time '
             f'changes their clock too, from when each of them started.</p>'
             if sitting else "")
-    timing = f"""<h2>The clock</h2>
+    timing = f"""<h2>Exam conditions</h2>
 <div class="card"><form method="post" action="/tests/{tid}/timing" class="inline">
 <label class="f">Time<input type="number" name="minutes" min="0" max="240"
  value="{mins or ''}" placeholder="none" style="width:90px"> minutes</label>
@@ -4936,8 +4946,18 @@ def view_test(req, db, tid):
 <option value="0"{"" if strict else " selected"}>does nothing</option>
 <option value="1"{" selected" if strict else ""}>hands the paper in</option>
 </select></label>
+<label class="f">Sittings
+<select name="once">
+<option value="0"{"" if once else " selected"}>as many as they like</option>
+<option value="1"{" selected" if once else ""}>one only</option>
+</select></label>
 <label class="f pushed">&nbsp;<button>Save</button></label>
 </form>
+<p class="sub gap-3"><strong>One only</strong> is what makes it an exam: once
+a student has handed the paper in they see their result and their marked
+paper, and there is no way back into it. Leave it on <strong>as many as they
+like</strong> for a booklet worth redoing until it is right &mdash; the
+league counts the first sitting either way.</p>
 <p class="sub gap-3">Leave the time empty for no limit, and the booklet
 behaves as it always has: no clock, and they can stop and come back. With a
 time set, a bar counts down on screen and the paper hands itself in when it
@@ -4997,8 +5017,9 @@ def act_test_timing(req, db, tid):
     raw = (req["form"].get("minutes", [""])[0] or "").strip()
     minutes = int(raw) if raw.isdigit() and 0 < int(raw) <= 240 else None
     strict = 1 if req["form"].get("strict", ["0"])[0] == "1" else 0
-    db.execute("UPDATE dtests SET minutes=?, strict=? WHERE id=?",
-               (minutes, strict, tid))
+    once = 1 if req["form"].get("once", ["0"])[0] == "1" else 0
+    db.execute("UPDATE dtests SET minutes=?, strict=?, once=? WHERE id=?",
+               (minutes, strict, once, tid))
     db.commit()
     return redirect(f"/tests/{tid}")
 
