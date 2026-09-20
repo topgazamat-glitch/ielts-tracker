@@ -1,12 +1,17 @@
-"""Build the B1+ mock final: the paper, the key, the audioscript, the digital test.
+"""Build a Competency mock final: paper, key, audioscript, digital test.
 
-    python3 exams/make_b1plus.py --paper --out ~/Desktop/B1+\\ Mock\\ Final
-    python3 exams/make_b1plus.py --digital --minutes 60 --strict --upload
+    python3 exams/make_competency.py b1plus --paper --out ~/Desktop/B1+\\ Mock
+    python3 exams/make_competency.py b1 --digital --minutes 60 --strict --upload
 
-The B1+ paper is not the A2 paper with harder words. Its questions have four
-options rather than three, its reading asks whether a statement about a long
-text is true, and it has two writing tasks instead of one - so it gets its own
-builder rather than a flag on the A2 one.
+The Empower Competency papers - B1 for Pre-Intermediate, B1+ for Intermediate
+- share one skeleton: four listening parts for twenty marks, five reading
+parts for twenty-five, and two writing tasks. What separates them is how many
+options each reading question offers, three or four, and how hard the texts
+are. So one builder makes both, and the number of options comes from the
+paper itself rather than from a setting here.
+
+The A2 paper has a different skeleton - one writing task, matching rather
+than YES/NO - and keeps its own builder in make_paper.py and make_digital.py.
 """
 import argparse
 import html
@@ -18,18 +23,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
-import b1plus_mock_final as paper
 from make_paper import CSS
 
+PAPERS = {"b1": ("b1_mock_final", "B1 Pre-Intermediate", "B1 Mock Final"),
+          "b1plus": ("b1plus_mock_final", "B1+ Intermediate", "B1+ Mock Final")}
+paper = None      # set by main() from the chosen level
+LEVEL_LINE = ""   # what the top of the printed paper says
+DIGITAL_HEAD = ""
+
 E = html.escape
-L4 = "ABCD"
+LETTERS = "ABCD"
 TEAL, DEEP, GREY = "#127D80", "#0B5456", "#6E6E6E"
 
 # --------------------------------------------------------- the printed paper
 
 
 def mcq(num, stem, options):
-    opts = "".join('<span>%s) %s</span>' % (L4[i], E(o))
+    opts = "".join('<span>%s) %s</span>' % (LETTERS[i], E(o))
                    for i, o in enumerate(options))
     return ('<p class="q"><b>%s</b> %s</p><p class="opts">%s</p>'
             % (num, E(stem), opts))
@@ -176,9 +186,9 @@ def page(title, inner):
     return ("<title>%s</title><style>@page{size:A4;margin:16mm 15mm}"
             "body{margin:0}%s</style>"
             '<div class="exam"><h1>%s</h1>'
-            '<p class="sub">B1+ Intermediate &middot; mock final &middot; '
+            '<p class="sub">%s &middot; mock final &middot; '
             'name ………………………………  class …………  date …………</p>%s</div>'
-            % (E(title), CSS, E(title), inner))
+            % (E(title), CSS, E(title), E(LEVEL_LINE), inner))
 
 
 # ------------------------------------------------------------- the website
@@ -242,7 +252,7 @@ YN = [("YES", ""), ("NO", "")]
 def digital_layout():
     R1, R2, R3 = paper.R_PART1, paper.R_PART2, paper.R_PART3
     R4, R5 = paper.R_PART4, paper.R_PART5
-    h = [head("B1+ INTERMEDIATE · MOCK FINAL", 9, TEAL, 2),
+    h = [head(DIGITAL_HEAD, 9, TEAL, 2),
          head("Reading and Writing", 20),
          rubric("Five reading parts, twenty-five questions, and two pieces of "
                 "writing. Answer every question — a wrong answer costs "
@@ -254,7 +264,7 @@ def digital_layout():
         h.append(panel([E(q["text"])], fill="#fff"))
         h.append(item(q["q"], E(q["ask"]),
                       ask("mcq", "%d %s" % (q["q"], q["ask"]), q["answer"],
-                          list(zip(L4, q["options"])))))
+                          list(zip(LETTERS, q["options"])))))
 
     h.append(part_bar(2, "Questions 6–10 · the review"))
     h.append(rubric(R2["intro"]))
@@ -271,7 +281,7 @@ def digital_layout():
     for q in R3["questions"]:
         h.append(item(q["q"], E(q["ask"]),
                       ask("mcq", "%d %s" % (q["q"], q["ask"]), q["answer"],
-                          list(zip(L4, q["options"])))))
+                          list(zip(LETTERS, q["options"])))))
 
     h.append(part_bar(4, "Questions 16–20 · the missing words"))
     h.append(rubric(R4["intro"]))
@@ -279,7 +289,7 @@ def digital_layout():
     for g in R4["gaps"]:
         h.append(item(g["q"], "",
                       ask("mcq", "Gap %d" % g["q"], g["answer"],
-                          list(zip(L4, g["options"])))))
+                          list(zip(LETTERS, g["options"])))))
 
     h.append(part_bar(5, "Questions 21–25 · one word in each gap"))
     h.append(rubric(R5["intro"]))
@@ -307,47 +317,56 @@ def digital_layout():
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("level", choices=sorted(PAPERS),
+                    help="which Competency paper to build")
     ap.add_argument("--paper", action="store_true")
     ap.add_argument("--digital", action="store_true")
-    ap.add_argument("--out",
-                    default=os.path.expanduser("~/Desktop/B1+ Mock Final"))
+    ap.add_argument("--out", default="")
     ap.add_argument("--minutes", type=int, default=60)
     ap.add_argument("--strict", action="store_true")
-    ap.add_argument("--once", action="store_true", default=True)
-    ap.add_argument("--level", default="Intermediate")
-    ap.add_argument("--title",
-                    default="B1+ Mock Final — Reading and Writing")
+    ap.add_argument("--resittable", action="store_true",
+                    help="let students sit it more than once")
     ap.add_argument("--upload", action="store_true")
     ap.add_argument("--site",
                     default="https://ielts-tracker-production.up.railway.app")
     args = ap.parse_args()
 
+    module, level_line, name = PAPERS[args.level]
+    global paper, LEVEL_LINE, DIGITAL_HEAD
+    paper = __import__(module)
+    LEVEL_LINE = level_line
+    DIGITAL_HEAD = level_line.upper() + " \u00b7 MOCK FINAL"
+    site_level = "Pre-Intermediate" if args.level == "b1" else "Intermediate"
+    out = os.path.expanduser(args.out or ("~/Desktop/%s" % name))
+
     if args.paper:
-        out = os.path.expanduser(args.out)
         os.makedirs(out, exist_ok=True)
         import export_booklet as ex
-        for name, inner in (
-                ("B1+ Mock Final - Question paper",
+        for label, inner in (
+                ("%s - Question paper" % name,
                  listening_html() + reading_html() + writing_html()),
-                ("B1+ Mock Final - Answer key", key_html()),
-                ("B1+ Mock Final - Audioscript", script_html())):
-            ex.to_pdf(page(name, inner), os.path.join(out, name + ".pdf"))
-            ex.to_docx(inner, os.path.join(out, name + ".docx"), name)
-            print("   %-42s written" % name)
+                ("%s - Answer key" % name, key_html()),
+                ("%s - Audioscript" % name, script_html())):
+            ex.to_pdf(page(label, inner), os.path.join(out, label + ".pdf"))
+            ex.to_docx(inner, os.path.join(out, label + ".docx"), label)
+            print("   %-42s written" % label)
 
     if args.digital:
         layout = digital_layout()
         marked = sum(1 for q in QS if q["kind"] != "open")
-        data = {"level": args.level, "number": 98, "title": args.title,
+        data = {"level": site_level, "number": 98,
+                "title": "%s \u2014 Reading and Writing" % name,
                 "passages": {}, "layout": layout, "questions": QS,
                 "minutes": args.minutes, "strict": bool(args.strict),
-                "once": bool(args.once)}
-        dest = os.path.join(HERE, "b1plus_mock_digital.json")
+                "once": not args.resittable}
+        dest = os.path.join(HERE, "%s_mock_digital.json" % args.level)
         json.dump(data, open(dest, "w"))
-        print("%d questions (%d marked, 2 written) · %d minutes · %s · %s"
-              % (len(QS), marked, args.minutes,
-                 "leaving the page hands it in" if args.strict else "no window rule",
-                 "one sitting" if args.once else "resittable"))
+        print("%s \u00b7 %d questions (%d marked, 2 written) \u00b7 %d minutes "
+              "\u00b7 %s \u00b7 %s"
+              % (site_level, len(QS), marked, args.minutes,
+                 "leaving the page hands it in" if args.strict
+                 else "no window rule",
+                 "resittable" if args.resittable else "one sitting"))
         print("written to", dest)
         if args.upload:
             import upload_booklets as ub

@@ -22,7 +22,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import a2_mock_final as paper   # replaced by --paper; see main()
 
-PAPERS = {"a2": "a2_mock_final", "b1plus": "b1plus_mock_final"}
+PAPERS = {"a2": "a2_mock_final", "b1": "b1_mock_final",
+          "b1plus": "b1plus_mock_final"}
 
 
 def speak(voice, text, dest, rate=160):
