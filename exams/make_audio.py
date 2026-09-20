@@ -6,6 +6,7 @@ as the real paper does. The pieces are spoken one at a time and joined here,
 because `say` speaks in one voice per run.
 
     python3 exams/make_audio.py --out ~/Desktop/A2\\ Mock\\ Final
+    python3 exams/make_audio.py --paper b1plus --out ~/Desktop/B1+\\ Mock\\ Final
 
 Needs nothing that is not already on a Mac: `say` to speak, `afconvert` to
 make the mp4 audio, and the standard library to join the pieces.
@@ -19,7 +20,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import a2_mock_final as paper
+import a2_mock_final as paper   # replaced by --paper; see main()
+
+PAPERS = {"a2": "a2_mock_final", "b1plus": "b1plus_mock_final"}
 
 
 def speak(voice, text, dest, rate=160):
@@ -149,10 +152,15 @@ def to_m4a(wav, dest):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.expanduser("~/Desktop/A2 Mock Final"))
+    ap.add_argument("--paper", default="a2", choices=sorted(PAPERS))
+    ap.add_argument("--name", default="Mock Final")
     args = ap.parse_args()
+    # the parts read the paper through this name, so swapping it swaps the exam
+    global paper
+    paper = __import__(PAPERS[args.paper])
     out = os.path.expanduser(args.out)
     os.makedirs(out, exist_ok=True)
-    work = tempfile.mkdtemp(prefix="a2audio-")
+    work = tempfile.mkdtemp(prefix="%saudio-" % args.paper)
 
     whole = []
     for i, maker in enumerate((part1, part2, part3, part4), 1):
@@ -160,12 +168,12 @@ def main():
         pieces = maker(work)
         one = os.path.join(work, "part%d.wav" % i)
         join(pieces, one)
-        to_m4a(one, os.path.join(out, "Mock Final - Part %d.m4a" % i))
+        to_m4a(one, os.path.join(out, "%s - Part %d.m4a" % (args.name, i)))
         whole += pieces
     print("  the whole paper ...", flush=True)
     every = os.path.join(work, "full.wav")
     join(whole, every)
-    to_m4a(every, os.path.join(out, "Mock Final - Full listening.m4a"))
+    to_m4a(every, os.path.join(out, "%s - Full listening.m4a" % args.name))
 
     for f in sorted(os.listdir(out)):
         if f.endswith(".m4a"):
