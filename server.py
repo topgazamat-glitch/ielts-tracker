@@ -4918,6 +4918,32 @@ def view_test(req, db, tid):
                 f'<button class="ghost small">Remove</button></form></td></tr>')
         results += "</table></div>"
 
+    mins = t["minutes"] if "minutes" in t.keys() else None
+    strict = bool(t["strict"]) if "strict" in t.keys() else False
+    sitting = db.execute(
+        "SELECT COUNT(*) c FROM dattempts WHERE test_id=? AND finished_at IS NULL",
+        (tid,)).fetchone()["c"]
+    busy = (f'<p class="sub gap-3" style="margin-bottom:0">'
+            f'{sitting} student(s) have this open right now. Changing the time '
+            f'changes their clock too, from when each of them started.</p>'
+            if sitting else "")
+    timing = f"""<h2>The clock</h2>
+<div class="card"><form method="post" action="/tests/{tid}/timing" class="inline">
+<label class="f">Time<input type="number" name="minutes" min="0" max="240"
+ value="{mins or ''}" placeholder="none" style="width:90px"> minutes</label>
+<label class="f">Leaving the page
+<select name="strict">
+<option value="0"{"" if strict else " selected"}>does nothing</option>
+<option value="1"{" selected" if strict else ""}>hands the paper in</option>
+</select></label>
+<label class="f pushed">&nbsp;<button>Save</button></label>
+</form>
+<p class="sub gap-3">Leave the time empty for no limit, and the booklet
+behaves as it always has: no clock, and they can stop and come back. With a
+time set, a bar counts down on screen and the paper hands itself in when it
+reaches nought &mdash; with whatever they had written, which is saved as they
+type, never a blank page.</p>{busy}</div>"""
+
     pub = ""
     if ready:
         counts = t["in_league"] if "in_league" in t.keys() else 1
@@ -4953,8 +4979,28 @@ def view_test(req, db, tid):
 <button class="ghost danger">Delete</button></form></div>
 </form>
 <div class="card gap-4">{pub}</div>
+{timing}
 {results}"""
     return html_response(page(t["title"], body, "Tests"))
+
+
+def act_test_timing(req, db, tid):
+    """The teacher sets the clock, not the file the test arrived in.
+
+    A time limit is a decision about a particular morning - how long the
+    lesson is, whether this is a mock under exam conditions or a booklet to
+    finish at home - so it belongs on the page, next to Publish, rather than
+    inside something only I can rebuild.
+    """
+    if not db.execute("SELECT id FROM dtests WHERE id=?", (tid,)).fetchone():
+        return not_found()
+    raw = (req["form"].get("minutes", [""])[0] or "").strip()
+    minutes = int(raw) if raw.isdigit() and 0 < int(raw) <= 240 else None
+    strict = 1 if req["form"].get("strict", ["0"])[0] == "1" else 0
+    db.execute("UPDATE dtests SET minutes=?, strict=? WHERE id=?",
+               (minutes, strict, tid))
+    db.commit()
+    return redirect(f"/tests/{tid}")
 
 
 def act_test_league(req, db, tid):
@@ -5876,6 +5922,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
+    ("POST", r"^/tests/(\d+)/timing$", act_test_timing),
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
     ("POST", r"^/students/(\d+)/newlink$", act_new_link),
     ("POST", r"^/cleanup$", act_free_space),
