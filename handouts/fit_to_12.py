@@ -85,19 +85,31 @@ def rewrite(src, dest, step):
     zin.close()
 
 
-SCRIPT = '''tell application "Microsoft Word"
-  open POSIX file "%s"
-  save as active document file name (POSIX file "%s") file format format PDF
-  close active document saving no
-end tell'''
+# Bound by name to the document this script opened, never to "active
+# document".
+# If an open ever failed, "active document" would be whatever the teacher had
+# in front of them - and the next two lines would save it as a PDF and close
+# it without saving. There is unsaved work in that Word window.
+# The timeout matters: exporting sixteen pages takes Word longer than
+# AppleScript waits by default, and the failure it gives back is a bare
+# "AppleEvent timed out" with the PDF half written.
+SCRIPT = '''with timeout of 600 seconds
+  tell application "Microsoft Word"
+    open POSIX file "%s"
+    set theDoc to document "%s"
+    save as theDoc file name (POSIX file "%s") file format format PDF
+    close theDoc saving no
+  end tell
+end timeout'''
 
 
 def to_pdf(docx, pdf):
     """Word lays it out; anything else would paginate differently."""
     if os.path.exists(pdf):
         os.remove(pdf)
-    subprocess.run(["osascript", "-e", SCRIPT % (docx, pdf)],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["osascript", "-e", SCRIPT % (docx, os.path.basename(docx), pdf)],
+        check=True, capture_output=True)
     return pdf
 
 
