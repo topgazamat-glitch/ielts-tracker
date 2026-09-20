@@ -3555,9 +3555,23 @@ def act_answer_question(req, db, qid):
 
 
 def view_transfer_json(req, db):
-    """Download everything - students, homework, submissions, photos - as one file."""
+    """Everything the Import page can read back: students, homework, marks.
+
+    Not the photographs. Every photograph on this server would have to be
+    read into memory, base64 encoded - which makes it a third bigger again -
+    and then held a second time inside one JSON string, all before a single
+    byte reaches the teacher. There are gigabytes of them. The server has
+    nothing like that much memory, so asking for this file used to kill the
+    site outright, which is not a backup: it is an outage with a download
+    button. The photographs already leave the volume by their own path, the
+    daily copy to Telegram.
+    """
     import transfer
-    data = transfer.export_db(db)
+    was, transfer.TABLES_WITH_PHOTOS = transfer.TABLES_WITH_PHOTOS, False
+    try:
+        data = transfer.export_db(db)
+    finally:
+        transfer.TABLES_WITH_PHOTOS = was
     payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
     stamp = core.now().strftime("%Y-%m-%d")
     return 200, [("Content-Type", "application/json; charset=utf-8"),

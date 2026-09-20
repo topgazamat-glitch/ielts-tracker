@@ -1,5 +1,10 @@
 """The Import page's "Download backup" hands back something importable.
 
+It must also stay small. Building the file used to read every photograph on
+the volume into memory, base64 encoded, and then hold the whole thing again
+inside one JSON string - gigabytes, on a server that has nothing like that
+much. Pressing the button took the site down.
+
 Two functions were both called view_backup, so /backup.json served the raw
 database file the Import page cannot read. This checks the route by what
 comes out of it, not by which function it points at.
@@ -25,6 +30,16 @@ gid = db.execute("INSERT INTO groups (name, join_code, created_at)"
                                      core.iso(core.now()))).lastrowid
 db.commit()
 core.add_student(db, "Dilnoza", gid)
+# a submission with a photograph attached, the thing that used to be inlined
+photo = b"\x89PNG\r\n\x1a\n" + os.urandom(400_000)
+sid = db.execute("SELECT id FROM students WHERE name='Dilnoza'").fetchone()["id"]
+sub = db.execute("INSERT INTO submissions (student_id, status, created_at)"
+                 " VALUES (?,?,?)", (sid, "graded", core.iso(core.now()))).lastrowid
+os.makedirs(core.UPLOAD_DIR, exist_ok=True)
+open(os.path.join(core.UPLOAD_DIR, "p1.png"), "wb").write(photo)
+db.execute("INSERT INTO files (submission_id, filename, ord) VALUES (?,?,0)",
+           (sub, "p1.png"))
+db.commit()
 db.close()
 
 srv = server.Server(("127.0.0.1", 8812), server.Handler)
@@ -48,6 +63,13 @@ data = json.loads(raw.decode("utf-8"))
 print("  it carries:", ", ".join(sorted(data)[:8]))
 assert "students" in data, sorted(data)
 assert any(s["name"] == "Dilnoza" for s in data["students"])
+
+print("  photographs on the volume:", core.human_size(len(photo)))
+assert len(raw) < len(photo), (
+    "the export is carrying the photographs; that is what killed the server")
+for sub in data.get("submissions", []):
+    for f in sub.get("files", []):
+        assert not f.get("data"), "a photograph travelled inside the export"
 
 srv.shutdown()
 print("PASS  the Import page is handed a file it can read back")
