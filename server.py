@@ -1730,9 +1730,21 @@ def view_word_list(req, db, wid):
             f'<tr><td>{E(w["term"])}</td><td class="sub">{E(w["translation"])}</td>'
             f'<td>{gap}</td><td>{agg["known"] or 0}</td><td>{shown}</td><td>{flag}</td></tr>'
         )
+    classes = "".join(
+        f'<option value="{g["id"]}"{" selected" if g["id"] == wl["group_id"] else ""}>'
+        f'{E(g["name"])}</option>'
+        for g in db.execute("SELECT id, name FROM groups WHERE archived=0 ORDER BY name"))
     body = f"""<h1>{E(wl["title"])}</h1>
 <p class="sub">{E(group_name(db, wl["group_id"]))} · the “hard” flag marks words the
 group answers correctly less than 60% of the time — worth reteaching.</p>
+<details class="adder"><summary>Rename, or change the class</summary>
+<div class="card"><form method="post" action="/vocab/{wid}/rename" class="inline">
+<label class="f" style="flex:1">Title<input name="title" value="{E(wl["title"])}"
+ required class="wide"></label>
+<label class="f">Class<select name="group_id">
+<option value=""{"" if wl["group_id"] else " selected"}>every class</option>{classes}
+</select></label>
+<label class="f pushed">&nbsp;<button>Save</button></label></form></div></details>
 <div class="card"><form method="post" action="/vocab/{wid}/add" class="inline">
 <label class="f" style="flex:1">Add more words (one per line, <code>word = meaning</code>)
 <textarea name="words" rows="3" class="wide"></textarea></label>
@@ -1832,6 +1844,30 @@ def act_new_word_list(req, db):
             term, meaning, example = item
             db.execute("INSERT INTO words (list_id, term, translation, example, ord)"
                        " VALUES (?,?,?,?,?)", (wid, term, meaning, example, i))
+    db.commit()
+    return redirect(f"/vocab/{wid}")
+
+
+def act_rename_word_list(req, db, wid):
+    """A new title, or a different class, without touching the words.
+
+    There was no way to change either once a list existed. A list made under
+    the wrong name could only be left as it was or made again - and making it
+    again left the first copy standing, because nothing can delete a list,
+    with the students' practice still pointing at it.
+    """
+    wl = db.execute("SELECT id FROM word_lists WHERE id=?", (wid,)).fetchone()
+    if not wl:
+        return not_found()
+    f = req["form"]
+    title = (f.get("title", [""])[0] or "").strip()[:160]
+    gid = (f.get("group_id", [""])[0] or "").strip()
+    if not title:
+        return redirect(f"/vocab/{wid}")
+    group = int(gid) if gid.isdigit() and db.execute(
+        "SELECT 1 FROM groups WHERE id=?", (int(gid),)).fetchone() else None
+    db.execute("UPDATE word_lists SET title=?, group_id=? WHERE id=?",
+               (title, group, wid))
     db.commit()
     return redirect(f"/vocab/{wid}")
 
@@ -6062,6 +6098,7 @@ ROUTES = [
     ("POST", r"^/vocab/new$", act_new_word_list),
     ("POST", r"^/vocab/(\d+)/add$", act_add_words),
     ("POST", r"^/vocab/(\d+)/replace$", act_replace_words),
+    ("POST", r"^/vocab/(\d+)/rename$", act_rename_word_list),
 ]
 
 
