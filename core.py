@@ -673,6 +673,12 @@ def migrate(db):
     if lcols and "kind" not in lcols:
         db.execute("ALTER TABLE word_lists ADD COLUMN kind TEXT NOT NULL DEFAULT 'vocab'")
     lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
+    if lcols and "level_id" not in lcols:
+        # which level a list is for. Without it every student saw every list,
+        # so an Elementary class was offered Intermediate conditionals.
+        db.execute("ALTER TABLE word_lists ADD COLUMN level_id INTEGER"
+                   " REFERENCES levels(id)")
+    lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
     if "source" not in lcols:
         db.execute("ALTER TABLE word_lists ADD COLUMN source TEXT")
     if "unit" not in lcols:
@@ -1516,13 +1522,20 @@ def week_start(cfg=None):
 
 
 def play_lists(db, student, kind):
-    """The lists this student can play: switched on, and for their class or all."""
+    """The lists this student can play.
+
+    Switched on, of this kind, for their class or for every class, and at
+    their level or at no level in particular. A list with no level set stays
+    visible to everybody, so nothing disappears until it is filed.
+    """
+    level = level_of(db, student["group_id"])
     return db.execute(
         "SELECT l.*, (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) n"
         " FROM word_lists l WHERE l.active=1 AND l.kind=?"
         " AND (l.group_id IS NULL OR l.group_id=?)"
+        " AND (l.level_id IS NULL OR l.level_id=?)"
         " AND (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) >= 4"
-        " ORDER BY l.id DESC", (kind, student["group_id"])).fetchall()
+        " ORDER BY l.id DESC", (kind, student["group_id"], level)).fetchall()
 
 
 def can_play(db, student, list_id):

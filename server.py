@@ -1681,10 +1681,15 @@ def view_vocab(req, db):
         ).fetchone()["c"]
         rows += (
             f'<tr><td><a href="/vocab/{wl["id"]}">{E(wl["title"])}</a></td>'
-            f'<td>{E(group_name(db, wl["group_id"]))}</td><td>{n}</td><td>{learners}</td>'
+            f'<td>{E(group_name(db, wl["group_id"]))}</td>'
+            f'<td>{E(core.level_name(db, wl["level_id"]) or "—")}</td>'
+            f'<td>{n}</td><td>{learners}</td>'
             f'<td>{"active" if wl["active"] else "off"}</td></tr>'
         )
     opts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
+    levels = '<option value="">every level</option>' + "".join(
+        f'<option value="{l["id"]}">{E(l["name"])}</option>'
+        for l in db.execute("SELECT id, name FROM levels ORDER BY sort"))
     body = f"""<h1>Vocabulary</h1>
 <p class="sub">Students practise these with <span class="kbd">/vocab</span> in the bot.
 Words they get wrong come back the next day; words they know come back later and later.</p>
@@ -1694,6 +1699,7 @@ Words they get wrong come back the next day; words they know come back later and
 <label class="f">Book<input name="source" placeholder="4000 Essential Words 1"></label>
 <label class="f">Unit<input name="unit" placeholder="15" style="width:80px"></label>
 <label class="f">Group<select name="group_id">{opts}</select></label>
+<label class="f">Level<select name="level_id">{levels}</select></label>
 <label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)"
  title="Each line carries its own wrong answers instead of borrowing them from other rows">
@@ -1704,9 +1710,9 @@ For a grammar list: <code>She is ____ than me. = taller | more tall | tallest</c
 <textarea name="words" rows="8" class="wide"
 placeholder="abandon = tashlab ketmoq / покидать | They had to abandon the car.&#10;absolute = mutlaq / абсолютный"></textarea></label>
 <div class="gap-3"><button>Create list</button></div></form></div>
-<div class="tablewrap"><table><tr><th>List</th><th>Group</th><th>Words</th>
-<th>Practising</th><th>Status</th></tr>
-{rows or '<tr><td colspan=5 class="sub">No word lists yet.</td></tr>'}</table></div>"""
+<div class="tablewrap"><table><tr><th>List</th><th>Group</th><th>Level</th>
+<th>Words</th><th>Practising</th><th>Status</th></tr>
+{rows or '<tr><td colspan=6 class="sub">No word lists yet.</td></tr>'}</table></div>"""
     return html_response(page("Vocabulary", body, "Vocabulary"))
 
 
@@ -1734,15 +1740,23 @@ def view_word_list(req, db, wid):
         f'<option value="{g["id"]}"{" selected" if g["id"] == wl["group_id"] else ""}>'
         f'{E(g["name"])}</option>'
         for g in db.execute("SELECT id, name FROM groups WHERE archived=0 ORDER BY name"))
+    levels = "".join(
+        f'<option value="{l["id"]}"{" selected" if l["id"] == wl["level_id"] else ""}>'
+        f'{E(l["name"])}</option>'
+        for l in db.execute("SELECT id, name FROM levels ORDER BY sort"))
     body = f"""<h1>{E(wl["title"])}</h1>
-<p class="sub">{E(group_name(db, wl["group_id"]))} · the “hard” flag marks words the
-group answers correctly less than 60% of the time — worth reteaching.</p>
+<p class="sub">{E(group_name(db, wl["group_id"]))} ·
+{E(core.level_name(db, wl["level_id"]) or "every level")} · the “hard” flag marks
+words the group answers correctly less than 60% of the time — worth reteaching.</p>
 <details class="adder"><summary>Rename, or change the class</summary>
 <div class="card"><form method="post" action="/vocab/{wid}/rename" class="inline">
 <label class="f" style="flex:1">Title<input name="title" value="{E(wl["title"])}"
  required class="wide"></label>
 <label class="f">Class<select name="group_id">
 <option value=""{"" if wl["group_id"] else " selected"}>every class</option>{classes}
+</select></label>
+<label class="f">Level<select name="level_id">
+<option value=""{"" if wl["level_id"] else " selected"}>every level</option>{levels}
 </select></label>
 <label class="f pushed">&nbsp;<button>Save</button></label></form></div></details>
 <div class="card"><form method="post" action="/vocab/{wid}/add" class="inline">
@@ -1826,13 +1840,15 @@ def act_new_word_list(req, db):
     pairs = parse_questions(raw) if grammar else parse_words(raw)
     if not title or not pairs:
         return redirect("/vocab")
+    lvl = (f.get("level_id", [""])[0] or "").strip()
     wid = db.execute(
-        "INSERT INTO word_lists (group_id, title, created_at, source, unit, kind)"
-        " VALUES (?,?,?,?,?,?)",
+        "INSERT INTO word_lists (group_id, title, created_at, source, unit, kind,"
+        " level_id) VALUES (?,?,?,?,?,?,?)",
         (int(gid) if gid else None, title, core.iso(core.now()),
          (f.get("source", [""])[0] or "").strip()[:80] or None,
          (f.get("unit", [""])[0] or "").strip()[:40] or None,
-         "grammar" if grammar else "vocab"),
+         "grammar" if grammar else "vocab",
+         int(lvl) if lvl.isdigit() else None),
     ).lastrowid
     for i, item in enumerate(pairs):
         if grammar:
@@ -1866,8 +1882,11 @@ def act_rename_word_list(req, db, wid):
         return redirect(f"/vocab/{wid}")
     group = int(gid) if gid.isdigit() and db.execute(
         "SELECT 1 FROM groups WHERE id=?", (int(gid),)).fetchone() else None
-    db.execute("UPDATE word_lists SET title=?, group_id=? WHERE id=?",
-               (title, group, wid))
+    lvl = (f.get("level_id", [""])[0] or "").strip()
+    level = int(lvl) if lvl.isdigit() and db.execute(
+        "SELECT 1 FROM levels WHERE id=?", (int(lvl),)).fetchone() else None
+    db.execute("UPDATE word_lists SET title=?, group_id=?, level_id=? WHERE id=?",
+               (title, group, level, wid))
     db.commit()
     return redirect(f"/vocab/{wid}")
 

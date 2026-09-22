@@ -45,7 +45,7 @@ base = "http://127.0.0.1:8817"
 op = urllib.request.build_opener()          # a student: no login, just their link
 
 def get(path):
-    return op.open(base + path).read().decode()
+    return op.open(base + path, timeout=20).read().decode()
 
 def answer_of(st):
     """Where the right answer sits: termN's answer is rightN."""
@@ -53,7 +53,7 @@ def answer_of(st):
 
 
 def post(path, data):
-    r = op.open(base + path, urllib.parse.urlencode(data).encode())
+    r = op.open(base + path, urllib.parse.urlencode(data).encode(), timeout=20)
     return r.geturl(), r.read().decode()
 
 print("1. THE PLAY TAB")
@@ -160,5 +160,53 @@ late = json.loads(late)
 assert late["ok"] and late["correct"] is False and late["points"] == 0 and late["late"]
 print("   a right answer sent after the time is up scores nothing")
 d.close()
+print("\n6. A LIST BELONGS TO A LEVEL")
+# its own server and its own data: this section is about what a student is
+# offered, and it should not inherit sixty requests' worth of state
 srv.shutdown()
-print("\nPASS  solo play works, and its ranking cannot be bought by replaying")
+tmp2 = tempfile.mkdtemp(); os.environ["DATA_DIR"] = tmp2
+import importlib
+importlib.reload(core); importlib.reload(server)
+core.init_db(); d = core.connect(); now = core.iso(core.now())
+lv = {r["name"]: r["id"] for r in d.execute("SELECT id, name FROM levels")}
+e = d.execute("INSERT INTO groups (name, join_code, created_at, level_id)"
+              " VALUES ('114','A',?,?)", (now, lv["Elementary"])).lastrowid
+i_ = d.execute("INSERT INTO groups (name, join_code, created_at, level_id)"
+               " VALUES ('116','B',?,?)", (now, lv["Intermediate"])).lastrowid
+ali2 = core.add_student(d, "Ali", e)
+far2 = core.add_student(d, "Farida", i_)
+tok2 = d.execute("SELECT token FROM students WHERE id=?", (ali2,)).fetchone()["token"]
+
+def grammar_list(title, level):
+    lid = d.execute("INSERT INTO word_lists (title, created_at, kind, level_id)"
+                    " VALUES (?,?,'grammar',?)", (title, now, level)).lastrowid
+    for k in range(6):
+        d.execute("INSERT INTO words (list_id, term, translation, options, ord)"
+                  " VALUES (?,?,?,?,?)",
+                  (lid, "term%d" % k, "right%d" % k, json.dumps(["a", "b", "c"]), k))
+    return lid
+inter = grammar_list("Conditionals (Intermediate)", lv["Intermediate"])
+elem = grammar_list("Comparatives (Elementary)", lv["Elementary"])
+anyone = grammar_list("Grammar for everyone", None)
+d.commit()
+rows = {sid: d.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
+        for sid in (ali2, far2)}
+titles = lambda sid: [l["title"] for l in core.play_lists(d, rows[sid], "grammar")]
+print("   Ali (Elementary) sees:", titles(ali2))
+print("   Farida (Intermediate) sees:", titles(far2))
+assert "Conditionals (Intermediate)" not in titles(ali2)
+assert "Comparatives (Elementary)" in titles(ali2)
+assert "Conditionals (Intermediate)" in titles(far2)
+assert "Grammar for everyone" in titles(ali2) and "Grammar for everyone" in titles(far2)
+print("   each level sees its own, and a list with no level still shows to everybody")
+d.close()
+
+srv2 = server.Server(("127.0.0.1", 8818), server.Handler)
+threading.Thread(target=srv2.serve_forever, daemon=True).start()
+time.sleep(0.4)
+r = urllib.request.urlopen("http://127.0.0.1:8818/s/%s/solo/start" % tok2,
+                           urllib.parse.urlencode({"list": inter}).encode(), timeout=20)
+assert r.geturl().endswith("tab=play"), "Ali was allowed to start an Intermediate round"
+print("   and Ali cannot start the Intermediate one by typing its number")
+srv2.shutdown()
+print("\nPASS  solo play works, its ranking cannot be bought, and each level sees its own lists")
