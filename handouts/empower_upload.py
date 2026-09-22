@@ -28,12 +28,16 @@ sys.path.insert(0, ROOT)
 
 SITE = "https://ielts-tracker-production.up.railway.app"
 BOOK = "Empower Elementary"
+BOOKS = {"exam": "A2 Key exam words"}          # a batch of exam words is its own book
 LEVEL_NAME = "Elementary"
 PAST = re.compile(r"\b(was|were|didn't|did you|went|bought|ate|saw)\b", re.I)
 
 
+PAIRS = ("vocab", "exam")      # a word and its meaning, not four options
+
+
 def lines_of(kind, items):
-    if kind == "vocab":
+    if kind in PAIRS:
         return "\n".join("%s = %s" % (a, b) for a, b in items)
     return "\n".join("%s = %s | %s | %s | %s" % it for it in items)
 
@@ -41,8 +45,9 @@ def lines_of(kind, items):
 def check(mod, allow_past_from=6):
     problems = []
     for title, kind, step, items in mod.LISTS:
-        unit = int(re.search(r"Unit (\d+)", title).group(1))
-        if kind == "vocab":
+        m = re.search(r"Unit (\d+)", title)
+        unit = int(m.group(1)) if m else 99      # exam words follow no unit order
+        if kind in PAIRS:
             meanings = [b for _a, b in items]
             for m, c in collections.Counter(meanings).items():
                 if c > 1:
@@ -87,16 +92,16 @@ def main():
     for title, kind, step, items in mod.LISTS:
         if title in index:
             print("already there:", title[:60]); continue
-        form = {"title": title, "source": BOOK, "unit": str(step),
+        book = BOOKS.get(kind, BOOK)
+        form = {"title": title, "source": book, "unit": str(step),
                 "group_id": "", "words": lines_of(kind, items)}
-        if kind == "grammar":
-            form["kind"] = "grammar"
+        form["kind"] = kind
         r = op.open(SITE + "/vocab/new", urllib.parse.urlencode(form).encode(),
                     timeout=180)
         wid = int(r.geturl().rsplit("/", 1)[1])
         op.open(SITE + "/vocab/%d/rename" % wid, urllib.parse.urlencode(
             {"title": title, "group_id": "", "level_id": level,
-             "source": BOOK, "step": str(step)}).encode(), timeout=60)
+             "source": book, "step": str(step)}).encode(), timeout=60)
         page = op.open(SITE + "/vocab/%d" % wid, timeout=60).read().decode()
         print("%-60s -> /vocab/%-4d %d questions"
               % (title[:60], wid, len(re.findall(r"<tr><td>", page))))

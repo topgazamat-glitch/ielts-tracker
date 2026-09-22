@@ -887,7 +887,9 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 
 /* The two doors into Play. The game's own blue and green, so it reads as the
    same game the teacher hosts, only on your own. */
-.playpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.playpick { display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3); }
 .playbtn {
   display: flex; flex-direction: column; justify-content: center; gap: var(--sp-1);
   min-height: 120px; padding: var(--sp-5); border-radius: var(--r-lg);
@@ -895,6 +897,7 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 }
 .playbtn.vocab { background: #1668c9; }
 .playbtn.grammar { background: #1a8a52; }
+.playbtn.exam { background: #8a4a1a; }
 .playbtn:active { transform: scale(.98); }
 .pbig { font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
 .psmall { font-size: 14px; opacity: .9; }

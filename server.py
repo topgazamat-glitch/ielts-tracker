@@ -1700,10 +1700,11 @@ Words they get wrong come back the next day; words they know come back later and
 <label class="f">Unit<input name="unit" placeholder="15" style="width:80px"></label>
 <label class="f">Group<select name="group_id">{opts}</select></label>
 <label class="f">Level<select name="level_id">{levels}</select></label>
-<label class="f pushed">&nbsp;
-<span style="font-size:13px;color:var(--ink)"
- title="Each line carries its own wrong answers instead of borrowing them from other rows">
-<input type="checkbox" name="kind" value="grammar"> grammar questions</span></label></div>
+<label class="f">Section<select name="kind">
+<option value="vocab">Vocabulary</option>
+<option value="grammar">Grammar &mdash; each line carries its own wrong answers</option>
+<option value="exam">Exam words</option>
+</select></label></div>
 <label class="f">One per line: <code>word = meaning</code>, or
 <code>word = meaning | example sentence</code> to unlock fill-the-gap.
 For a grammar list: <code>She is ____ than me. = taller | more tall | tallest</code>
@@ -1744,6 +1745,9 @@ def view_word_list(req, db, wid):
         f'<option value="{l["id"]}"{" selected" if l["id"] == wl["level_id"] else ""}>'
         f'{E(l["name"])}</option>'
         for l in db.execute("SELECT id, name FROM levels ORDER BY sort"))
+    kinds = "".join(
+        f'<option value="{k}"{" selected" if k == wl["kind"] else ""}>{E(v)}</option>'
+        for k, v in KIND_NAME.items())
     body = f"""<h1>{E(wl["title"])}</h1>
 <p class="sub">{E(group_name(db, wl["group_id"]))} ·
 {E(core.level_name(db, wl["level_id"]) or "every level")} · the “hard” flag marks
@@ -1762,6 +1766,7 @@ words the group answers correctly less than 60% of the time — worth reteaching
  placeholder="4000 Essential Words 1"></label>
 <label class="f">Step<input name="step" type="number" min="0" max="999"
  value="{wl["step"] or 0}" class="tiny"></label>
+<label class="f">Section<select name="kind">{kinds}</select></label>
 <label class="f pushed">&nbsp;<button>Save</button></label></form></div></details>
 <div class="card"><form method="post" action="/vocab/{wid}/add" class="inline">
 <label class="f" style="flex:1">Add more words (one per line, <code>word = meaning</code>)
@@ -1839,7 +1844,9 @@ def act_new_word_list(req, db):
     f = req["form"]
     title = (f.get("title", [""])[0] or "").strip()
     gid = f.get("group_id", [None])[0]
-    grammar = f.get("kind", [""])[0] == "grammar"
+    kind = (f.get("kind", ["vocab"])[0] or "vocab")
+    kind = kind if kind in ("vocab", "grammar", "exam") else "vocab"
+    grammar = kind == "grammar"
     raw = f.get("words", [""])[0]
     pairs = parse_questions(raw) if grammar else parse_words(raw)
     if not title or not pairs:
@@ -1851,8 +1858,7 @@ def act_new_word_list(req, db):
         (int(gid) if gid else None, title, core.iso(core.now()),
          (f.get("source", [""])[0] or "").strip()[:80] or None,
          (f.get("unit", [""])[0] or "").strip()[:40] or None,
-         "grammar" if grammar else "vocab",
-         int(lvl) if lvl.isdigit() else None),
+         kind, int(lvl) if lvl.isdigit() else None),
     ).lastrowid
     for i, item in enumerate(pairs):
         if grammar:
@@ -1891,10 +1897,12 @@ def act_rename_word_list(req, db, wid):
         "SELECT 1 FROM levels WHERE id=?", (int(lvl),)).fetchone() else None
     step = (f.get("step", ["0"])[0] or "0").strip()
     source = (f.get("source", [""])[0] or "").strip()[:80] or None
+    kind = (f.get("kind", [""])[0] or "").strip()
+    kind = kind if kind in KIND_NAME else None
     db.execute("UPDATE word_lists SET title=?, group_id=?, level_id=?, source=?,"
-               " step=? WHERE id=?",
+               " step=?, kind=COALESCE(?, kind) WHERE id=?",
                (title, group, level, source,
-                int(step) if step.isdigit() and int(step) < 1000 else 0, wid))
+                int(step) if step.isdigit() and int(step) < 1000 else 0, kind, wid))
     db.commit()
     return redirect(f"/vocab/{wid}")
 
@@ -3265,7 +3273,10 @@ def act_student_goal(req, db, token):
     return redirect(f"/s/{token}?tab=goal")
 
 
-KIND_NAME = {"vocab": "Vocabulary", "grammar": "Grammar"}
+KIND_NAME = {"vocab": "Vocabulary", "grammar": "Grammar",
+             "exam": "Exam words"}
+# the sections that open on their books rather than straight on the steps
+BY_BOOK = ("vocab", "exam")
 
 
 def solo_rows(rows, me_id, cols):
@@ -3303,7 +3314,7 @@ def portal_play(db, s, token, query):
         here = next((c for c in chain if c["list"]["id"] == wl["id"]), None)
         back = (f'{base}&amp;kind={E(wl["kind"])}'
                 + (f'&amp;book={urllib.parse.quote(wl["source"] or "") or "-"}'
-                   if wl["kind"] == "vocab" else ""))
+                   if wl["kind"] in BY_BOOK else ""))
         if not here:
             return '<h2>Play</h2><p class="sub">That list is not open to your class.</p>'
         if not here["unlocked"]:
@@ -3340,26 +3351,27 @@ table starts again every Monday; a step you have passed stays passed.</p>
 <p class="gap-4"><a class="tab" href="{back}">Back to the steps</a></p>"""
 
     if kind in KIND_NAME:
-        if kind == "vocab" and book is None:
-            books = core.play_books(db, s, "vocab")
+        if kind in BY_BOOK and book is None:
+            books = core.play_books(db, s, kind)
             cards = ""
             for b in books:
                 bar = (f'{b["passed"]} of {b["steps"]} passed' if b["steps"] else "empty")
                 cards += (f'<a class="tile small" '
-                          f'href="{base}&amp;kind=vocab&amp;book='
+                          f'href="{base}&amp;kind={E(kind)}&amp;book='
                           f'{urllib.parse.quote(b["source"]) or "-"}">'
                           f'<div class="tile-title">{E(b["title"])}</div>'
                           f'<div class="sub">{b["steps"]} '
                           f'step{"" if b["steps"] == 1 else "s"} &middot; {bar}</div></a>')
-            return (f"<h2>Vocabulary</h2><p class=\"sub\">Pick a book. Each one is a "
-                    f"ladder: pass a step to open the next.</p>"
+            return (f"<h2>{KIND_NAME[kind]}</h2><p class=\"sub\">Pick a book. Each "
+                    f"one is a ladder: pass a step to open the next.</p>"
                     + (f'<div class="tiles">{cards}</div>' if cards else
                        '<div class="card"><p class="flush">No lists here yet. Your '
                        'teacher will add some.</p></div>')
                     + f'<p class="gap-4"><a class="tab" href="{base}">Back to Play</a></p>')
 
-        chain = core.play_chain(db, s, kind, book if kind == "vocab" else None)
-        title = (book or "Other lists") if kind == "vocab" else "Grammar"
+        chain = core.play_chain(db, s, kind, book if kind in BY_BOOK else None)
+        title = ((book or "Other lists") if kind in BY_BOOK
+                 else KIND_NAME[kind])
         steps = ""
         for c in chain:
             l, round_n = c["list"], min(core.SOLO_ROUND, c["n"])
@@ -3375,7 +3387,8 @@ table starts again every Monday; a step you have passed stays passed.</p>
             steps += (f'<a class="steprow{cls}" href="{base}&amp;l={l["id"]}">{inner}</a>'
                       if c["unlocked"] else f'<div class="steprow{cls}">{inner}</div>')
         done = sum(1 for c in chain if c["passed"])
-        back = (f'{base}&amp;kind=vocab' if kind == "vocab" and book is not None else base)
+        back = (f'{base}&amp;kind={E(kind)}'
+                if kind in BY_BOOK and book is not None else base)
         return (f"<h2>{E(title)}</h2>"
                 + (f'<p class="sub">Step {min(done + 1, len(chain))} of {len(chain)} '
                    f'&middot; {done} passed</p>' if chain else "")
@@ -3391,17 +3404,18 @@ table starts again every Monday; a step you have passed stays passed.</p>
     passed = core.passed_lists(db, s["id"])
     got = {k: sum(1 for l in core.play_lists(db, s, k) if l["id"] in passed)
            for k in KIND_NAME}
+    # a door only appears once there is something behind it
+    doors = "".join(
+        f'<a class="playbtn {k}" href="{base}&amp;kind={k}">'
+        f'<span class="pbig">{KIND_NAME[k]}</span>'
+        f'<span class="psmall">{got[k]} of {counts[k]} steps passed</span></a>'
+        for k in ("vocab", "grammar", "exam") if counts[k])
     week = core.solo_week_board(db, s["group_id"])
     rows = solo_rows(week[:10], s["id"],
                      [lambda r: "%d" % r["mastered"], lambda r: "%d" % r["points"]])
     return f"""<h2>Play</h2>
 {banner}
-<div class="playpick">
-<a class="playbtn vocab" href="{base}&amp;kind=vocab"><span class="pbig">Vocabulary</span>
-<span class="psmall">{got["vocab"]} of {counts["vocab"]} steps passed</span></a>
-<a class="playbtn grammar" href="{base}&amp;kind=grammar"><span class="pbig">Grammar</span>
-<span class="psmall">{got["grammar"]} of {counts["grammar"]} steps passed</span></a>
-</div>
+<div class="playpick">{doors}</div>
 <h3 class="gap-4">This week's champions</h3>
 <div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
 <th class="num">Passed</th><th class="num">Points</th></tr>

@@ -124,5 +124,37 @@ d2.execute("UPDATE solo_runs SET finished_at=? WHERE list_id=?",
 d2.commit(); d2.close()
 assert core.can_play(db, me, gr[1]), "a step passed last month was taken back"
 print("   a step passed a month ago still holds the next one open")
+
+
+def get(path):
+    return op.open(B + path, timeout=20).read().decode()
+
+
+print("\n9. EXAM WORDS ARE THEIR OWN SECTION")
+exam1 = db.execute("INSERT INTO word_lists (title, created_at, kind, level_id, source, unit)"
+                   " VALUES ('A2 words - food',?,'exam',?,'A2 Key words','1')",
+                   (now, lv["Pre-Intermediate"])).lastrowid
+exam2 = db.execute("INSERT INTO word_lists (title, created_at, kind, level_id, source, unit)"
+                   " VALUES ('A2 words - travel',?,'exam',?,'A2 Key words','2')",
+                   (now, lv["Pre-Intermediate"])).lastrowid
+for lid in (exam1, exam2):
+    for i in range(22):
+        db.execute("INSERT INTO words (list_id, term, translation, ord) VALUES (?,?,?,?)",
+                   (lid, "word%d_%d" % (lid, i), "meaning%d_%d" % (lid, i), i))
+db.commit()
+page = get("/s/%s?tab=play" % tok)
+assert "Exam words" in page, "no door for the exam words"
+assert "kind=exam" in page
+print("   the Play page has a third door")
+books = get("/s/%s?tab=play&kind=exam" % tok)
+assert "A2 Key words" in books and "Essential" not in books
+print("   it opens on its own books, separate from Vocabulary")
+vocab = get("/s/%s?tab=play&kind=vocab" % tok)
+assert "A2 Key words" not in vocab, "the exam book leaked into Vocabulary"
+print("   and the exam book does not appear under Vocabulary")
+chain = core.play_chain(db, me, "exam", "A2 Key words")
+assert [c["unlocked"] for c in chain] == [True, False]
+print("   its steps lock like every other ladder")
+
 srv.shutdown()
-print("\nPASS  Play is a career: books, steps, 18 of 20, and no way to skip one")
+print("\nPASS  Play is a career: books, steps, 18 of 20, and exam words of their own")
