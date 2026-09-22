@@ -29,6 +29,8 @@ sys.path.insert(0, ROOT)
 SITE = "https://ielts-tracker-production.up.railway.app"
 BOOK = "Empower Elementary"
 BOOKS = {"exam": "A2 Key exam words"}          # a batch of exam words is its own book
+# a batch can say which book and level it belongs to, in the module itself
+
 LEVEL_NAME = "Elementary"
 PAST = re.compile(r"\b(was|were|didn't|did you|went|bought|ate|saw)\b", re.I)
 
@@ -75,7 +77,7 @@ def check(mod, allow_past_from=6):
 def main():
     name = sys.argv[1]
     mod = importlib.import_module(name)
-    problems = check(mod)
+    problems = check(mod, allow_past_from=getattr(mod, "PAST_FROM", 6))
     for title, why in problems:
         print("PROBLEM  %-46s %s" % (title[:46], why))
     print("%d lists, %d questions, %d problems"
@@ -88,11 +90,12 @@ def main():
     op = ub.sign_in(SITE, os.environ["TEACHER_PASSWORD"])
     index = html.unescape(op.open(SITE + "/vocab", timeout=60).read().decode())
     level = dict((m[1], m[0]) for m in re.findall(
-        r'<option value="(\d+)">([^<]+)</option>', index))[LEVEL_NAME]
+        r'<option value="(\d+)">([^<]+)</option>', index))[
+            getattr(mod, "LEVEL", LEVEL_NAME)]
     for title, kind, step, items in mod.LISTS:
         if title in index:
             print("already there:", title[:60]); continue
-        book = BOOKS.get(kind, BOOK)
+        book = getattr(mod, "BOOK", None) or BOOKS.get(kind, BOOK)
         form = {"title": title, "source": book, "unit": str(step),
                 "group_id": "", "words": lines_of(kind, items)}
         form["kind"] = kind
