@@ -108,5 +108,37 @@ def main():
     return 0
 
 
+
+
+
+def replace_existing(pairs):
+    """Swap the contents of lists that are already on the site.
+
+    The site keeps a list and its students' progress and changes only the
+    words, so a student who has already passed a step does not lose it.
+    """
+    import html
+    import upload_booklets as ub
+    mod_name, first_id = pairs
+    mod = importlib.import_module(mod_name)
+    op = ub.sign_in(SITE, os.environ["TEACHER_PASSWORD"])
+    for i, (title, kind, step, items) in enumerate(mod.LISTS):
+        wid = first_id + i
+        page = html.unescape(op.open(SITE + "/vocab/%d" % wid, timeout=60).read().decode())
+        there = re.search(r"<h1>(.*?)</h1>", page, re.S).group(1)
+        if there.strip() != title.strip():
+            print("SKIPPED /vocab/%d: it holds %r, not %r" % (wid, there[:40], title[:40]))
+            continue
+        op.open(SITE + "/vocab/%d/replace" % wid,
+                urllib.parse.urlencode({"words": lines_of(kind, items)}).encode(),
+                timeout=180)
+        after = op.open(SITE + "/vocab/%d" % wid, timeout=60).read().decode()
+        print("/vocab/%d %-46s %d questions" % (wid, title[:46],
+                                                len(re.findall(r"<tr><td>", after))))
+
+
 if __name__ == "__main__":
+    if "--replace" in sys.argv:
+        replace_existing((sys.argv[1], int(sys.argv[sys.argv.index("--replace") + 1])))
+        sys.exit(0)
     sys.exit(main())
