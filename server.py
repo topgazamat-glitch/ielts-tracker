@@ -3423,6 +3423,17 @@ table starts again every Monday; a step you have passed stays passed.</p>
         f'<span class="pbig">{KIND_NAME[k]}</span>'
         f'<span class="psmall">{got[k]} of {counts[k]} steps passed</span></a>'
         for k in ("vocab", "grammar", "exam") if counts[k])
+    # the fourth door: racing a classmate rather than the ladder
+    waiting = len(core.open_invites(db, s))
+    rec = core.battle_record(db, s["id"])
+    doors += (f'<a class="playbtn battle" href="/s/{E(token)}?tab=battle">'
+              f'<span class="pbig">Battle</span>'
+              f'<span class="psmall">'
+              + (f'{waiting} challenge{"" if waiting == 1 else "s"} waiting!'
+                 if waiting else
+                 (f'{rec["wins"]} win{"" if rec["wins"] == 1 else "s"} this week'
+                  if rec["races"] else "race a classmate"))
+              + '</span></a>')
     week = core.solo_week_board(db, s["group_id"])
     rows = solo_rows(week[:10], s["id"],
                      [lambda r: "%d" % r["mastered"], lambda r: "%d" % r["points"]])
@@ -3584,11 +3595,367 @@ load();
     return html_response(student_page(run["title"], body))
 
 
+def portal_battle(db, s, token, query):
+    """The Battle door: start a race, join one by code, or answer an invitation."""
+    base = f"/s/{E(token)}?tab=battle"
+    mine = core.my_open_battle(db, s)
+    running = (f'<a class="card playlive" href="/s/{E(token)}/battle/{mine["id"]}">'
+               f'<strong>You are in a race.</strong> '
+               f'{"Back to the lobby" if mine["state"] == "lobby" else "Back to the track"}'
+               f' &rarr;</a>' if mine else "")
+    invites = core.open_invites(db, s)
+    inv_html = ""
+    for i in invites:
+        inv_html += (
+            f'<div class="card invite"><div><strong>{E(i["from_name"])}</strong> '
+            f'challenges you &middot; <span class="sub">{E(i["title"])}</span></div>'
+            f'<div class="inviterow">'
+            f'<form method="post" action="/s/{E(token)}/battle/join">'
+            f'<input type="hidden" name="battle" value="{i["battle_id"]}">'
+            f'<button class="big">Accept</button></form>'
+            f'<form method="post" action="/s/{E(token)}/battle/decline">'
+            f'<input type="hidden" name="battle" value="{i["battle_id"]}">'
+            f'<button class="tab">No thanks</button></form></div></div>')
+
+    lists = core.battle_lists(db, s)
+    pick = ""
+    for l in lists:
+        n = db.execute("SELECT COUNT(*) c FROM words WHERE list_id=?",
+                       (l["id"],)).fetchone()["c"]
+        if n < 4:
+            continue
+        label = (l["source"] or KIND_NAME.get(l["kind"], "")).strip()
+        pick += (f'<option value="{l["id"]}">{E(l["title"])}'
+                 + (f' &mdash; {E(label)}' if label else "") + '</option>')
+
+    rec = core.battle_record(db, s["id"])
+    board = core.battle_week_board(db, s["group_id"])
+    rows = solo_rows(board[:10], s["id"],
+                     [lambda r: "%d" % r["wins"], lambda r: "%d" % r["races"],
+                      lambda r: "%d" % r["points"]])
+    mine_line = (f'This week: <strong>{rec["wins"]}</strong> win'
+                 f'{"" if rec["wins"] == 1 else "s"} from {rec["races"]} race'
+                 f'{"" if rec["races"] == 1 else "s"}.'
+                 if rec["races"] else "You have not raced yet this week.")
+    return f"""<h2>Battle</h2>
+<p class="sub">Up to {core.BATTLE_MAX} of you race through the same
+{core.BATTLE_ROUND} questions. Everyone runs at their own speed and you watch
+each other move. Fastest right answers win.</p>
+{running}{inv_html}
+{"" if mine else f'''<div class="card">
+<h3 class="flush">Start a race</h3>
+<form method="post" action="/s/{E(token)}/battle/new" class="battlestart">
+<label class="lab" for="blist">Topic</label>
+<select id="blist" name="list" required>{pick}</select>
+<button class="big gap-2">Open a lobby</button></form>
+{"" if pick else '<p class="sub">No topics are open to your class yet.</p>'}
+</div>
+<div class="card">
+<h3 class="flush">Join a race</h3>
+<p class="sub">Type the four letters your classmate reads out.</p>
+<form method="post" action="/s/{E(token)}/battle/code" class="battlecode">
+<input name="code" maxlength="4" autocapitalize="characters" autocomplete="off"
+ spellcheck="false" placeholder="ABCD" required>
+<button class="big">Join</button></form>
+</div>'''}
+<p class="gap-3">{mine_line}</p>
+<h3 class="gap-4">This week's racers</h3>
+<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
+<th class="num">Wins</th><th class="num">Races</th><th class="num">Points</th></tr>
+{rows or '<tr><td colspan="5" class="sub">Nobody has raced yet this week. Be the first.</td></tr>'}
+</table></div>
+<p class="sub gap-3">The table starts again every Monday. Like Play, battles are
+just for fun: they are not part of the league, and they do not open career steps.</p>
+<p class="gap-4"><a class="tab" href="/s/{E(token)}?tab=play">Back to Play</a></p>"""
+
+
+def act_battle_new(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    lid = (req["form"].get("list", [""])[0] or "")
+    bid = core.create_battle(db, s, int(lid)) if lid.isdigit() else None
+    if not bid:
+        return redirect(f"/s/{token}?tab=battle")
+    return redirect(f"/s/{token}/battle/{bid}")
+
+
+def act_battle_code(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    b = core.battle_by_code(db, (req["form"].get("code", [""])[0] or ""))
+    bid = core.join_battle(db, s, b["id"]) if b else None
+    if not bid:
+        return redirect(f"/s/{token}?tab=battle&e=code")
+    return redirect(f"/s/{token}/battle/{bid}")
+
+
+def act_battle_join(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    raw = (req["form"].get("battle", [""])[0] or "")
+    bid = core.join_battle(db, s, int(raw)) if raw.isdigit() else None
+    if not bid:
+        return redirect(f"/s/{token}?tab=battle&e=full")
+    return redirect(f"/s/{token}/battle/{bid}")
+
+
+def act_battle_decline(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    raw = (req["form"].get("battle", [""])[0] or "")
+    if raw.isdigit():
+        core.decline_invite(db, s, int(raw))
+    return redirect(f"/s/{token}?tab=battle")
+
+
+def act_battle_invite(req, db, token, bid):
+    s = core.student_by_token(db, token)
+    if not s:
+        return json_response({"ok": False})
+    raw = (req["form"].get("who", [""])[0] or "")
+    ok = core.invite_to_battle(db, s, bid, int(raw)) if raw.isdigit() else False
+    return json_response({"ok": bool(ok)})
+
+
+def act_battle_start(req, db, token, bid):
+    s = core.student_by_token(db, token)
+    if not s:
+        return json_response({"ok": False})
+    return json_response({"ok": core.start_battle(db, bid, s["id"])})
+
+
+def act_battle_leave(req, db, token, bid):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    core.leave_battle(db, s, bid)
+    return redirect(f"/s/{token}?tab=battle")
+
+
+def act_battle_answer(req, db, token, bid):
+    s = core.student_by_token(db, token)
+    if not s:
+        return json_response({"ok": False})
+    f = req["form"]
+    q, c = (f.get("q", [""])[0] or ""), (f.get("choice", [""])[0] or "")
+    if not (q.isdigit() and c.lstrip("-").isdigit()):
+        return json_response({"ok": False})
+    r = core.answer_battle(db, bid, s["id"], int(q), int(c))
+    return json_response(dict(r, ok=True) if r else {"ok": False})
+
+
+def battle_state_json(req, db, token, bid):
+    s = core.student_by_token(db, token)
+    if not s:
+        return json_response({"state": "gone"})
+    core.touch_student(db, s["id"])
+    st = core.battle_state(db, bid, s["id"])
+    if st and st["state"] == "lobby":
+        st["mates"] = core.classmates_for_battle(db, s)
+        st["invited"] = [r["to_id"] for r in db.execute(
+            "SELECT to_id FROM battle_invites WHERE battle_id=?", (bid,)).fetchall()]
+    return json_response(st or {"state": "gone"})
+
+
+def view_battle(req, db, token, bid):
+    """The lobby, then the track, then the finish: one page that follows the race."""
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    st = core.battle_state(db, bid, s["id"])
+    if not st:
+        return redirect(f"/s/{token}?tab=battle")
+    body = f"""<div id="head"></div>
+<div id="play"></div>
+<script>
+const TOK = {json.dumps(token)}, BID = {bid};
+const SHAPES = ['▲', '◆', '●', '■'];
+const CARS = ['●', '◆', '▲', '■'];
+let st = null, ticker = null, poller = null, busy = false, ac = null, lastAt = {{}};
+function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
+  ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
+function beep(freq, ms, type) {{
+  try {{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.14, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + ms / 1000);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + ms / 1000);
+  }} catch (e) {{}}
+}}
+function track(showScore) {{
+  return '<div class="track">' + st.track.map((t, i) => {{
+    const pct = st.total ? Math.round(100 * t.at / st.total) : 0;
+    const moved = lastAt[t.id] !== undefined && lastAt[t.id] !== t.at;
+    lastAt[t.id] = t.at;
+    return '<div class="lane' + (t.me ? ' me' : '') + (t.home ? ' home' : '') + '">' +
+      '<div class="lanetop"><span class="who">' +
+        (t.place ? '<span class="place">' + t.place + '</span> ' : '') +
+        esc(t.name) + (t.me ? ' <span class="sub">(you)</span>' : '') + '</span>' +
+      '<span class="num">' + (showScore ? t.score + ' pts' : t.at + '/' + st.total) +
+      '</span></div>' +
+      '<div class="rail"><div class="fill c' + (i % 4) + '" style="width:' + pct + '%">' +
+      '</div><span class="car' + (moved ? ' bump' : '') + '" style="left:' + pct + '%">' +
+      CARS[i % 4] + '</span></div></div>';
+  }}).join('') + '</div>';
+}}
+async function load() {{
+  const r = await fetch('/s/' + TOK + '/battle/' + BID + '.json', {{cache: 'no-store'}});
+  st = await r.json();
+  show();
+}}
+function poll(ms) {{
+  clearInterval(poller);
+  poller = setInterval(async () => {{
+    const r = await fetch('/s/' + TOK + '/battle/' + BID + '.json', {{cache: 'no-store'}});
+    const next = await r.json();
+    const was = st ? st.state : null;
+    st = next;
+    if (st.state !== was) {{ show(); return; }}
+    if (st.state === 'lobby') drawLobby();
+    else if (st.state === 'waiting' || st.state === 'done') show();
+    else document.getElementById('rail').innerHTML = track(false);
+  }}, ms);
+}}
+function drawLobby() {{
+  const full = st.track.length >= st.seats;
+  document.getElementById('head').innerHTML =
+    '<p class="sub solotitle">' + esc(st.title) + '</p>';
+  const mates = (st.mates || []).map(m =>
+    '<button class="mate' + (m.online ? ' on' : '') +
+    (st.invited.indexOf(m.id) >= 0 ? ' asked' : '') + '"' +
+    (st.invited.indexOf(m.id) >= 0 || full ? ' disabled' : '') +
+    ' onclick="invite(' + m.id + ')">' + esc(m.name) +
+    '<span class="dot"></span></button>').join('');
+  document.getElementById('play').innerHTML =
+    '<div class="codecard"><div class="gsmall">Race code</div>' +
+    '<div class="bigcode">' + esc(st.code) + '</div>' +
+    '<div class="gsmall">Read it out, or tap a classmate below</div></div>' +
+    '<h3>On the grid (' + st.track.length + ' of ' + st.seats + ')</h3>' +
+    '<div class="grid">' + st.track.map((t, i) =>
+      '<div class="seat"><span class="car c' + (i % 4) + '">' + CARS[i % 4] + '</span>' +
+      esc(t.name) + (t.me ? ' <span class="sub">(you)</span>' : '') + '</div>').join('') +
+    '</div>' +
+    (mates ? '<h3 class="gap-3">Invite a classmate</h3><div class="mates">' +
+      mates + '</div>' : '') +
+    (st.host
+      ? '<button class="big gap-3"' + (st.can_start ? '' : ' disabled') +
+        ' onclick="go()">' + (st.can_start ? 'Start the race'
+          : 'Waiting for someone to join') + '</button>'
+      : '<p class="gap-3 sub">Waiting for the host to start the race…</p>') +
+    '<form method="post" action="/s/' + TOK + '/battle/' + BID + '/leave">' +
+    '<button class="tab gap-2">Leave</button></form>';
+}}
+async function invite(id) {{
+  await fetch('/s/' + TOK + '/battle/' + BID + '/invite', {{method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'who=' + id}});
+  load();
+}}
+async function go() {{
+  await fetch('/s/' + TOK + '/battle/' + BID + '/start', {{method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}, body: ''}});
+  load();
+}}
+function show() {{
+  clearInterval(ticker);
+  const el = document.getElementById('play');
+  if (st.state === 'gone') {{ location.href = '/s/' + TOK + '?tab=battle'; return; }}
+  if (st.state === 'lobby') {{ drawLobby(); poll(1500); return; }}
+  if (st.state === 'waiting') {{
+    document.getElementById('head').innerHTML =
+      '<p class="sub solotitle">' + esc(st.title) + '</p>';
+    el.innerHTML = '<div class="gcard"><div class="gsmall">You are home</div>' +
+      '<div class="gbig">Finished</div><div class="gsmall">' +
+      st.left_on_track + ' still racing…</div></div>' +
+      '<div id="rail">' + track(true) + '</div>';
+    poll(1200);
+    return;
+  }}
+  if (st.state === 'done') {{
+    clearInterval(poller);
+    document.getElementById('head').innerHTML = '';
+    const won = st.place === 1;
+    const wrong = (st.review || []).filter(x => !x.right);
+    el.innerHTML =
+      '<div class="gcard ' + (won ? 'right' : '') + '">' +
+      '<div class="gsmall">' + esc(st.title) + '</div>' +
+      '<div class="gbig">' + (won ? '🏆 1st' :
+        st.place === 2 ? '2nd' : st.place === 3 ? '3rd' : st.place + 'th') + '</div>' +
+      '<div class="gsmall">' + st.correct + ' of ' + st.total + ' right · ' +
+      st.score + ' points</div></div>' +
+      track(true) +
+      (wrong.length ? '<h3 class="gap-3">Look at these again</h3>' +
+        '<div class="card solorev">' + wrong.map(x =>
+          '<p><span class="sub">' + esc(x.term) + '</span><br><strong>' +
+          esc(x.answer) + '</strong>' + (x.given
+            ? ' <span class="sub">(you chose ' + esc(x.given) + ')</span>'
+            : ' <span class="sub">(time ran out)</span>') + '</p>').join('') + '</div>'
+        : '<p class="gap-3">Every one right. 🎉</p>') +
+      '<p class="gap-3"><a class="tab" href="/s/' + TOK + '?tab=battle">' +
+      'Race again</a></p>';
+    return;
+  }}
+  // racing
+  document.getElementById('head').innerHTML =
+    '<div class="solobar"><span>Question ' + (st.q + 1) + ' of ' + st.total + '</span>' +
+    '<span class="sub">' + esc(st.title) + '</span></div>';
+  let left = st.left;
+  el.innerHTML =
+    '<div class="gcard"><div class="gclock" id="clock">' + left + '</div>' +
+    '<div class="gword">' + esc(st.term) + '</div></div>' +
+    '<div class="gopts">' + st.options.map((o, i) =>
+      '<button class="gopt c' + i + '" onclick="pick(' + i + ')">' +
+      '<span class="gshape">' + SHAPES[i] + '</span>' + esc(o) + '</button>').join('') +
+    '</div><div id="rail">' + track(false) + '</div>';
+  busy = false;
+  poll(1400);
+  ticker = setInterval(() => {{
+    left -= 1;
+    const c = document.getElementById('clock');
+    if (c) c.textContent = Math.max(0, left);
+    if (left <= 5 && left > 0) beep(880, 60);
+    if (left <= 0) {{ clearInterval(ticker); pick(-1); }}
+  }}, 1000);
+}}
+async function pick(i) {{
+  if (busy) return;
+  busy = true; clearInterval(ticker);
+  document.querySelectorAll('.gopt').forEach(b => {{
+    b.disabled = true; b.classList.add('off'); }});
+  const r = await fetch('/s/' + TOK + '/battle/' + BID + '/answer', {{method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'q=' + st.q + '&choice=' + i}});
+  const a = await r.json();
+  if (!a.ok) {{ load(); return; }}
+  if (a.correct) {{ beep(660, 90); setTimeout(() => beep(990, 140), 100); }}
+  else beep(180, 220, 'square');
+  const rail = document.getElementById('rail');
+  document.getElementById('play').innerHTML =
+    '<div class="gcard ' + (a.correct ? 'right' : 'wrong') + '">' +
+    '<div class="gbig">' + (a.correct ? '+' + a.points :
+      (i < 0 || a.late ? 'Time up' : 'Wrong')) + '</div>' +
+    '<div class="gsmall">' + esc(st.term) + '</div>' +
+    '<div class="soloans">' + esc(a.answer_text) + '</div></div>' +
+    '<div id="rail">' + (rail ? rail.innerHTML : '') + '</div>';
+  setTimeout(load, a.correct ? 700 : 1500);
+}}
+load();
+</script>"""
+    return html_response(student_page("Battle", body))
+
+
 def view_student_portal(req, db, token, flash=""):
     s = core.student_by_token(db, token)
     if not s:
         return html_response(student_page("Not found",
             "<h1>Link not recognised</h1><p class='sub'>Ask your teacher for your link.</p>"), 404)
+    core.touch_student(db, s["id"])   # so classmates can see who is here to race
     query = (req or {}).get("query", {}) if isinstance(req, dict) else {}
     tab = (query.get("tab", ["home"])[0] or "home")
     if tab == "materials":
@@ -3601,6 +3968,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_tests(db, s, token, query)
     elif tab == "play":
         body = portal_play(db, s, token, query)
+    elif tab == "battle":
+        body = portal_battle(db, s, token, query)
     elif tab == "class":
         sc = (query.get("scope", ["class"])[0] or "class")
         body = portal_class(db, s, token, "school" if sc == "school" else "class")
@@ -6550,6 +6919,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*fn({"query": query}, db, m.group(1), int(m.group(2))))
             finally:
                 db.close()
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/battle/(\d+)(\.json)?$", path)
+        if m:
+            db = core.connect()
+            try:
+                fn = battle_state_json if m.group(3) else view_battle
+                return self._send(*fn({"query": query}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
         if len(parts) == 4 and parts[3] in ("game", "game.json"):
             db = core.connect()
             try:
@@ -6914,6 +7291,25 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_test(
                     {"query": {}, "form": form}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/battle/"
+                     r"(new|code|join|decline|(\d+)/(start|answer|invite|leave))$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            tok, what = m.group(1), m.group(2)
+            db = core.connect()
+            try:
+                flat = {"new": act_battle_new, "code": act_battle_code,
+                        "join": act_battle_join, "decline": act_battle_decline}
+                if what in flat:
+                    return self._send(*flat[what]({"form": form}, db, tok))
+                onbattle = {"start": act_battle_start, "answer": act_battle_answer,
+                            "invite": act_battle_invite, "leave": act_battle_leave}
+                return self._send(*onbattle[m.group(4)](
+                    {"form": form}, db, tok, int(m.group(3))))
             finally:
                 db.close()
 

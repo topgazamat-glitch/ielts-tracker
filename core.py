@@ -661,7 +661,73 @@ def migrate(db):
         token TEXT UNIQUE,
         created_at TEXT NOT NULL
     );
+    -- a battle: up to four classmates racing through the same questions at
+    -- their own speed, each watching the others move. Never in the league.
+    CREATE TABLE IF NOT EXISTS battles (
+        id INTEGER PRIMARY KEY,
+        code TEXT UNIQUE,
+        group_id INTEGER REFERENCES groups(id),
+        list_id INTEGER NOT NULL REFERENCES word_lists(id) ON DELETE CASCADE,
+        host_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        q_count INTEGER NOT NULL,
+        seconds INTEGER NOT NULL,
+        state TEXT NOT NULL DEFAULT 'lobby',   -- lobby | racing | done
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT
+    );
+    -- one shared set of questions, in one shared order: the race is only fair
+    -- if every car drives the same track
+    CREATE TABLE IF NOT EXISTS battle_questions (
+        id INTEGER PRIMARY KEY,
+        battle_id INTEGER NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        ord INTEGER NOT NULL,
+        word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
+        options TEXT NOT NULL,                 -- JSON, four answers
+        answer INTEGER NOT NULL,
+        UNIQUE (battle_id, ord)
+    );
+    CREATE TABLE IF NOT EXISTS battle_players (
+        id INTEGER PRIMARY KEY,
+        battle_id INTEGER NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        score INTEGER NOT NULL DEFAULT 0,
+        correct INTEGER NOT NULL DEFAULT 0,
+        answered INTEGER NOT NULL DEFAULT 0,   -- how far along the track they are
+        place INTEGER,                         -- 1 is the winner, set at the end
+        joined_at TEXT NOT NULL,
+        finished_at TEXT,
+        UNIQUE (battle_id, student_id)
+    );
+    CREATE TABLE IF NOT EXISTS battle_answers (
+        id INTEGER PRIMARY KEY,
+        battle_id INTEGER NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        ord INTEGER NOT NULL,
+        shown_at TEXT,                         -- the server's clock, not the phone's
+        choice INTEGER,                        -- -1 when the time ran out
+        correct INTEGER,
+        points INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (battle_id, student_id, ord)
+    );
+    CREATE TABLE IF NOT EXISTS battle_invites (
+        id INTEGER PRIMARY KEY,
+        battle_id INTEGER NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        from_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        to_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'open',    -- open | joined | declined
+        UNIQUE (battle_id, to_id)
+    );
+    CREATE INDEX IF NOT EXISTS battles_by_group ON battles(group_id, state);
+    CREATE INDEX IF NOT EXISTS battle_players_by_student
+        ON battle_players(student_id, battle_id);
     """)
+    scols = {r["name"] for r in db.execute("PRAGMA table_info(students)")}
+    if "last_seen" not in scols:
+        # who is on the site right now, so a student can invite a classmate
+        # who will actually answer rather than one who went home
+        db.execute("ALTER TABLE students ADD COLUMN last_seen TEXT")
     wcols = {r["name"] for r in db.execute("PRAGMA table_info(words)")}
     if "example" not in wcols:
         db.execute("ALTER TABLE words ADD COLUMN example TEXT")
@@ -1786,6 +1852,431 @@ def solo_best(db, student_id, list_id, since=None):
         "SELECT MAX(score) best, MAX(100 * correct / q_count) pct, COUNT(*) rounds"
         " FROM solo_runs WHERE student_id=? AND list_id=? AND finished_at IS NOT NULL"
         " AND finished_at >= ?", (student_id, list_id, since)).fetchone()
+
+
+# ---------------------------------------------------------------- battles
+#
+# Up to four classmates race through the same ten questions. Everyone runs at
+# their own speed and watches the others move along the track, which is where
+# the idea came from: the multiplayer races in Blur.
+#
+# Like solo play, a battle never touches the league. It keeps its own weekly
+# table so that beating a classmate is worth something without letting anyone
+# farm points off a weaker friend.
+
+BATTLE_MAX = 4           # cars on the track, as in Blur
+BATTLE_ROUND = 10        # questions in a race: short enough to want a rematch
+BATTLE_SECONDS = 15      # per question, quicker than solo play
+BATTLE_LOBBY_MINS = 20   # a lobby nobody started is stale after this
+BATTLE_ONLINE_SECS = 150 # "online now" for the invite list
+BATTLE_CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"   # no I or O: they read as 1 and 0
+
+
+def touch_student(db, student_id):
+    """Remember that this student is on the site, for the invite list."""
+    db.execute("UPDATE students SET last_seen=? WHERE id=?", (iso(now()), student_id))
+    db.commit()
+
+
+def _battle_code(db):
+    for _ in range(50):
+        code = "".join(random.choice(BATTLE_CODE_LETTERS) for _ in range(4))
+        if not db.execute("SELECT 1 FROM battles WHERE code=? AND state<>'done'",
+                          (code,)).fetchone():
+            return code
+    return None
+
+
+def battle_lists(db, student):
+    """Topics a student may race on: everything their class can see.
+
+    Deliberately not the career ladder. A battle earns no step, so letting a
+    student race on a step they have not reached yet gives nothing away that
+    matters, and it would be a poor challenge if the two of them had to have
+    climbed to exactly the same rung.
+    """
+    out = []
+    for kind in ("vocab", "grammar", "exam"):
+        out.extend(play_lists(db, student, kind))
+    return out
+
+
+def can_battle_on(db, student, list_id):
+    return any(l["id"] == list_id for l in battle_lists(db, student))
+
+
+def create_battle(db, student, list_id, q_count=BATTLE_ROUND, seconds=BATTLE_SECONDS):
+    """Open a lobby and put the host in it. Questions are drawn at the start,
+    not now, so a host cannot open a lobby to peek at the questions."""
+    if not can_battle_on(db, student, list_id):
+        return None
+    n = db.execute("SELECT COUNT(*) c FROM words WHERE list_id=?",
+                   (list_id,)).fetchone()["c"]
+    if n < 4:
+        return None
+    code = _battle_code(db)
+    if not code:
+        return None
+    bid = db.execute(
+        "INSERT INTO battles (code, group_id, list_id, host_id, q_count, seconds,"
+        " state, created_at) VALUES (?,?,?,?,?,?,'lobby',?)",
+        (code, student["group_id"], list_id, student["id"],
+         min(q_count, n), seconds, iso(now()))).lastrowid
+    db.execute("INSERT INTO battle_players (battle_id, student_id, joined_at)"
+               " VALUES (?,?,?)", (bid, student["id"], iso(now())))
+    db.commit()
+    return bid
+
+
+def battle_by_code(db, code):
+    return db.execute(
+        "SELECT * FROM battles WHERE code=? AND state='lobby'"
+        " AND created_at >= ? ORDER BY id DESC LIMIT 1",
+        ((code or "").strip().upper(),
+         iso(now() - timedelta(minutes=BATTLE_LOBBY_MINS)))).fetchone()
+
+
+def battle_players(db, battle_id):
+    return db.execute(
+        "SELECT p.*, s.name, s.avatar FROM battle_players p"
+        " JOIN students s ON s.id=p.student_id"
+        " WHERE p.battle_id=? ORDER BY p.joined_at, p.id", (battle_id,)).fetchall()
+
+
+def join_battle(db, student, battle_id):
+    """Take a free seat. Full, started, or another class's race: no."""
+    b = db.execute("SELECT * FROM battles WHERE id=?", (battle_id,)).fetchone()
+    if not b or b["state"] != "lobby":
+        return None
+    if b["group_id"] is not None and student["group_id"] != b["group_id"]:
+        return None
+    seats = db.execute("SELECT COUNT(*) c FROM battle_players WHERE battle_id=?",
+                       (battle_id,)).fetchone()["c"]
+    mine = db.execute("SELECT 1 FROM battle_players WHERE battle_id=? AND student_id=?",
+                      (battle_id, student["id"])).fetchone()
+    if not mine:
+        if seats >= BATTLE_MAX:
+            return None
+        db.execute("INSERT INTO battle_players (battle_id, student_id, joined_at)"
+                   " VALUES (?,?,?)", (battle_id, student["id"], iso(now())))
+    db.execute("UPDATE battle_invites SET state='joined'"
+               " WHERE battle_id=? AND to_id=? AND state='open'",
+               (battle_id, student["id"]))
+    db.commit()
+    return b["id"]
+
+
+def leave_battle(db, student, battle_id):
+    """Only from the lobby. Leaving a race in progress is just losing it."""
+    b = db.execute("SELECT * FROM battles WHERE id=?", (battle_id,)).fetchone()
+    if not b or b["state"] != "lobby":
+        return False
+    db.execute("DELETE FROM battle_players WHERE battle_id=? AND student_id=?",
+               (battle_id, student["id"]))
+    if student["id"] == b["host_id"]:
+        db.execute("UPDATE battles SET state='done', finished_at=? WHERE id=?",
+                   (iso(now()), battle_id))      # the host left: the lobby closes
+    db.commit()
+    return True
+
+
+def classmates_for_battle(db, student):
+    """Who this student can invite, the ones on the site right now first."""
+    cutoff = iso(now() - timedelta(seconds=BATTLE_ONLINE_SECS))
+    rows = db.execute(
+        "SELECT id, name, avatar, last_seen FROM students"
+        " WHERE active=1 AND id<>? AND group_id IS ? ORDER BY name",
+        (student["id"], student["group_id"])).fetchall()
+    return [{"id": r["id"], "name": r["name"], "avatar": r["avatar"],
+             "online": bool(r["last_seen"] and r["last_seen"] >= cutoff)}
+            for r in rows]
+
+
+def invite_to_battle(db, student, battle_id, to_id):
+    b = db.execute("SELECT * FROM battles WHERE id=? AND state='lobby'",
+                   (battle_id,)).fetchone()
+    if not b:
+        return False
+    if not db.execute("SELECT 1 FROM battle_players WHERE battle_id=? AND student_id=?",
+                      (battle_id, student["id"])).fetchone():
+        return False                    # only someone already in the lobby invites
+    other = db.execute("SELECT * FROM students WHERE id=? AND active=1",
+                       (to_id,)).fetchone()
+    if not other or other["group_id"] != student["group_id"]:
+        return False
+    db.execute("INSERT OR IGNORE INTO battle_invites (battle_id, from_id, to_id,"
+               " created_at) VALUES (?,?,?,?)",
+               (battle_id, student["id"], to_id, iso(now())))
+    db.commit()
+    return True
+
+
+def open_invites(db, student):
+    """Invitations waiting for this student, newest first."""
+    since = iso(now() - timedelta(minutes=BATTLE_LOBBY_MINS))
+    return db.execute(
+        "SELECT i.*, s.name from_name, b.code, b.id battle_id, l.title"
+        " FROM battle_invites i"
+        " JOIN battles b ON b.id=i.battle_id"
+        " JOIN students s ON s.id=i.from_id"
+        " JOIN word_lists l ON l.id=b.list_id"
+        " WHERE i.to_id=? AND i.state='open' AND b.state='lobby'"
+        " AND i.created_at >= ? ORDER BY i.id DESC", (student["id"], since)).fetchall()
+
+
+def decline_invite(db, student, battle_id):
+    db.execute("UPDATE battle_invites SET state='declined'"
+               " WHERE battle_id=? AND to_id=?", (battle_id, student["id"]))
+    db.commit()
+
+
+def my_open_battle(db, student):
+    """A lobby or a race this student is already in, so Play can point at it."""
+    since = iso(now() - timedelta(minutes=BATTLE_LOBBY_MINS))
+    return db.execute(
+        "SELECT b.* FROM battles b JOIN battle_players p ON p.battle_id=b.id"
+        " WHERE p.student_id=? AND b.state IN ('lobby','racing')"
+        " AND b.created_at >= ? ORDER BY b.id DESC LIMIT 1",
+        (student["id"], since)).fetchone()
+
+
+def start_battle(db, battle_id, host_id):
+    """The host drops the flag. Questions are drawn now, once, for everybody."""
+    b = db.execute("SELECT * FROM battles WHERE id=? AND host_id=? AND state='lobby'",
+                   (battle_id, host_id)).fetchone()
+    if not b:
+        return False
+    players = battle_players(db, battle_id)
+    if len(players) < 2:
+        return False                    # a race needs somebody to race
+    words = db.execute("SELECT * FROM words WHERE list_id=? ORDER BY id",
+                       (b["list_id"],)).fetchall()
+    picked = list(words)
+    random.shuffle(picked)
+    picked = picked[:min(b["q_count"], len(picked))]
+    pool = [w["translation"] for w in words]
+    for i, w in enumerate(picked):
+        options = four_options(w, pool)
+        db.execute("INSERT INTO battle_questions (battle_id, ord, word_id, options,"
+                   " answer) VALUES (?,?,?,?,?)",
+                   (battle_id, i, w["id"], json.dumps(options, ensure_ascii=False),
+                    options.index(w["translation"])))
+    db.execute("UPDATE battles SET state='racing', q_count=?, started_at=? WHERE id=?",
+               (len(picked), iso(now()), battle_id))
+    db.commit()
+    return True
+
+
+def _battle_deadline(b):
+    """When the flag falls whatever anyone has left: the whole track, plus a
+    little, so a player who loses their signal cannot hold the others up."""
+    return parse(b["started_at"]) + timedelta(
+        seconds=b["q_count"] * (b["seconds"] + 3) + 20)
+
+
+def _battle_timeout(db, b, student_id):
+    """A question left past its time is missed, the same as in solo play."""
+    a = db.execute("SELECT * FROM battle_answers WHERE battle_id=? AND student_id=?"
+                   " AND choice IS NULL ORDER BY ord LIMIT 1",
+                   (b["id"], student_id)).fetchone()
+    if a and a["shown_at"]:
+        used = (now() - parse(a["shown_at"])).total_seconds()
+        if used > b["seconds"] + 2:
+            db.execute("UPDATE battle_answers SET choice=-1, correct=0, points=0"
+                       " WHERE id=?", (a["id"],))
+            db.commit()
+            return True
+    return False
+
+
+def _battle_tally(db, b, student_id):
+    t = db.execute(
+        "SELECT COUNT(*) n, COALESCE(SUM(points),0) p, COALESCE(SUM(correct),0) c"
+        " FROM battle_answers WHERE battle_id=? AND student_id=? AND choice IS NOT NULL",
+        (b["id"], student_id)).fetchone()
+    db.execute("UPDATE battle_players SET answered=?, score=?, correct=?"
+               " WHERE battle_id=? AND student_id=?",
+               (t["n"], t["p"], t["c"], b["id"], student_id))
+    if t["n"] >= b["q_count"]:
+        db.execute("UPDATE battle_players SET finished_at=COALESCE(finished_at,?)"
+                   " WHERE battle_id=? AND student_id=?",
+                   (iso(now()), b["id"], student_id))
+    db.commit()
+
+
+def _battle_finish_if_done(db, b):
+    """The race ends when every car is home, or when the flag falls."""
+    if b["state"] != "racing":
+        return
+    left = db.execute("SELECT COUNT(*) c FROM battle_players"
+                      " WHERE battle_id=? AND finished_at IS NULL",
+                      (b["id"],)).fetchone()["c"]
+    over = now() >= _battle_deadline(b)
+    if left and not over:
+        return
+    if over:
+        # anyone still out on the track is marked home where they stood
+        db.execute("UPDATE battle_players SET finished_at=? WHERE battle_id=?"
+                   " AND finished_at IS NULL", (iso(now()), b["id"]))
+    # places: most points wins; a tie goes to whoever got there first
+    rows = db.execute(
+        "SELECT student_id FROM battle_players WHERE battle_id=?"
+        " ORDER BY score DESC, correct DESC, finished_at ASC, id ASC",
+        (b["id"],)).fetchall()
+    for i, r in enumerate(rows):
+        db.execute("UPDATE battle_players SET place=? WHERE battle_id=? AND student_id=?",
+                   (i + 1, b["id"], r["student_id"]))
+    db.execute("UPDATE battles SET state='done', finished_at=? WHERE id=?",
+               (iso(now()), b["id"]))
+    db.commit()
+
+
+def battle_state(db, battle_id, student_id):
+    """Everything the phone draws: the lobby, the track, or the finish."""
+    b = db.execute("SELECT b.*, l.title, l.kind FROM battles b"
+                   " JOIN word_lists l ON l.id=b.list_id WHERE b.id=?",
+                   (battle_id,)).fetchone()
+    if not b:
+        return None
+    if not db.execute("SELECT 1 FROM battle_players WHERE battle_id=? AND student_id=?",
+                      (battle_id, student_id)).fetchone():
+        return None
+    if b["state"] == "racing":
+        while _battle_timeout(db, b, student_id):
+            pass
+        _battle_tally(db, b, student_id)
+        _battle_finish_if_done(db, b)
+        b = db.execute("SELECT b.*, l.title, l.kind FROM battles b"
+                       " JOIN word_lists l ON l.id=b.list_id WHERE b.id=?",
+                       (battle_id,)).fetchone()
+    players = battle_players(db, battle_id)
+    track = [{"id": p["student_id"], "name": p["name"], "me": p["student_id"] == student_id,
+              "at": p["answered"], "score": p["score"], "correct": p["correct"],
+              "place": p["place"], "home": bool(p["finished_at"])} for p in players]
+    track.sort(key=lambda t: (-(t["place"] or 99) if b["state"] == "done" else 0,
+                              -t["score"], -t["at"]))
+    if b["state"] == "done":
+        track.sort(key=lambda t: t["place"] or 99)
+    base = {"state": b["state"], "code": b["code"], "title": b["title"],
+            "kind": b["kind"], "total": b["q_count"], "seconds": b["seconds"],
+            "host": b["host_id"] == student_id, "track": track,
+            "list_id": b["list_id"], "id": b["id"]}
+    if b["state"] == "lobby":
+        base["can_start"] = b["host_id"] == student_id and len(players) >= 2
+        base["seats"] = BATTLE_MAX
+        return base
+    if b["state"] == "done":
+        me = next((p for p in players if p["student_id"] == student_id), None)
+        base.update(place=me["place"] if me else None,
+                    score=me["score"] if me else 0,
+                    correct=me["correct"] if me else 0,
+                    review=_battle_review(db, battle_id, student_id))
+        return base
+    # racing: the question this player is on
+    a = db.execute("SELECT * FROM battle_answers WHERE battle_id=? AND student_id=?"
+                   " AND choice IS NULL ORDER BY ord LIMIT 1",
+                   (battle_id, student_id)).fetchone()
+    if not a:
+        done = db.execute("SELECT COUNT(*) c FROM battle_answers WHERE battle_id=?"
+                          " AND student_id=?", (battle_id, student_id)).fetchone()["c"]
+        if done >= b["q_count"]:
+            base["state"] = "waiting"       # home, watching the others come in
+            base["left_on_track"] = sum(1 for t in track if not t["home"])
+            return base
+        q = db.execute("SELECT * FROM battle_questions WHERE battle_id=? AND ord=?",
+                       (battle_id, done)).fetchone()
+        db.execute("INSERT INTO battle_answers (battle_id, student_id, ord, shown_at)"
+                   " VALUES (?,?,?,?)", (battle_id, student_id, q["ord"], iso(now())))
+        db.commit()
+        a = db.execute("SELECT * FROM battle_answers WHERE battle_id=? AND student_id=?"
+                       " AND ord=?", (battle_id, student_id, q["ord"])).fetchone()
+    q = db.execute("SELECT * FROM battle_questions WHERE battle_id=? AND ord=?",
+                   (battle_id, a["ord"])).fetchone()
+    if not a["shown_at"]:
+        db.execute("UPDATE battle_answers SET shown_at=? WHERE id=?",
+                   (iso(now()), a["id"]))
+        db.commit()
+        a = db.execute("SELECT * FROM battle_answers WHERE id=?", (a["id"],)).fetchone()
+    used = (now() - parse(a["shown_at"])).total_seconds()
+    w = db.execute("SELECT term FROM words WHERE id=?", (q["word_id"],)).fetchone()
+    base.update(q=q["ord"], term=w["term"], options=json.loads(q["options"]),
+                left=max(0, int(round(b["seconds"] - used))))
+    return base
+
+
+def _battle_review(db, battle_id, student_id):
+    rows = db.execute(
+        "SELECT a.choice, a.correct, q.options, q.answer, w.term, w.translation"
+        " FROM battle_answers a"
+        " JOIN battle_questions q ON q.battle_id=a.battle_id AND q.ord=a.ord"
+        " JOIN words w ON w.id=q.word_id"
+        " WHERE a.battle_id=? AND a.student_id=? AND a.choice IS NOT NULL"
+        " ORDER BY a.ord", (battle_id, student_id)).fetchall()
+    out = []
+    for r in rows:
+        opts = json.loads(r["options"])
+        out.append({"term": r["term"], "answer": r["translation"],
+                    "given": opts[r["choice"]] if r["choice"] >= 0 else None,
+                    "right": bool(r["correct"])})
+    return out
+
+
+def answer_battle(db, battle_id, student_id, ord_, choice):
+    """One answer, against the server's clock. Scored as solo play is."""
+    b = db.execute("SELECT * FROM battles WHERE id=?", (battle_id,)).fetchone()
+    if not b or b["state"] != "racing":
+        return None
+    a = db.execute("SELECT * FROM battle_answers WHERE battle_id=? AND student_id=?"
+                   " AND choice IS NULL ORDER BY ord LIMIT 1",
+                   (battle_id, student_id)).fetchone()
+    if not a or a["ord"] != ord_ or not a["shown_at"]:
+        return None                     # not the question on their screen
+    q = db.execute("SELECT * FROM battle_questions WHERE battle_id=? AND ord=?",
+                   (battle_id, ord_)).fetchone()
+    used = (now() - parse(a["shown_at"])).total_seconds()
+    left = b["seconds"] - used
+    right = left > 0 and choice == q["answer"]
+    points = GAME_BASE + int(GAME_SPEED * (left / float(b["seconds"]))) if right else 0
+    db.execute("UPDATE battle_answers SET choice=?, correct=?, points=? WHERE id=?",
+               (choice if left > 0 else -1, 1 if right else 0, points, a["id"]))
+    db.commit()
+    record_answer(db, student_id, q["word_id"], right)
+    _battle_tally(db, b, student_id)
+    _battle_finish_if_done(db, b)
+    word = db.execute("SELECT translation FROM words WHERE id=?",
+                      (q["word_id"],)).fetchone()
+    return {"correct": right, "points": points, "answer": q["answer"],
+            "answer_text": word["translation"], "late": left <= 0}
+
+
+def battle_week_board(db, group_id, since=None):
+    """This week's racers. Its own table: the league never sees any of this."""
+    since = since or week_start()
+    return db.execute(
+        "SELECT s.id, s.name, s.avatar,"
+        "       COUNT(*) races,"
+        "       COALESCE(SUM(CASE WHEN p.place=1 THEN 1 ELSE 0 END),0) wins,"
+        "       COALESCE(SUM(p.score),0) points"
+        " FROM battle_players p"
+        " JOIN battles b ON b.id=p.battle_id"
+        " JOIN students s ON s.id=p.student_id"
+        " WHERE b.state='done' AND b.finished_at >= ? AND s.active=1"
+        "   AND s.group_id IS ?"
+        " GROUP BY s.id, s.name, s.avatar"
+        " ORDER BY wins DESC, points DESC, races ASC", (since, group_id)).fetchall()
+
+
+def battle_record(db, student_id, since=None):
+    """One student's week: races, wins, best finish."""
+    since = since or week_start()
+    r = db.execute(
+        "SELECT COUNT(*) races,"
+        "       COALESCE(SUM(CASE WHEN p.place=1 THEN 1 ELSE 0 END),0) wins,"
+        "       COALESCE(SUM(p.score),0) points"
+        " FROM battle_players p JOIN battles b ON b.id=p.battle_id"
+        " WHERE p.student_id=? AND b.state='done' AND b.finished_at >= ?",
+        (student_id, since)).fetchone()
+    return {"races": r["races"], "wins": r["wins"], "points": r["points"]}
 
 
 def vocab_stats(db, student_id):

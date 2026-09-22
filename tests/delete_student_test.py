@@ -74,6 +74,21 @@ run = core.start_solo(db, st_row, wl)
 core.solo_state(db, run, sid)
 att = core.start_attempt(db, t, sid)
 core.submit_attempt(db, att, {dq: "A"})
+# a battle: this student hosts one, races a classmate, and is invited to another
+rival = core.add_student(db, "Rival", g)
+db.commit()
+me_row = db.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
+rival_row = db.execute("SELECT * FROM students WHERE id=?", (rival,)).fetchone()
+bat = core.create_battle(db, me_row, wl, q_count=2)
+core.join_battle(db, rival_row, bat)
+core.invite_to_battle(db, me_row, bat, rival)
+core.start_battle(db, bat, sid)
+bst = core.battle_state(db, bat, sid)
+core.answer_battle(db, bat, sid, bst["q"], 0)
+theirs = core.create_battle(db, rival_row, wl, q_count=2)
+core.invite_to_battle(db, rival_row, theirs, sid)
+db.commit()
+
 db.execute("INSERT INTO seasons (no, started_at, closed_at, winner_id, winner_name,"
            " winner_points, standing) VALUES (1,?,?,?,'Ali',5.0,'[]')",
            (core.iso(core.now()), core.iso(core.now()), sid))

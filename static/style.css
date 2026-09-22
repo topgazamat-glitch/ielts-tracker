@@ -1557,3 +1557,75 @@ main.portal:has(.booksheet) { max-width: 940px; }
    own measure so a long email does not run the full width of a laptop. */
 .writ .passage { max-width: 62ch; }
 .writ + .writ { margin-top: var(--sp-3); }
+
+/* --------------------------------------------------- battles
+
+   Four classmates racing the same questions. The track is the point: a lane
+   each, a car that slides as answers land, so you can see a rival pulling
+   away without reading a number. */
+
+.playbtn.battle { background: #b32d4e; }
+
+.codecard { text-align: center; padding: var(--sp-5); border-radius: var(--r-lg);
+  background: var(--accent-soft); border: 1px solid var(--brand);
+  margin-bottom: var(--sp-4); }
+.bigcode { font-size: 46px; font-weight: 700; letter-spacing: .18em;
+  line-height: 1.1; margin: var(--sp-1) 0; }
+
+.grid { display: flex; flex-direction: column; gap: var(--sp-2); }
+.seat { display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
+  background: var(--line-soft); }
+
+.mates { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.mate { display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); font-size: 15px; }
+.mate .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.mate.on .dot { background: #1a8a52; box-shadow: 0 0 0 3px rgba(26,138,82,.18); }
+.mate.asked { opacity: .55; }
+.mate[disabled] { cursor: default; }
+
+.invite { display: flex; flex-direction: column; gap: var(--sp-3);
+  border-color: var(--brand); background: var(--accent-soft); }
+.inviterow { display: flex; gap: var(--sp-3); align-items: center; }
+.inviterow form { flex: 1; margin: 0; }
+.inviterow form:last-child { flex: 0 0 auto; }
+
+.battlestart select, .battlecode input { width: 100%; }
+.battlecode { display: flex; gap: var(--sp-2); }
+.battlecode input { font-size: 30px; text-align: center; letter-spacing: .3em;
+  text-transform: uppercase; font-weight: 700; }
+.battlecode button { flex: 0 0 34%; }
+
+.track { display: flex; flex-direction: column; gap: var(--sp-3);
+  margin-top: var(--sp-4); }
+.lane { font-size: 14px; }
+.lane.me { font-weight: 600; }
+.lanetop { display: flex; justify-content: space-between; gap: var(--sp-2);
+  margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.lane .place { display: inline-block; min-width: 20px; font-weight: 700; }
+.lane.home .rail { opacity: .75; }
+.rail { position: relative; height: 12px; border-radius: 999px;
+  background: var(--line-soft); }
+.rail .fill { height: 100%; border-radius: 999px; transition: width .45s ease; }
+/* the car rides its own lane, so it needs an outline to stay visible on
+   both the filled part of the rail and the empty part ahead of it */
+.rail .car { position: absolute; top: 50%; font-size: 15px; line-height: 1;
+  color: var(--ink); transform: translate(-50%, -50%); transition: left .45s ease;
+  text-shadow: 0 0 2px var(--surface), 0 0 3px var(--surface),
+               0 0 4px var(--surface); }
+.rail .fill.c0 { background: #1668c9; }
+.rail .fill.c1 { background: #b32d4e; }
+.rail .fill.c2 { background: #1a8a52; }
+.rail .fill.c3 { background: #8a4a1a; }
+.seat .car.c0 { color: #1668c9; } .seat .car.c1 { color: #b32d4e; }
+.seat .car.c2 { color: #1a8a52; } .seat .car.c3 { color: #8a4a1a; }
+.rail .car.bump { animation: bump .45s ease; }
+@keyframes bump { 0% { transform: translate(-50%, -50%) scale(1); }
+  40% { transform: translate(-50%, -50%) scale(1.5); }
+  100% { transform: translate(-50%, -50%) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .rail .fill, .rail .car { transition: none; }
+  .rail .car.bump { animation: none; }
+}
