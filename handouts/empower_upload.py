@@ -114,6 +114,33 @@ def main():
 
 
 
+def replace_by_title(mod_name, id_from, id_to):
+    """Swap the contents of lists found by their title, whatever id they hold."""
+    import html
+    import upload_booklets as ub
+    mod = importlib.import_module(mod_name)
+    op = ub.sign_in(SITE, os.environ["TEACHER_PASSWORD"])
+    where = {}
+    for wid in range(id_from, id_to + 1):
+        try:
+            page = html.unescape(op.open(SITE + "/vocab/%d" % wid, timeout=60).read().decode())
+        except Exception:
+            continue
+        m = re.search(r"<h1>(.*?)</h1>", page, re.S)
+        if m:
+            where[m.group(1).strip()] = wid
+    for title, kind, step, items in mod.LISTS:
+        wid = where.get(title.strip())
+        if not wid:
+            print("NOT FOUND on the site:", title[:56]); continue
+        op.open(SITE + "/vocab/%d/replace" % wid,
+                urllib.parse.urlencode({"words": lines_of(kind, items)}).encode(),
+                timeout=180)
+        after = op.open(SITE + "/vocab/%d" % wid, timeout=60).read().decode()
+        print("/vocab/%-4d %-52s %d questions"
+              % (wid, title[:52], len(re.findall(r"<tr><td>", after))))
+
+
 def replace_existing(pairs):
     """Swap the contents of lists that are already on the site.
 
@@ -141,6 +168,10 @@ def replace_existing(pairs):
 
 
 if __name__ == "__main__":
+    if "--retitle" in sys.argv:
+        i = sys.argv.index("--retitle")
+        replace_by_title(sys.argv[1], int(sys.argv[i + 1]), int(sys.argv[i + 2]))
+        sys.exit(0)
     if "--replace" in sys.argv:
         replace_existing((sys.argv[1], int(sys.argv[sys.argv.index("--replace") + 1])))
         sys.exit(0)
