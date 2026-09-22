@@ -68,6 +68,10 @@ t = db.execute("INSERT INTO dtests (title, published, created_at) VALUES ('T',1,
                (core.iso(core.now()),)).lastrowid
 dq = db.execute("INSERT INTO dquestions (test_id, num, kind, prompt, answer)"
                 " VALUES (?,1,'mcq','q','A')", (t,)).lastrowid
+st_row = db.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
+db.execute("UPDATE word_lists SET active=1 WHERE id=?", (wl,))
+run = core.start_solo(db, st_row, wl)
+core.solo_state(db, run, sid)
 att = core.start_attempt(db, t, sid)
 core.submit_attempt(db, att, {dq: "A"})
 db.execute("INSERT INTO seasons (no, started_at, closed_at, winner_id, winner_name,"

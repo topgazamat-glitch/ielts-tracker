@@ -883,6 +883,44 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 .gopt:active { transform: scale(.98); }
 @media (max-width: 380px) { .gopts { grid-template-columns: 1fr; } }
 
+/* --------------------------------------------------- solo play */
+
+/* The two doors into Play. The game's own blue and green, so it reads as the
+   same game the teacher hosts, only on your own. */
+.playpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.playbtn {
+  display: flex; flex-direction: column; justify-content: center; gap: var(--sp-1);
+  min-height: 120px; padding: var(--sp-5); border-radius: var(--r-lg);
+  color: #fff; text-decoration: none; box-shadow: var(--shadow-1);
+}
+.playbtn.vocab { background: #1668c9; }
+.playbtn.grammar { background: #1a8a52; }
+.playbtn:active { transform: scale(.98); }
+.pbig { font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+.psmall { font-size: 14px; opacity: .9; }
+@media (max-width: 380px) { .playpick { grid-template-columns: 1fr; } }
+
+.playlive { display: block; text-decoration: none; color: var(--ink);
+  background: var(--accent-soft); border-color: var(--brand); }
+
+table.rank td.num, table.rank th.num { text-align: right;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.rank tr.me td { background: var(--accent-soft); font-weight: 600; }
+/* a phone is narrow: the face and the name stay on one line, and the table
+   gives up its roomy padding before anything is pushed off the edge */
+table.rank td.who { white-space: nowrap; }
+table.rank th, table.rank td { padding-left: var(--sp-2); padding-right: var(--sp-2); }
+
+button.big { width: 100%; min-height: 56px; font-size: 20px; }
+
+.solotitle { margin-bottom: var(--sp-1); }
+.solobar { display: flex; justify-content: space-between; gap: var(--sp-2);
+  font-size: 14px; color: var(--ink-2); margin-bottom: var(--sp-2);
+  font-variant-numeric: tabular-nums; }
+.gword.solo { font-size: 20px; letter-spacing: 0; font-weight: 600; line-height: 1.4; }
+.soloans { font-size: 20px; font-weight: 700; margin: var(--sp-2) 0; }
+.solorev p { margin: 0 0 var(--sp-3); }
+
 /* --------------------------------------------------- game: who you are */
 
 .gwho { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }

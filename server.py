@@ -1990,7 +1990,7 @@ def student_shell(s, db, token, tab, body):
     """One page, four tabs, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
     tabs = [("home", "Homework"), ("write", "Writing"),
-            ("materials", "Materials"), ("tests", "Tests"),
+            ("materials", "Materials"), ("tests", "Tests"), ("play", "Play"),
             ("progress", "Progress"), ("class", "Class"), ("goal", "My goal"),
             ("profile", "Profile")]
     nav = "".join(
@@ -3238,6 +3238,243 @@ def act_student_goal(req, db, token):
     return redirect(f"/s/{token}?tab=goal")
 
 
+KIND_NAME = {"vocab": "Vocabulary", "grammar": "Grammar"}
+
+
+def solo_rows(rows, me_id, cols):
+    """A ranking table: position, who, and the columns that matter for it."""
+    out = ""
+    for i, r in enumerate(rows, 1):
+        mine = ' class="me"' if r["id"] == me_id else ""
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, str(i))
+        out += (f'<tr{mine}><td class="num">{medal}</td>'
+                f'<td class="who">{E(r["avatar"] or "")} {E(r["name"])}</td>'
+                + "".join(f'<td class="num">{c(r)}</td>' for c in cols) + "</tr>")
+    return out
+
+
+def portal_play(db, s, token, query):
+    """Solo play: the teacher's lists, a round at a time, with a fair ranking.
+
+    Nothing here touches the league. The live game still needs the teacher to
+    host it; this is the same game for a student on their own.
+    """
+    base = f"/s/{E(token)}?tab=play"
+    kind = (query.get("kind", [""])[0] or "")
+    lid = query.get("l", [""])[0]
+
+    if lid.isdigit():
+        wl = db.execute("SELECT * FROM word_lists WHERE id=?", (int(lid),)).fetchone()
+        if not wl or not core.can_play(db, s, wl["id"]):
+            return '<h2>Play</h2><p class="sub">That list is not open to your class.</p>'
+        n = db.execute("SELECT COUNT(*) c FROM words WHERE list_id=?", (wl["id"],)).fetchone()["c"]
+        mine = core.solo_best(db, s["id"], wl["id"])
+        board = core.solo_list_board(db, wl["id"], s["group_id"])
+        rows = solo_rows(board[:10], s["id"],
+                         [lambda r: "%d" % r["best"], lambda r: "%d%%" % r["pct"]])
+        me_line = (f'Your best this week: <strong>{mine["best"]}</strong> points, '
+                   f'{mine["pct"]}% right, in {mine["rounds"]} round(s).'
+                   if mine["rounds"] else "You have not played this list this week.")
+        round_n = min(core.SOLO_ROUND, n)
+        return f"""<h2>{E(wl["title"])}</h2>
+<p class="sub">{KIND_NAME.get(wl["kind"], "")} · {n} questions ·
+each round is {round_n} of them, picked at random, {core.SOLO_SECONDS} seconds each.
+Right and fast scores most.</p>
+<form method="post" action="/s/{E(token)}/solo/start">
+<input type="hidden" name="list" value="{wl["id"]}">
+<button class="big">Play a round</button></form>
+<p class="gap-3">{me_line}</p>
+<h3 class="gap-4">This week in your class</h3>
+<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
+<th class="num">Best</th><th class="num">Right</th></tr>
+{rows or '<tr><td colspan="4" class="sub">Nobody has played it yet this week. Be the first.</td></tr>'}
+</table></div>
+<p class="sub gap-3">Your best round this week counts, however many you play. The
+table starts again every Monday.</p>
+<p class="gap-4"><a class="tab" href="{base}&amp;kind={E(wl["kind"])}">Back to
+{KIND_NAME.get(wl["kind"], "the lists")}</a></p>"""
+
+    if kind in KIND_NAME:
+        lists = core.play_lists(db, s, kind)
+        cards = ""
+        for l in lists:
+            mine = core.solo_best(db, s["id"], l["id"])
+            badge = ""
+            if mine["rounds"]:
+                badge = ("✅ mastered" if mine["pct"] >= core.SOLO_MASTERED
+                         else f'best {mine["best"]}')
+            cards += (f'<a class="tile small" href="{base}&amp;l={l["id"]}">'
+                      f'<div class="tile-title">{E(l["title"])}</div>'
+                      f'<div class="sub">{l["n"]} questions'
+                      f'{" · " + badge if badge else ""}</div></a>')
+        return (f"<h2>{KIND_NAME[kind]}</h2>"
+                + (f'<div class="tiles">{cards}</div>' if cards else
+                   '<div class="card"><p class="flush">No lists here yet. Your '
+                   'teacher will add some.</p></div>')
+                + f'<p class="gap-4"><a class="tab" href="{base}">Back to Play</a></p>')
+
+    live = core.live_game(db, s["group_id"])
+    banner = (f'<a class="card playlive" href="/s/{E(token)}/game"><strong>Your '
+              f'teacher\'s game is on.</strong> Join it now &rarr;</a>' if live else "")
+    counts = {k: len(core.play_lists(db, s, k)) for k in KIND_NAME}
+    week = core.solo_week_board(db, s["group_id"])
+    rows = solo_rows(week[:10], s["id"],
+                     [lambda r: "%d" % r["mastered"], lambda r: "%d" % r["points"]])
+    return f"""<h2>Play</h2>
+{banner}
+<div class="playpick">
+<a class="playbtn vocab" href="{base}&amp;kind=vocab"><span class="pbig">Vocabulary</span>
+<span class="psmall">{counts["vocab"]} list{"" if counts["vocab"] == 1 else "s"}</span></a>
+<a class="playbtn grammar" href="{base}&amp;kind=grammar"><span class="pbig">Grammar</span>
+<span class="psmall">{counts["grammar"]} list{"" if counts["grammar"] == 1 else "s"}</span></a>
+</div>
+<h3 class="gap-4">This week's champions</h3>
+<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
+<th class="num">Mastered</th><th class="num">Points</th></tr>
+{rows or '<tr><td colspan="4" class="sub">Nobody has played yet this week.</td></tr>'}
+</table></div>
+<p class="sub gap-3">A list is mastered when you get {core.SOLO_MASTERED}% of a round
+right. Each list counts once, so the way up is to learn more lists, not to play one
+over and over. Starts again every Monday. This is just for fun: it is not part of
+the league.</p>"""
+
+
+def act_solo_start(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    lid = (req["form"].get("list", [""])[0] or "")
+    rid = core.start_solo(db, s, int(lid)) if lid.isdigit() else None
+    if not rid:
+        return redirect(f"/s/{token}?tab=play")
+    return redirect(f"/s/{token}/solo/{rid}")
+
+
+def solo_state_json(req, db, token, rid):
+    s = core.student_by_token(db, token)
+    st = core.solo_state(db, rid, s["id"]) if s else None
+    return json_response(st or {"state": "gone"})
+
+
+def act_solo_answer(req, db, token, rid):
+    s = core.student_by_token(db, token)
+    if not s:
+        return json_response({"ok": False})
+    f = req["form"]
+    q, c = (f.get("q", [""])[0] or ""), (f.get("choice", [""])[0] or "")
+    if not (q.isdigit() and c.lstrip("-").isdigit()):
+        return json_response({"ok": False})
+    r = core.answer_solo(db, rid, s["id"], int(q), int(c))
+    return json_response(dict(r, ok=True) if r else {"ok": False})
+
+
+def view_solo(req, db, token, rid):
+    """The phone, alone: the live game's four targets, with nobody hosting."""
+    s = core.student_by_token(db, token)
+    if not s:
+        return not_found()
+    run = db.execute("SELECT r.*, l.title, l.kind FROM solo_runs r"
+                     " JOIN word_lists l ON l.id=r.list_id"
+                     " WHERE r.id=? AND r.student_id=?", (rid, s["id"])).fetchone()
+    if not run:
+        return redirect(f"/s/{token}?tab=play")
+    body = f"""<p class="sub solotitle">{E(run["title"])}</p>
+<div id="bar" class="solobar"></div>
+<div id="play"></div>
+<script>
+const TOK = {json.dumps(token)}, RID = {rid}, LIST = {run["list_id"]};
+const SENTENCE = {json.dumps(run["kind"] == "grammar")};
+const SHAPES = ['\u25B2', '\u25C6', '\u25CF', '\u25A0'];
+let st = null, ticker = null, busy = false, ac = null;
+function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
+  ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
+function beep(freq, ms, type) {{
+  try {{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.14, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + ms / 1000);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + ms / 1000);
+  }} catch (e) {{}}
+}}
+function bar() {{
+  document.getElementById('bar').innerHTML =
+    '<span>Question ' + Math.min(st.number + 1, st.total) + ' of ' + st.total + '</span>' +
+    (st.streak >= 2 ? '<span>' + st.streak + ' in a row 🔥</span>' : '<span></span>') +
+    '<span><strong>' + st.score + '</strong> points</span>';
+}}
+async function load() {{
+  const r = await fetch('/s/' + TOK + '/solo/' + RID + '.json', {{cache: 'no-store'}});
+  st = await r.json();
+  show();
+}}
+function show() {{
+  clearInterval(ticker);
+  const el = document.getElementById('play');
+  if (st.state === 'done') {{
+    document.getElementById('bar').innerHTML = '';
+    const wrong = st.review.filter(x => !x.right);
+    el.innerHTML =
+      '<div class="gcard"><div class="gsmall">Finished</div>' +
+      '<div class="gbig">' + st.score + ' points</div>' +
+      '<div class="gsmall">' + st.correct + ' of ' + st.total + ' right</div></div>' +
+      (wrong.length ? '<h3>Look at these again</h3><div class="card solorev">' +
+        wrong.map(x => '<p><span class="sub">' + esc(x.term) + '</span><br>' +
+          '<strong>' + esc(x.answer) + '</strong>' +
+          (x.given ? ' <span class="sub">(you chose ' + esc(x.given) + ')</span>'
+                   : ' <span class="sub">(time ran out)</span>') + '</p>').join('') +
+        '</div>' : '<p>Every one right. 🎉</p>') +
+      '<form method="post" action="/s/' + TOK + '/solo/start">' +
+      '<input type="hidden" name="list" value="' + LIST + '">' +
+      '<button class="big">Play again</button></form>' +
+      '<p class="gap-3"><a class="tab" href="/s/' + TOK + '?tab=play&amp;l=' + LIST +
+      '">See the ranking</a></p>';
+    return;
+  }}
+  if (st.state !== 'question') {{ location.href = '/s/' + TOK + '?tab=play'; return; }}
+  bar();
+  let left = st.left;
+  el.innerHTML =
+    '<div class="gcard"><div class="gclock" id="clock">' + left + '</div>' +
+    '<div class="gword' + (SENTENCE ? ' solo' : '') + '">' + esc(st.term) + '</div></div>' +
+    '<div class="gopts">' + st.options.map((o, i) =>
+      '<button class="gopt c' + i + '" onclick="pick(' + i + ')">' +
+      '<span class="gshape">' + SHAPES[i] + '</span>' + esc(o) + '</button>').join('') +
+    '</div>';
+  busy = false;
+  ticker = setInterval(() => {{
+    left -= 1;
+    const c = document.getElementById('clock');
+    if (c) c.textContent = Math.max(0, left);
+    if (left <= 5 && left > 0) beep(880, 60);
+    if (left <= 0) {{ clearInterval(ticker); pick(-1); }}
+  }}, 1000);
+}}
+async function pick(i) {{
+  if (busy) return;
+  busy = true; clearInterval(ticker);
+  document.querySelectorAll('.gopt').forEach(b => {{ b.disabled = true; b.classList.add('off'); }});
+  const r = await fetch('/s/' + TOK + '/solo/' + RID + '/answer', {{method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'q=' + st.q + '&choice=' + i}});
+  const a = await r.json();
+  if (!a.ok) {{ load(); return; }}
+  if (a.correct) {{ beep(660, 90); setTimeout(() => beep(990, 140), 100); }}
+  else beep(180, 220, 'square');
+  document.getElementById('play').innerHTML =
+    '<div class="gcard ' + (a.correct ? 'right' : 'wrong') + '">' +
+    '<div class="gbig">' + (a.correct ? 'Correct' : (i < 0 || a.late ? 'Time up' : 'Not this time')) + '</div>' +
+    '<div class="gsmall">' + esc(st.term) + '</div>' +
+    '<div class="soloans">' + esc(a.answer_text) + '</div>' +
+    (a.points ? '<div class="gsmall">+' + a.points + ' points</div>' : '') + '</div>';
+  setTimeout(load, a.correct ? 1300 : 2600);
+}}
+load();
+</script>"""
+    return html_response(student_page(run["title"], body))
+
+
 def view_student_portal(req, db, token, flash=""):
     s = core.student_by_token(db, token)
     if not s:
@@ -3253,6 +3490,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_write(db, s, token, query)
     elif tab == "tests":
         body = portal_tests(db, s, token, query)
+    elif tab == "play":
+        body = portal_play(db, s, token, query)
     elif tab == "class":
         sc = (query.get("scope", ["class"])[0] or "class")
         body = portal_class(db, s, token, "school" if sc == "school" else "class")
@@ -6194,6 +6433,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _student_get(self, path, query):
         parts = path.split("/")
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/solo/(\d+)(\.json)?$", path)
+        if m:
+            db = core.connect()
+            try:
+                fn = solo_state_json if m.group(3) else view_solo
+                return self._send(*fn({"query": query}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
         if len(parts) == 4 and parts[3] in ("game", "game.json"):
             db = core.connect()
             try:
@@ -6558,6 +6805,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_test(
                     {"query": {}, "form": form}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/solo/(start|(\d+)/answer)$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                if m.group(2) == "start":
+                    return self._send(*act_solo_start({"form": form}, db, m.group(1)))
+                return self._send(*act_solo_answer({"form": form}, db, m.group(1),
+                                                   int(m.group(3))))
             finally:
                 db.close()
 

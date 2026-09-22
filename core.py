@@ -502,6 +502,31 @@ def migrate(db):
         opened_at TEXT,                        -- when the current question went up
         created_at TEXT NOT NULL
     );
+    -- solo play: a student on their own, from the Play tab. Never in the league.
+    CREATE TABLE IF NOT EXISTS solo_runs (
+        id INTEGER PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        list_id INTEGER NOT NULL REFERENCES word_lists(id) ON DELETE CASCADE,
+        q_count INTEGER NOT NULL,
+        seconds INTEGER NOT NULL,
+        score INTEGER NOT NULL DEFAULT 0,
+        correct INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS solo_questions (
+        id INTEGER PRIMARY KEY,
+        run_id INTEGER NOT NULL REFERENCES solo_runs(id) ON DELETE CASCADE,
+        ord INTEGER NOT NULL,
+        word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
+        options TEXT NOT NULL,                 -- JSON, four answers
+        answer INTEGER NOT NULL,               -- which of them is right
+        shown_at TEXT,                         -- the server's clock, not the phone's
+        choice INTEGER,                        -- -1 when the time ran out
+        correct INTEGER,
+        points INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS solo_runs_by_student ON solo_runs(student_id, list_id);
     CREATE TABLE IF NOT EXISTS game_questions (
         id INTEGER PRIMARY KEY,
         game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
@@ -1282,6 +1307,28 @@ def game_code(db):
             return code
 
 
+def four_options(word, pool):
+    """The four answers a question offers, shuffled.
+
+    A grammar question brings its own wrong answers; a vocabulary word borrows
+    three meanings from the other words on its list, which keeps them plausible.
+    """
+    own = []
+    if "options" in word.keys() and word["options"]:
+        try:
+            own = [str(x) for x in json.loads(word["options"]) if str(x).strip()]
+        except ValueError:
+            own = []
+    if own:
+        options = own[:3] + [word["translation"]]
+    else:
+        others = [t for t in pool if t != word["translation"]]
+        random.shuffle(others)
+        options = others[:3] + [word["translation"]]
+    random.shuffle(options)
+    return options
+
+
 def make_game(db, group_id, list_id, q_count=10, seconds=20):
     """Draw the questions up front, so the game cannot stall mid-round.
 
@@ -1304,19 +1351,7 @@ def make_game(db, group_id, list_id, q_count=10, seconds=20):
 
     pool = [w["translation"] for w in words]
     for i, w in enumerate(picked):
-        own = []
-        if "options" in w.keys() and w["options"]:
-            try:
-                own = [str(x) for x in json.loads(w["options"]) if str(x).strip()]
-            except ValueError:
-                own = []
-        if own:
-            options = own[:3] + [w["translation"]]
-        else:
-            others = [t for t in pool if t != w["translation"]]
-            random.shuffle(others)
-            options = others[:3] + [w["translation"]]
-        random.shuffle(options)
+        options = four_options(w, pool)
         db.execute(
             "INSERT INTO game_questions (game_id, ord, word_id, options, answer)"
             " VALUES (?,?,?,?,?)",
@@ -1447,6 +1482,224 @@ def _snapshot_ranks(db, game_id):
 def end_game(db, game_id):
     db.execute("UPDATE games SET state='done' WHERE id=?", (game_id,))
     db.commit()
+
+
+# ------------------------------------------------------------- solo play
+#
+# The live game needs the teacher to host it. Solo play is the same game with
+# nobody at the front: a student picks a list and plays a round alone.
+#
+# It is deliberately kept out of the league. What makes its ranking fair:
+#   - the clock is the server's. The phone asks for a question, the server
+#     notes the moment it handed it over, and the speed bonus is measured from
+#     there - so a student cannot slow the clock or send an answer "early";
+#   - every round is the same length and draws its questions at random from
+#     the list, so learning one round's order by heart gains nothing;
+#   - the tables are for this week only and for your own class only, so a
+#     student who joins on Thursday is not already hopelessly behind;
+#   - the week's champion is whoever has mastered the most lists, not whoever
+#     replayed one list the most. Replaying helps you learn; it cannot buy rank.
+
+SOLO_ROUND = 10          # questions in a round, or the whole list if shorter
+SOLO_SECONDS = 20        # per question, the same as the live game
+SOLO_MASTERED = 80       # per cent right in one round to count a list as mastered
+
+
+def week_start(cfg=None):
+    """Monday 00:00 in the teacher's timezone, as a UTC timestamp string."""
+    cfg = cfg or load_config()
+    off = timedelta(hours=cfg["timezone_offset_hours"])
+    local = now() + off
+    monday = (local - timedelta(days=local.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    return iso(monday - off)
+
+
+def play_lists(db, student, kind):
+    """The lists this student can play: switched on, and for their class or all."""
+    return db.execute(
+        "SELECT l.*, (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) n"
+        " FROM word_lists l WHERE l.active=1 AND l.kind=?"
+        " AND (l.group_id IS NULL OR l.group_id=?)"
+        " AND (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) >= 4"
+        " ORDER BY l.id DESC", (kind, student["group_id"])).fetchall()
+
+
+def can_play(db, student, list_id):
+    row = db.execute("SELECT kind FROM word_lists WHERE id=?", (list_id,)).fetchone()
+    return bool(row) and any(l["id"] == list_id for l in play_lists(db, student, row["kind"]))
+
+
+def start_solo(db, student, list_id, q_count=SOLO_ROUND, seconds=SOLO_SECONDS):
+    """A fresh round. An unfinished one on the same list is abandoned, not resumed:
+    resuming would let a student peek at a question, leave, and come back."""
+    if not can_play(db, student, list_id):
+        return None
+    words = db.execute("SELECT * FROM words WHERE list_id=? ORDER BY id",
+                       (list_id,)).fetchall()
+    picked = list(words)
+    random.shuffle(picked)
+    picked = picked[:min(q_count, len(picked))]
+    rid = db.execute(
+        "INSERT INTO solo_runs (student_id, list_id, q_count, seconds, started_at)"
+        " VALUES (?,?,?,?,?)",
+        (student["id"], list_id, len(picked), seconds, iso(now()))).lastrowid
+    pool = [w["translation"] for w in words]
+    for i, w in enumerate(picked):
+        options = four_options(w, pool)
+        db.execute("INSERT INTO solo_questions (run_id, ord, word_id, options, answer)"
+                   " VALUES (?,?,?,?,?)",
+                   (rid, i, w["id"], json.dumps(options, ensure_ascii=False),
+                    options.index(w["translation"])))
+    db.commit()
+    return rid
+
+
+def _solo_run(db, run_id, student_id):
+    return db.execute("SELECT * FROM solo_runs WHERE id=? AND student_id=?",
+                      (run_id, student_id)).fetchone()
+
+
+def _solo_timeout(db, run):
+    """A question left past its time counts as missed: nothing to gain by waiting."""
+    q = db.execute("SELECT * FROM solo_questions WHERE run_id=? AND choice IS NULL"
+                   " ORDER BY ord LIMIT 1", (run["id"],)).fetchone()
+    if q and q["shown_at"]:
+        used = (now() - parse(q["shown_at"])).total_seconds()
+        if used > run["seconds"] + 2:
+            db.execute("UPDATE solo_questions SET choice=-1, correct=0, points=0"
+                       " WHERE id=?", (q["id"],))
+            db.commit()
+            return True
+    return False
+
+
+def _solo_finish_if_done(db, run):
+    left = db.execute("SELECT COUNT(*) c FROM solo_questions WHERE run_id=?"
+                      " AND choice IS NULL", (run["id"],)).fetchone()["c"]
+    if left == 0 and not run["finished_at"]:
+        t = db.execute("SELECT COALESCE(SUM(points),0) p, COALESCE(SUM(correct),0) c"
+                       " FROM solo_questions WHERE run_id=?", (run["id"],)).fetchone()
+        db.execute("UPDATE solo_runs SET score=?, correct=?, finished_at=? WHERE id=?",
+                   (t["p"], t["c"], iso(now()), run["id"]))
+        db.commit()
+
+
+def solo_state(db, run_id, student_id):
+    """What the phone should show now. Serving a question starts its clock."""
+    run = _solo_run(db, run_id, student_id)
+    if not run:
+        return None
+    while _solo_timeout(db, run):
+        pass
+    _solo_finish_if_done(db, run)
+    run = _solo_run(db, run_id, student_id)
+    done = db.execute("SELECT * FROM solo_questions WHERE run_id=? AND choice IS NOT NULL"
+                      " ORDER BY ord", (run_id,)).fetchall()
+    score = sum(q["points"] for q in done)
+    streak = 0
+    for q in reversed(done):
+        if not q["correct"]:
+            break
+        streak += 1
+    base = {"total": run["q_count"], "number": len(done), "score": score,
+            "streak": streak, "list_id": run["list_id"]}
+    if run["finished_at"]:
+        review = []
+        for q in done:
+            w = db.execute("SELECT term, translation FROM words WHERE id=?",
+                           (q["word_id"],)).fetchone()
+            opts = json.loads(q["options"])
+            review.append({"term": w["term"], "answer": w["translation"],
+                           "given": opts[q["choice"]] if q["choice"] >= 0 else None,
+                           "right": bool(q["correct"])})
+        base.update(state="done", correct=run["correct"], score=run["score"],
+                    review=review)
+        return base
+    q = db.execute("SELECT * FROM solo_questions WHERE run_id=? AND choice IS NULL"
+                   " ORDER BY ord LIMIT 1", (run_id,)).fetchone()
+    if not q["shown_at"]:
+        db.execute("UPDATE solo_questions SET shown_at=? WHERE id=?", (iso(now()), q["id"]))
+        db.commit()
+        q = db.execute("SELECT * FROM solo_questions WHERE id=?", (q["id"],)).fetchone()
+    used = (now() - parse(q["shown_at"])).total_seconds()
+    w = db.execute("SELECT term FROM words WHERE id=?", (q["word_id"],)).fetchone()
+    base.update(state="question", q=q["ord"], term=w["term"],
+                options=json.loads(q["options"]),
+                left=max(0, int(round(run["seconds"] - used))), seconds=run["seconds"])
+    return base
+
+
+def answer_solo(db, run_id, student_id, ord_, choice):
+    """Mark one answer against the server's clock. One answer per question."""
+    run = _solo_run(db, run_id, student_id)
+    if not run or run["finished_at"]:
+        return None
+    q = db.execute("SELECT * FROM solo_questions WHERE run_id=? AND choice IS NULL"
+                   " ORDER BY ord LIMIT 1", (run_id,)).fetchone()
+    if not q or q["ord"] != ord_ or not q["shown_at"]:
+        return None                       # not the question on screen
+    used = (now() - parse(q["shown_at"])).total_seconds()
+    left = run["seconds"] - used
+    right = left > 0 and choice == q["answer"]
+    points = GAME_BASE + int(GAME_SPEED * (left / float(run["seconds"]))) if right else 0
+    db.execute("UPDATE solo_questions SET choice=?, correct=?, points=? WHERE id=?",
+               (choice if left > 0 else -1, 1 if right else 0, points, q["id"]))
+    db.commit()
+    record_answer(db, student_id, q["word_id"], right)   # feeds the bot's revision, as the live game does
+    _solo_finish_if_done(db, run)
+    word = db.execute("SELECT translation FROM words WHERE id=?", (q["word_id"],)).fetchone()
+    return {"correct": right, "points": points, "answer": q["answer"],
+            "answer_text": word["translation"], "late": left <= 0}
+
+
+def solo_list_board(db, list_id, group_id, since=None):
+    """This week's best round on one list, for each classmate who played it."""
+    since = since or week_start()
+    return db.execute(
+        "SELECT s.id, s.name, s.avatar, MAX(r.score) best,"
+        " MAX(100 * r.correct / r.q_count) pct, COUNT(*) rounds"
+        " FROM solo_runs r JOIN students s ON s.id=r.student_id"
+        " WHERE r.list_id=? AND s.group_id=? AND s.active=1"
+        " AND r.finished_at IS NOT NULL AND r.finished_at >= ?"
+        " GROUP BY s.id ORDER BY best DESC, s.name", (list_id, group_id, since)).fetchall()
+
+
+def solo_week_board(db, group_id, since=None):
+    """The week's champions: most lists mastered, then the best points across them.
+
+    Mastering a list means one round of at least SOLO_MASTERED per cent right.
+    Each list counts once however often it is replayed, so the way up the
+    table is to learn more lists, not to grind the same one."""
+    since = since or week_start()
+    rows = db.execute(
+        "SELECT r.student_id, r.list_id, MAX(r.score) best,"
+        " MAX(100 * r.correct / r.q_count) pct"
+        " FROM solo_runs r JOIN students s ON s.id=r.student_id"
+        " WHERE s.group_id=? AND s.active=1 AND r.finished_at IS NOT NULL"
+        " AND r.finished_at >= ? GROUP BY r.student_id, r.list_id",
+        (group_id, since)).fetchall()
+    per = {}
+    for r in rows:
+        d = per.setdefault(r["student_id"], {"mastered": 0, "points": 0, "lists": 0})
+        d["lists"] += 1
+        d["points"] += r["best"]
+        if r["pct"] >= SOLO_MASTERED:
+            d["mastered"] += 1
+    out = []
+    for sid, d in per.items():
+        st = db.execute("SELECT id, name, avatar FROM students WHERE id=?", (sid,)).fetchone()
+        out.append(dict(d, id=sid, name=st["name"], avatar=st["avatar"]))
+    out.sort(key=lambda d: (-d["mastered"], -d["points"], d["name"]))
+    return out
+
+
+def solo_best(db, student_id, list_id, since=None):
+    since = since or week_start()
+    return db.execute(
+        "SELECT MAX(score) best, MAX(100 * correct / q_count) pct, COUNT(*) rounds"
+        " FROM solo_runs WHERE student_id=? AND list_id=? AND finished_at IS NOT NULL"
+        " AND finished_at >= ?", (student_id, list_id, since)).fetchone()
 
 
 def vocab_stats(db, student_id):
@@ -3678,9 +3931,11 @@ def remove_student(db, student_id):
     db.execute("DELETE FROM dresponses WHERE attempt_id IN"
                " (SELECT id FROM dattempts WHERE student_id=?)", (student_id,))
     db.execute("DELETE FROM game_answers WHERE student_id=?", (student_id,))
+    db.execute("DELETE FROM solo_questions WHERE run_id IN"
+               " (SELECT id FROM solo_runs WHERE student_id=?)", (student_id,))
     for table in ("submissions", "word_progress", "quiz_sessions", "questions",
                   "parents", "lesson_marks", "goals", "game_players", "dattempts",
-                  "students"):
+                  "solo_runs", "students"):
         db.execute(f"DELETE FROM {table} WHERE student_id=?"
                    if table != "students" else "DELETE FROM students WHERE id=?",
                    (student_id,))
