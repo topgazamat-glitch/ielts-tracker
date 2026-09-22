@@ -927,6 +927,9 @@ button.big { width: 100%; min-height: 56px; font-size: 20px; }
 /* ---------------------------------------------- solo play: the ladder */
 
 input.tiny { width: 84px; }
+.alsolevels { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.alsolevels label { display: flex; align-items: center; gap: var(--sp-1);
+  font-size: 14px; font-weight: 400; }
 
 .steps { display: flex; flex-direction: column; gap: var(--sp-2); }
 .steprow {

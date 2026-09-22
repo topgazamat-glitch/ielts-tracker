@@ -156,5 +156,42 @@ chain = core.play_chain(db, me, "exam", "A2 Key words")
 assert [c["unlocked"] for c in chain] == [True, False]
 print("   its steps lock like every other ladder")
 
+
+print("\n10. A LIST CAN BE SHOWN TO MORE THAN ONE LEVEL")
+d2 = core.connect()
+lv2 = {r["name"]: r["id"] for r in d2.execute("SELECT id, name FROM levels")}
+beg = d2.execute("INSERT INTO groups (name, join_code, created_at, level_id)"
+                 " VALUES ('110','BEG',?,?)", (now, lv2["Beginner"])).lastrowid
+elem = d2.execute("INSERT INTO groups (name, join_code, created_at, level_id)"
+                  " VALUES ('116e','ELM',?,?)", (now, lv2["Elementary"])).lastrowid
+b_id = core.add_student(d2, "Bahodir", beg)
+e_id = core.add_student(d2, "Elnur", elem)
+exam3 = d2.execute("INSERT INTO word_lists (title, created_at, kind, level_id, source)"
+                   " VALUES ('A2 words - shared',?,'exam',?,'A2 Key words')",
+                   (now, lv2["Elementary"])).lastrowid
+for i in range(22):
+    d2.execute("INSERT INTO words (list_id, term, translation, ord) VALUES (?,?,?,?)",
+               (exam3, "w%d" % i, "m%d" % i, i))
+d2.commit()
+rows = {x: d2.execute("SELECT * FROM students WHERE id=?", (x,)).fetchone()
+        for x in (b_id, e_id, sid)}
+seen = lambda who: [l["title"] for l in core.play_lists(d2, rows[who], "exam")]
+print("   Elementary sees:", seen(e_id))
+print("   Pre-Intermediate sees:", seen(sid))
+assert "A2 words - shared" in seen(e_id)
+assert "A2 words - shared" not in seen(sid), "it reached Pre-Intermediate too early"
+
+d2.execute("UPDATE word_lists SET extra_levels=? WHERE id=?",
+           (str(lv2["Pre-Intermediate"]), exam3))
+d2.commit()
+print("   after 'also show to Pre-Intermediate':")
+print("      Pre-Intermediate sees:", seen(sid))
+print("      Beginner sees:", seen(b_id))
+assert "A2 words - shared" in seen(sid), "the extra level was ignored"
+assert "A2 words - shared" not in seen(b_id), "it leaked to Beginner"
+assert "A2 words - shared" in seen(e_id), "it lost its own level"
+print("   its own level keeps it, the named one gains it, nobody else sees it")
+d2.close()
+
 srv.shutdown()
-print("\nPASS  Play is a career: books, steps, 18 of 20, and exam words of their own")
+print("\nPASS  Play is a career, with exam words of their own and levels that share")

@@ -1748,9 +1748,18 @@ def view_word_list(req, db, wid):
     kinds = "".join(
         f'<option value="{k}"{" selected" if k == wl["kind"] else ""}>{E(v)}</option>'
         for k, v in KIND_NAME.items())
+    also = {x for x in (wl["extra_levels"] or "").split(",") if x}
+    extra = "".join(
+        f'<label><input type="checkbox" name="extra" value="{l["id"]}"'
+        f'{" checked" if str(l["id"]) in also else ""}> {E(l["name"])}</label>'
+        for l in db.execute("SELECT id, name FROM levels ORDER BY sort"))
+    also_line = ""
+    if wl["extra_levels"]:
+        names = [core.level_name(db, int(x)) for x in wl["extra_levels"].split(",") if x]
+        also_line = " (also " + ", ".join(n for n in names if n) + ")"
     body = f"""<h1>{E(wl["title"])}</h1>
 <p class="sub">{E(group_name(db, wl["group_id"]))} ·
-{E(core.level_name(db, wl["level_id"]) or "every level")} · the “hard” flag marks
+{E(core.level_name(db, wl["level_id"]) or "every level")}{also_line} · the “hard” flag marks
 words the group answers correctly less than 60% of the time — worth reteaching.</p>
 <details class="adder"><summary>Rename, or change the class, level, book or step</summary>
 <div class="card"><form method="post" action="/vocab/{wid}/rename" class="inline">
@@ -1767,6 +1776,7 @@ words the group answers correctly less than 60% of the time — worth reteaching
 <label class="f">Step<input name="step" type="number" min="0" max="999"
  value="{wl["step"] or 0}" class="tiny"></label>
 <label class="f">Section<select name="kind">{kinds}</select></label>
+<label class="f">Also show to<span class="alsolevels">{extra}</span></label>
 <label class="f pushed">&nbsp;<button>Save</button></label></form></div></details>
 <div class="card"><form method="post" action="/vocab/{wid}/add" class="inline">
 <label class="f" style="flex:1">Add more words (one per line, <code>word = meaning</code>)
@@ -1899,10 +1909,13 @@ def act_rename_word_list(req, db, wid):
     source = (f.get("source", [""])[0] or "").strip()[:80] or None
     kind = (f.get("kind", [""])[0] or "").strip()
     kind = kind if kind in KIND_NAME else None
+    valid = {str(r["id"]) for r in db.execute("SELECT id FROM levels")}
+    extra = ",".join(sorted(v for v in f.get("extra", []) if v in valid)) or None
     db.execute("UPDATE word_lists SET title=?, group_id=?, level_id=?, source=?,"
-               " step=?, kind=COALESCE(?, kind) WHERE id=?",
+               " step=?, kind=COALESCE(?, kind), extra_levels=? WHERE id=?",
                (title, group, level, source,
-                int(step) if step.isdigit() and int(step) < 1000 else 0, kind, wid))
+                int(step) if step.isdigit() and int(step) < 1000 else 0, kind,
+                extra, wid))
     db.commit()
     return redirect(f"/vocab/{wid}")
 

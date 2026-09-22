@@ -679,6 +679,12 @@ def migrate(db):
         db.execute("ALTER TABLE word_lists ADD COLUMN level_id INTEGER"
                    " REFERENCES levels(id)")
     lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
+    if lcols and "extra_levels" not in lcols:
+        # a list belongs to one level, but some are worth more than one: the
+        # A2 exam words are the floor for Pre-Intermediate too, because the
+        # B1 exam list contains every A2 word.
+        db.execute("ALTER TABLE word_lists ADD COLUMN extra_levels TEXT")
+    lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
     if lcols and "step" not in lcols:
         # where a list sits in its ladder. 0 means "wherever its unit number
         # puts it", which is right for a book of numbered units.
@@ -1539,9 +1545,11 @@ def play_lists(db, student, kind):
         "SELECT l.*, (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) n"
         " FROM word_lists l WHERE l.active=1 AND l.kind=?"
         " AND (l.group_id IS NULL OR l.group_id=?)"
-        " AND (l.level_id IS NULL OR l.level_id=?)"
+        " AND (l.level_id IS NULL OR l.level_id=?"
+        "      OR ',' || IFNULL(l.extra_levels, '') || ',' LIKE '%,' || ? || ',%')"
         " AND (SELECT COUNT(*) FROM words w WHERE w.list_id=l.id) >= 4"
-        " ORDER BY l.id DESC", (kind, student["group_id"], level)).fetchall()
+        " ORDER BY l.id DESC",
+        (kind, student["group_id"], level, level)).fetchall()
 
 
 def pass_mark(n):
