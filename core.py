@@ -679,6 +679,11 @@ def migrate(db):
         db.execute("ALTER TABLE word_lists ADD COLUMN level_id INTEGER"
                    " REFERENCES levels(id)")
     lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
+    if lcols and "step" not in lcols:
+        # where a list sits in its ladder. 0 means "wherever its unit number
+        # puts it", which is right for a book of numbered units.
+        db.execute("ALTER TABLE word_lists ADD COLUMN step INTEGER NOT NULL DEFAULT 0")
+    lcols = {r["name"] for r in db.execute("PRAGMA table_info(word_lists)")}
     if "source" not in lcols:
         db.execute("ALTER TABLE word_lists ADD COLUMN source TEXT")
     if "unit" not in lcols:
@@ -1506,9 +1511,10 @@ def end_game(db, game_id):
 #   - the week's champion is whoever has mastered the most lists, not whoever
 #     replayed one list the most. Replaying helps you learn; it cannot buy rank.
 
-SOLO_ROUND = 10          # questions in a round, or the whole list if shorter
+SOLO_ROUND = 20          # questions in a round, or the whole list if shorter
 SOLO_SECONDS = 20        # per question, the same as the live game
-SOLO_MASTERED = 80       # per cent right in one round to count a list as mastered
+SOLO_PASS = 90           # per cent right to pass a step: 18 out of 20
+SOLO_MASTERED = SOLO_PASS   # the weekly table counts a passed step as mastered
 
 
 def week_start(cfg=None):
@@ -1538,9 +1544,67 @@ def play_lists(db, student, kind):
         " ORDER BY l.id DESC", (kind, student["group_id"], level)).fetchall()
 
 
+def pass_mark(n):
+    """How many of n questions must be right to pass: 18 out of 20."""
+    return -(-n * SOLO_PASS // 100)
+
+
+def passed_lists(db, student_id):
+    """Every list this student has ever passed. Progress is kept for good:
+    a step you have earned is not taken back on Monday."""
+    return {r["list_id"] for r in db.execute(
+        "SELECT list_id FROM solo_runs WHERE student_id=? AND finished_at IS NOT NULL"
+        " AND correct * 100 >= q_count * ?", (student_id, SOLO_PASS))}
+
+
+def _order_key(l):
+    unit = (l["unit"] or "").strip()
+    return (l["step"] or 0, int(unit) if unit.isdigit() else 9999, l["id"])
+
+
+def play_chain(db, student, kind, source=None):
+    """The ladder: the lists in order, each locked until the one before it is passed.
+
+    This is the career: step one is open to everybody, and every step after it
+    has to be earned. The lock is here, not only in the page, so typing a
+    list's number into the address bar does not skip it.
+    """
+    lists = [l for l in play_lists(db, student, kind)
+             if source is None or (l["source"] or "") == source]
+    lists.sort(key=_order_key)
+    passed = passed_lists(db, student["id"])
+    out, open_next = [], True
+    for i, l in enumerate(lists):
+        done = l["id"] in passed
+        out.append({"list": l, "step": i + 1, "passed": done, "unlocked": open_next,
+                    "n": l["n"], "need": pass_mark(min(SOLO_ROUND, l["n"]))})
+        open_next = done                       # the next step waits for this one
+    return out
+
+
+def play_books(db, student, kind="vocab"):
+    """Vocabulary is filed by book; each book is its own ladder."""
+    seen, books = set(), []
+    for l in sorted(play_lists(db, student, kind), key=_order_key):
+        name = (l["source"] or "").strip()
+        if name in seen:
+            continue
+        seen.add(name)
+        chain = play_chain(db, student, kind, name)
+        books.append({"source": name, "title": name or "Other lists",
+                      "steps": len(chain),
+                      "passed": sum(1 for c in chain if c["passed"])})
+    return books
+
+
 def can_play(db, student, list_id):
-    row = db.execute("SELECT kind FROM word_lists WHERE id=?", (list_id,)).fetchone()
-    return bool(row) and any(l["id"] == list_id for l in play_lists(db, student, row["kind"]))
+    """Playable only if it is this student's list and its step is unlocked."""
+    row = db.execute("SELECT kind, source FROM word_lists WHERE id=?",
+                     (list_id,)).fetchone()
+    if not row:
+        return False
+    chain = play_chain(db, student, row["kind"], (row["source"] or "").strip())
+    return any(c["list"]["id"] == list_id and c["unlocked"] for c in chain)
 
 
 def start_solo(db, student, list_id, q_count=SOLO_ROUND, seconds=SOLO_SECONDS):
@@ -1626,8 +1690,9 @@ def solo_state(db, run_id, student_id):
             review.append({"term": w["term"], "answer": w["translation"],
                            "given": opts[q["choice"]] if q["choice"] >= 0 else None,
                            "right": bool(q["correct"])})
+        need = pass_mark(run["q_count"])
         base.update(state="done", correct=run["correct"], score=run["score"],
-                    review=review)
+                    review=review, need=need, passed=run["correct"] >= need)
         return base
     q = db.execute("SELECT * FROM solo_questions WHERE run_id=? AND choice IS NULL"
                    " ORDER BY ord LIMIT 1", (run_id,)).fetchone()

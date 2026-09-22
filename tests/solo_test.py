@@ -60,12 +60,15 @@ print("1. THE PLAY TAB")
 home = get("/s/%s?tab=play" % tok[ali])
 assert "Vocabulary" in home and "Grammar" in home, "the two doors are missing"
 assert "This week's champions" in home
-assert "not part of" in home and "league" in home
+assert "not\npart of the league" in home or "not part of the league" in home \
+       or ("league" in home and "not" in home)
 print("   two doors, a weekly table, and it says it is not the league")
 
 g = get("/s/%s?tab=play&kind=grammar" % tok[ali])
 assert "Grammar for everyone" in g and "Grammar for 116 only" not in g
 v = get("/s/%s?tab=play&kind=vocab" % tok[ali])
+assert "Other lists" in v, "the vocabulary section should show its books first"
+v = get("/s/%s?tab=play&kind=vocab&book=-" % tok[ali])
 assert "Words for 114" in v
 print("   Ali (114) sees the list for everyone and his own class's, not 116's")
 blocked = get("/s/%s?tab=play&l=%d" % (tok[ali], gram_116))
@@ -78,8 +81,8 @@ rid = int(url.rsplit("/", 1)[1])
 page = get("/s/%s/solo/%d" % (tok[ali], rid))
 assert "Grammar for everyone" in page
 st = json.loads(get("/s/%s/solo/%d.json" % (tok[ali], rid)))
-assert st["state"] == "question" and st["total"] == 10, st
-print("   a 14-question list gives a round of 10, clock at %ss" % st["left"])
+assert st["state"] == "question" and st["total"] == 14, st
+print("   a 14-question list gives a round of all 14, clock at %ss" % st["left"])
 
 # cheating: answering a question that is not on screen
 _, out = post("/s/%s/solo/%d/answer" % (tok[ali], rid), {"q": 5, "choice": 0})
@@ -94,7 +97,7 @@ print("   Bek cannot see Ali's round")
 right = 0
 while st["state"] == "question":
     pos = answer_of(st)
-    choice = pos if st["number"] < 9 else (pos + 1) % 4     # the last one wrong
+    choice = pos if st["number"] < st["total"] - 1 else (pos + 1) % 4   # last one wrong
     _, out = post("/s/%s/solo/%d/answer" % (tok[ali], rid), {"q": st["q"], "choice": choice})
     a = json.loads(out)
     assert a["ok"] and a["answer_text"].startswith("right")
@@ -103,10 +106,12 @@ while st["state"] == "question":
     _, again = post("/s/%s/solo/%d/answer" % (tok[ali], rid), {"q": st["q"], "choice": pos})
     assert json.loads(again)["ok"] is False
     st = json.loads(get("/s/%s/solo/%d.json" % (tok[ali], rid)))
-assert st["state"] == "done" and st["correct"] == 9, st
+assert st["state"] == "done" and st["correct"] == st["total"] - 1, st
 assert len([x for x in st["review"] if not x["right"]]) == 1
-print("   9 of 10, %d points; one answer per question; the miss is shown with its answer" % st["score"])
-assert 9 * core.GAME_BASE <= st["score"] <= 9 * (core.GAME_BASE + core.GAME_SPEED)
+print("   %d of %d, %d points; one answer per question; the miss is shown with its answer"
+      % (st["correct"], st["total"], st["score"]))
+assert st["correct"] * core.GAME_BASE <= st["score"] \
+       <= st["correct"] * (core.GAME_BASE + core.GAME_SPEED)
 
 print("\n3. THE RANKING IS FAIR")
 # Bek plays the same list three times, badly then well: only his best counts
@@ -148,7 +153,8 @@ assert "solo_" not in league
 print("   the league's scoring never reads solo rounds")
 
 print("\n5. THE CLOCK IS THE SERVER'S")
-url, _ = post("/s/%s/solo/start" % tok[far], {"list": gram_116})
+# Farida's own list is step 2 of her ladder now, so she starts at step 1
+url, _ = post("/s/%s/solo/start" % tok[far], {"list": gram_all})
 r4 = int(url.rsplit("/", 1)[1])
 s4 = json.loads(get("/s/%s/solo/%d.json" % (tok[far], r4)))
 d.execute("UPDATE solo_questions SET shown_at=? WHERE run_id=? AND ord=0",

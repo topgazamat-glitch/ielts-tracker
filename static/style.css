@@ -921,6 +921,25 @@ button.big { width: 100%; min-height: 56px; font-size: 20px; }
 .soloans { font-size: 20px; font-weight: 700; margin: var(--sp-2) 0; }
 .solorev p { margin: 0 0 var(--sp-3); }
 
+/* ---------------------------------------------- solo play: the ladder */
+
+input.tiny { width: 84px; }
+
+.steps { display: flex; flex-direction: column; gap: var(--sp-2); }
+.steprow {
+  display: grid; grid-template-columns: auto 1fr; gap: 0 var(--sp-3);
+  align-items: baseline; padding: var(--sp-3) var(--sp-4);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); text-decoration: none; color: var(--ink);
+}
+.steprow .sub { grid-column: 2; }
+.stepno { grid-row: span 2; font-weight: 700; font-size: 16px; white-space: nowrap; }
+.steptitle { font-weight: 600; }
+.steprow.open { border-color: var(--brand); box-shadow: var(--shadow-1); }
+.steprow.passed .stepno { color: #1a8a52; }
+/* a locked step is visible but plainly out of reach */
+.steprow.locked { opacity: .55; background: transparent; }
+
 /* --------------------------------------------------- game: who you are */
 
 .gwho { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }
