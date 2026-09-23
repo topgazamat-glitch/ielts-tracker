@@ -442,5 +442,5 @@
   }
  ],
  "minutes": 35,
- "strict": false
+ "strict": true
 }
