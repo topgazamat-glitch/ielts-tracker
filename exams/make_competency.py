@@ -27,6 +27,10 @@ from make_paper import CSS
 
 PAPERS = {"b1": ("b1_mock_final", "B1 Pre-Intermediate", "B1 Mock Final"),
           "b1plus": ("b1plus_mock_final", "B1+ Intermediate", "B1+ Mock Final")}
+# the extra Intermediate papers, which are Reading and Writing only
+for _n in range(2, 7):
+    PAPERS["b1plus-%d" % _n] = ("b1plus_mock_%d" % _n, "B1+ Intermediate",
+                                "B1+ Mock %d" % _n)
 paper = None      # set by main() from the chosen level
 LEVEL_LINE = ""   # what the top of the printed paper says
 DIGITAL_HEAD = ""

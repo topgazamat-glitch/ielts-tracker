@@ -26,6 +26,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 # measured from the real papers; see the module docstring
+#
+# The Competency papers (B1 for Pre-Intermediate, B1+ for Intermediate) are a
+# different animal. Azamat's own B1+ final runs 368 words at 21.6 words a
+# sentence with 13.9% long words in the Part 4 article, and its cloze is
+# denser still. Those are the numbers the B1+ mocks have to meet.
+C_LONG_WORDS = (300, 410)
+C_LONG_SENT = (15.0, 23.5)
+C_LONG_PC = (9.0, 15.5)
+C_GAP_WORDS = (90, 150)
+
 ART_WORDS = (170, 210)
 ART_SENT = (9.0, 16.0)
 ART_LONG = (5.0, 10.0)
@@ -44,8 +54,97 @@ def measure(text):
     return len(w), per, long_pc
 
 
+def competency(name, p):
+    """A B1 or B1+ Reading and Writing paper: YES/NO, a cloze, two emails.
+
+    B1+ offers four options a question and B1 three, which is the difference
+    between the two levels rather than a mistake in either.
+    """
+    plus = name.startswith("b1plus")
+    n_opt = 4 if plus else 3
+    letters = "ABCD" if plus else "ABC"
+    bad = []
+
+    def want(cond, why):
+        if not cond:
+            bad.append(why)
+
+    want(len(p.R_PART1["questions"]) == 5, "Part 1 does not have five texts")
+    for q in p.R_PART1["questions"]:
+        want(len(q["options"]) == n_opt,
+             "Q%s does not have %d options" % (q["q"], n_opt))
+        want(q["answer"] in letters, "Q%s answer is out of range" % q["q"])
+        want(bool(q["text"].strip()), "Q%s has no text to read" % q["q"])
+    want(len(p.R_PART2["statements"]) == 5, "Part 2 does not have five sentences")
+    for it in p.R_PART2["statements"]:
+        want(it["answer"] in ("YES", "NO"), "Q%s is not YES or NO" % it["q"])
+    want(len({it["answer"] for it in p.R_PART2["statements"]}) == 2,
+         "Part 2 is all YES or all NO")
+    want(len(p.R_PART3["questions"]) == 5, "Part 3 does not have five questions")
+    for q in p.R_PART3["questions"]:
+        want(len(q["options"]) == n_opt,
+             "Q%s does not have %d options" % (q["q"], n_opt))
+        want(q["answer"] in letters, "Q%s answer is out of range" % q["q"])
+    want(len(p.R_PART4["gaps"]) == 5, "Part 4 does not have five gaps")
+    for g in p.R_PART4["gaps"]:
+        want(len(g["options"]) == n_opt,
+             "Q%s does not have %d options" % (g["q"], n_opt))
+        want(g["answer"] in letters, "Q%s answer is out of range" % g["q"])
+    want(len(p.R_PART5["gaps"]) == 5, "Part 5 does not have five gaps")
+    for g in p.R_PART5["gaps"]:
+        want(bool(str(g["answer"]).strip()), "Q%s has no answer" % g["q"])
+
+    nums = ([q["q"] for q in p.R_PART1["questions"]]
+            + [it["q"] for it in p.R_PART2["statements"]]
+            + [q["q"] for q in p.R_PART3["questions"]]
+            + [g["q"] for g in p.R_PART4["gaps"]]
+            + [g["q"] for g in p.R_PART5["gaps"]])
+    want(nums == list(range(1, 26)), "reading is not numbered 1-25: %s" % nums)
+
+    for part, text in ((4, p.R_PART4["text"]), (5, p.R_PART5["text"])):
+        seen = [int(m) for m in re.findall(r"\((\d+)\)\s*\.", text)]
+        asked = [g["q"] for g in (p.R_PART4 if part == 4 else p.R_PART5)["gaps"]]
+        want(seen == asked,
+             "Part %d: gaps in the text are %s but the questions are %s"
+             % (part, seen, asked))
+
+    want(len(p.WRITING1["points"]) == 3, "the first email does not ask three things")
+    want(bool(p.WRITING2.get("quote")), "the second task has nothing to reply to")
+    return bad
+
+
 def check(name):
     p = importlib.import_module(name)
+    if hasattr(p, "WRITING2"):      # the Competency shape, B1 and B1+
+        print("%s" % name)
+        bad = competency(name, p)
+        for label, text, band in (
+                ("Part 2 text", " ".join(p.R_PART2["text"]), "long"),
+                ("Part 3 article", " ".join(p.R_PART3["text"]), "long"),
+                ("Part 4 gapped text",
+                 re.sub(r"\(\d+\)\s*\.+", "word", p.R_PART4["text"]), "gap"),
+                ("Part 5 cloze",
+                 re.sub(r"\(\d+\)\s*\.+", "word", p.R_PART5["text"]), "gap")):
+            w, per, pc = measure(text)
+            if band == "long":
+                checks = ((w, C_LONG_WORDS, "words", "%d"),
+                          (per, C_LONG_SENT, "words a sentence", "%.1f"),
+                          (pc, C_LONG_PC, "long words, %", "%.1f"))
+            else:
+                checks = ((w, C_GAP_WORDS, "words", "%d"),)
+            judge = name.startswith("b1plus")
+            for val, (lo, hi), what, fmt in checks:
+                ok = (lo <= val <= hi) if judge else True
+                print("   %-34s " % ("%s, %s" % (label, what)) + (fmt % val)
+                      + ("  ok" if ok else "  OUT OF BAND (%s-%s)" % (lo, hi))
+                      + ("" if judge else "   (B1: measured, not judged)"))
+                if not ok:
+                    bad.append("%s %s is %s, outside %s-%s"
+                               % (label, what, fmt % val, lo, hi))
+        for why in bad:
+            print("   PROBLEM  " + why)
+        print("   %d problem(s)\n" % len(bad))
+        return len(bad)
     bad = []
 
     def want(cond, why):
@@ -155,7 +254,9 @@ def main():
     a = ap.parse_args()
     names = a.papers
     if a.all or not names:
-        names = ["a2_mock_final"] + ["a2_mock_%d" % n for n in range(2, 7)]
+        names = (["a2_mock_final"] + ["a2_mock_%d" % n for n in range(2, 7)]
+                 + ["b1plus_mock_final"]
+                 + ["b1plus_mock_%d" % n for n in range(2, 7)])
         names = [n for n in names if os.path.exists(os.path.join(HERE, n + ".py"))]
     total = sum(check(n) for n in names)
     print("%d paper(s), %d problem(s)" % (len(names), total))
