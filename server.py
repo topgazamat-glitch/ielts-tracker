@@ -5856,7 +5856,11 @@ def serve_track(req, db, level, track):
             not os.path.abspath(path).startswith(os.path.abspath(core.AUDIO_DIR)):
         return not_found()
     data = open(path, "rb").read()
-    return (200, [("Content-Type", "audio/mpeg"),
+    # The shelf is named .mp3, but the Mac cannot encode mp3 and the mock
+    # recordings come out of `say` as AAC in an MP4 container. Say what the
+    # bytes actually are, or the phone refuses to play them.
+    kind = "audio/mp4" if data[4:8] == b"ftyp" else "audio/mpeg"
+    return (200, [("Content-Type", kind),
                   ("Content-Length", str(len(data))),
                   ("Cache-Control", "public, max-age=86400")], data)
 
