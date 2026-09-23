@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
-import a2_mock_final as paper
+import a2_mock_final as paper   # replaced by --paper; see main()
 
 E = html.escape
 LETTERS = "ABC"
@@ -204,8 +204,12 @@ def page(title, inner):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--paper", default="a2_mock_final",
+                    help="the content module, e.g. a2_mock_2")
     ap.add_argument("--out", default=os.path.expanduser("~/Desktop/A2 Mock Final"))
     args = ap.parse_args()
+    global paper
+    paper = __import__(args.paper)
     out = os.path.expanduser(args.out)
     os.makedirs(out, exist_ok=True)
     import export_booklet as ex

@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
-import a2_mock_final as paper
+import a2_mock_final as paper   # replaced by --paper; see main()
 
 E = html.escape
 TEAL, DEEP, GREY, RULE = "#127D80", "#0B5456", "#6E6E6E", "#C9C9C9"
@@ -137,6 +137,8 @@ def build():
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--paper", default="a2_mock_final",
+                    help="the content module, e.g. a2_mock_2")
     ap.add_argument("--minutes", type=int, default=50)
     ap.add_argument("--strict", action="store_true",
                     help="leaving the page hands the paper in")
@@ -148,12 +150,15 @@ def main():
                     default="https://ielts-tracker-production.up.railway.app")
     args = ap.parse_args()
 
+    global paper, QS
+    paper = __import__(args.paper)
+    QS = []
     layout = build()
     marked = sum(1 for q in QS if q["kind"] != "open")
     data = {"level": args.level, "number": 99, "title": args.title,
             "passages": {}, "layout": layout, "questions": QS,
             "minutes": args.minutes, "strict": bool(args.strict)}
-    out = args.out or os.path.join(HERE, "a2_mock_digital.json")
+    out = args.out or os.path.join(HERE, "%s_digital.json" % args.paper)
     json.dump(data, open(out, "w"))
     print("%d questions (%d marked, 1 email) · %d minutes · %s"
           % (len(QS), marked, args.minutes,

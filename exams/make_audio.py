@@ -23,7 +23,8 @@ sys.path.insert(0, HERE)
 import a2_mock_final as paper   # replaced by --paper; see main()
 
 PAPERS = {"a2": "a2_mock_final", "b1": "b1_mock_final",
-          "b1plus": "b1plus_mock_final"}
+          "b1plus": "b1plus_mock_final",
+          "a2-2": "a2_mock_2", "a2-3": "a2_mock_3", "a2-4": "a2_mock_4", "a2-5": "a2_mock_5", "a2-6": "a2_mock_6"}
 
 
 def speak(voice, text, dest, rate=160):
