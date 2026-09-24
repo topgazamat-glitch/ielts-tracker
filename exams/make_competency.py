@@ -31,6 +31,10 @@ PAPERS = {"b1": ("b1_mock_final", "B1 Pre-Intermediate", "B1 Mock Final"),
 for _n in range(2, 7):
     PAPERS["b1plus-%d" % _n] = ("b1plus_mock_%d" % _n, "B1+ Intermediate",
                                 "B1+ Mock %d" % _n)
+# the Pre-Intermediate mid-course papers, Reading and Writing only
+for _n in range(1, 6):
+    PAPERS["b1mid-%d" % _n] = ("b1mid_%d" % _n, "B1 Pre-Intermediate",
+                               "B1 Mid-Course Test %d" % _n)
 paper = None      # set by main() from the chosen level
 LEVEL_LINE = ""   # what the top of the printed paper says
 DIGITAL_HEAD = ""
@@ -253,6 +257,30 @@ def panel(lines, fill="#F2F8F8", edge=TEAL):
 YN = [("YES", ""), ("NO", "")]
 
 
+def skills_panel():
+    """What a mid-course paper says before the questions start.
+
+    A final is a measurement and says nothing. A mid-course test is still
+    teaching, and most of the marks students throw away at this stage go on
+    not knowing how the paper works rather than on the English.
+    """
+    notes = getattr(paper, "EXAM_SKILLS", None)
+    if not notes:
+        return ""
+    rows = "".join(
+        '<p style="margin-bottom:5px"><span style="font-weight:700;color:%s;'
+        'font-size:10pt">%s</span> <span style="font-size:10pt">%s</span></p>'
+        % (DEEP, E(part), E(text)) for part, text in notes)
+    return ('<table class="bk"><tr><td style="background:#FFF8E6;'
+            'border:1px solid #E8D48A;padding:12px">'
+            '<p style="margin:0 0 6px"><span style="font-weight:700;color:%s;'
+            'font-size:11pt">Before you start</span></p>%s'
+            '<p style="margin:6px 0 0"><span style="font-size:9.5pt;color:%s">'
+            'This box is here because it is a practice paper. The real exam '
+            'does not have one.</span></p></td></tr></table>'
+            % (DEEP, rows, GREY))
+
+
 def digital_layout():
     R1, R2, R3 = paper.R_PART1, paper.R_PART2, paper.R_PART3
     R4, R5 = paper.R_PART4, paper.R_PART5
@@ -262,6 +290,7 @@ def digital_layout():
                 "writing. Answer every question — a wrong answer costs "
                 "nothing.")]
 
+    h.append(skills_panel())
     h.append(part_bar(1, "Questions 1–5 · short texts"))
     h.append(rubric(R1["intro"]))
     for q in R1["questions"]:
@@ -340,7 +369,8 @@ def main():
     paper = __import__(module)
     LEVEL_LINE = level_line
     DIGITAL_HEAD = level_line.upper() + " \u00b7 MOCK FINAL"
-    site_level = "Pre-Intermediate" if args.level == "b1" else "Intermediate"
+    site_level = ("Pre-Intermediate" if level_line.startswith("B1 ")
+                  else "Intermediate")
     out = os.path.expanduser(args.out or ("~/Desktop/%s" % name))
 
     if args.paper:

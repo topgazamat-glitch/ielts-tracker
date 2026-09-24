@@ -36,6 +36,20 @@ C_LONG_SENT = (15.0, 23.5)
 C_LONG_PC = (9.0, 15.5)
 C_GAP_WORDS = (90, 150)
 
+# The B1 mid-course paper is a different shape of difficulty again. Measured
+# from the official Empower B1 Mid-Course Competency test: its YES/NO text is
+# long (459 words) but plain - 15.3 words a sentence, 7% long words - and its
+# article is short with markedly short sentences, 279 words at 10.7. Long and
+# plain is not the same as short and dense, and a mid paper should be the
+# first of those.
+MID_LONG_WORDS = (380, 520)
+MID_LONG_SENT = (12.5, 18.0)
+MID_LONG_PC = (4.5, 10.5)
+MID_ART_WORDS = (245, 330)
+MID_ART_SENT = (9.0, 14.5)
+MID_ART_PC = (5.5, 11.5)
+MID_GAP_WORDS = (75, 120)
+
 ART_WORDS = (170, 210)
 ART_SENT = (9.0, 16.0)
 ART_LONG = (5.0, 10.0)
@@ -118,21 +132,31 @@ def check(name):
     if hasattr(p, "WRITING2"):      # the Competency shape, B1 and B1+
         print("%s" % name)
         bad = competency(name, p)
+        mid = name.startswith("b1mid")
         for label, text, band in (
                 ("Part 2 text", " ".join(p.R_PART2["text"]), "long"),
-                ("Part 3 article", " ".join(p.R_PART3["text"]), "long"),
+                ("Part 3 article", " ".join(p.R_PART3["text"]), "article"),
                 ("Part 4 gapped text",
                  re.sub(r"\(\d+\)\s*\.+", "word", p.R_PART4["text"]), "gap"),
                 ("Part 5 cloze",
                  re.sub(r"\(\d+\)\s*\.+", "word", p.R_PART5["text"]), "gap")):
             w, per, pc = measure(text)
-            if band == "long":
+            if band == "gap":
+                checks = ((w, MID_GAP_WORDS if mid else C_GAP_WORDS,
+                           "words", "%d"),)
+            elif mid and band == "long":
+                checks = ((w, MID_LONG_WORDS, "words", "%d"),
+                          (per, MID_LONG_SENT, "words a sentence", "%.1f"),
+                          (pc, MID_LONG_PC, "long words, %", "%.1f"))
+            elif mid:
+                checks = ((w, MID_ART_WORDS, "words", "%d"),
+                          (per, MID_ART_SENT, "words a sentence", "%.1f"),
+                          (pc, MID_ART_PC, "long words, %", "%.1f"))
+            else:
                 checks = ((w, C_LONG_WORDS, "words", "%d"),
                           (per, C_LONG_SENT, "words a sentence", "%.1f"),
                           (pc, C_LONG_PC, "long words, %", "%.1f"))
-            else:
-                checks = ((w, C_GAP_WORDS, "words", "%d"),)
-            judge = name.startswith("b1plus")
+            judge = name.startswith("b1plus") or name.startswith("b1mid")
             for val, (lo, hi), what, fmt in checks:
                 ok = (lo <= val <= hi) if judge else True
                 print("   %-34s " % ("%s, %s" % (label, what)) + (fmt % val)
@@ -256,7 +280,8 @@ def main():
     if a.all or not names:
         names = (["a2_mock_final"] + ["a2_mock_%d" % n for n in range(2, 7)]
                  + ["b1plus_mock_final"]
-                 + ["b1plus_mock_%d" % n for n in range(2, 7)])
+                 + ["b1plus_mock_%d" % n for n in range(2, 7)]
+                 + ["b1mid_%d" % n for n in range(1, 6)])
         names = [n for n in names if os.path.exists(os.path.join(HERE, n + ".py"))]
     total = sum(check(n) for n in names)
     print("%d paper(s), %d problem(s)" % (len(names), total))
