@@ -2279,6 +2279,140 @@ def battle_record(db, student_id, since=None):
     return {"races": r["races"], "wins": r["wins"], "points": r["points"]}
 
 
+# --------------------------------------------------------------- reteaching
+#
+# Every answer a student gives - in Play, in a battle, in the live game -
+# writes a row to word_progress. Nothing read it back to the teacher, so a
+# class could fail the same word ninety times and nobody would know unless
+# they happened to be standing there.
+#
+# These three questions are what a teacher would ask if they could hold
+# eighty-five students in their head at once:
+#   which words is this class getting wrong?
+#   which steps are they failing?
+#   who is quietly slipping while their homework still looks fine?
+
+RETEACH_MIN_SEEN = 8      # answers before a word can be called hard
+RETEACH_MIN_WHO = 3       # students, so one bad night is not a finding
+RETEACH_HARD = 60         # per cent right, at or below which it needs work
+OVERDUE_MANY = 25         # revision words past due before it is worth saying
+QUIET_DAYS = 7            # days away from Play before a student is "quiet"
+
+
+def reteach_words(db, group_id, limit=20, min_seen=RETEACH_MIN_SEEN,
+                  min_who=RETEACH_MIN_WHO):
+    """The words this class gets wrong most, worst first.
+
+    A word only counts once enough of the class has met it enough times:
+    one student having a bad evening is not a lesson plan.
+    """
+    rows = db.execute(
+        "SELECT w.id, w.term, w.translation, l.title list_title, l.kind,"
+        "       SUM(p.seen) seen, SUM(p.correct) correct,"
+        "       COUNT(DISTINCT p.student_id) who"
+        "  FROM word_progress p"
+        "  JOIN words w ON w.id = p.word_id"
+        "  JOIN word_lists l ON l.id = w.list_id"
+        "  JOIN students s ON s.id = p.student_id"
+        " WHERE s.active = 1 AND s.group_id IS ?"
+        " GROUP BY w.id"
+        # the aggregates are spelled out again rather than using the aliases:
+        # an unqualified `seen` in HAVING resolves to word_progress.seen, one
+        # student's count, not the class's total
+        " HAVING SUM(p.seen) >= ? AND COUNT(DISTINCT p.student_id) >= ?"
+        " ORDER BY (correct * 1.0 / seen), seen DESC"
+        " LIMIT ?", (group_id, min_seen, min_who, limit)).fetchall()
+    out = []
+    for r in rows:
+        pct = int(round(100.0 * r["correct"] / r["seen"]))
+        if pct > RETEACH_HARD:
+            continue
+        out.append({"word_id": r["id"], "term": r["term"],
+                    "answer": r["translation"], "list": r["list_title"],
+                    "kind": r["kind"], "seen": r["seen"],
+                    "correct": r["correct"], "pct": pct, "who": r["who"]})
+    return out
+
+
+def reteach_steps(db, group_id, limit=10, min_runs=4):
+    """The Play steps this class does worst on.
+
+    A word tells you what to put on the board; a step tells you which lesson
+    did not land.
+    """
+    rows = db.execute(
+        "SELECT l.id, l.title, l.kind, l.source,"
+        "       COUNT(*) runs, COUNT(DISTINCT r.student_id) who,"
+        "       AVG(r.correct * 100.0 / r.q_count) pct,"
+        "       SUM(CASE WHEN r.correct * 100.0 / r.q_count >= ?"
+        "                THEN 1 ELSE 0 END) passes"
+        "  FROM solo_runs r"
+        "  JOIN word_lists l ON l.id = r.list_id"
+        "  JOIN students s ON s.id = r.student_id"
+        " WHERE r.finished_at IS NOT NULL AND s.active = 1 AND s.group_id IS ?"
+        " GROUP BY l.id"
+        " HAVING COUNT(*) >= ?"
+        " ORDER BY pct"
+        " LIMIT ?", (SOLO_PASS, group_id, min_runs, limit)).fetchall()
+    return [{"list_id": r["id"], "title": r["title"], "kind": r["kind"],
+             "book": (r["source"] or "").strip(), "runs": r["runs"],
+             "who": r["who"], "pct": int(round(r["pct"])),
+             "passes": r["passes"]} for r in rows]
+
+
+def quiet_strugglers(db, group_id):
+    """Students the homework view cannot see.
+
+    view_overview finds the ones who stop handing work in. These are the
+    opposite: the homework arrives, so nothing is flagged, but the words are
+    not going in. Ordered worst first.
+    """
+    now_iso = iso(now())
+    quiet_before = iso(now() - timedelta(days=QUIET_DAYS))
+    out = []
+    for s in db.execute(
+            "SELECT * FROM students WHERE active=1 AND group_id IS ?"
+            " ORDER BY name", (group_id,)).fetchall():
+        p = db.execute(
+            "SELECT COUNT(*) words, COALESCE(SUM(seen),0) seen,"
+            "       COALESCE(SUM(correct),0) correct,"
+            "       SUM(CASE WHEN next_due <= ? THEN 1 ELSE 0 END) overdue,"
+            "       MAX(last_seen) last"
+            "  FROM word_progress WHERE student_id=?",
+            (now_iso, s["id"])).fetchone()
+        if not p["words"]:
+            continue
+        pct = int(round(100.0 * p["correct"] / p["seen"])) if p["seen"] else 0
+        overdue = p["overdue"] or 0
+        quiet = not p["last"] or p["last"] < quiet_before
+        stats = student_stats(db, s["id"])
+        reasons = []
+        if p["seen"] >= 40 and pct <= RETEACH_HARD:
+            reasons.append("%d%% right on %d answers" % (pct, p["seen"]))
+        if overdue >= OVERDUE_MANY:
+            reasons.append("%d words due for revision" % overdue)
+        if quiet:
+            reasons.append("nothing since %s" % (p["last"] or "never")[:10])
+        if not reasons:
+            continue
+        out.append({"id": s["id"], "name": s["name"], "avatar": s["avatar"],
+                    "pct": pct, "seen": p["seen"], "overdue": overdue,
+                    "last": p["last"], "quiet": quiet, "reasons": reasons,
+                    # the point of the page: homework is fine, so nothing
+                    # else on the site is going to mention this student
+                    "homework_fine": not stats["at_risk"],
+                    "average": stats["average"]})
+    out.sort(key=lambda r: (not r["homework_fine"], r["pct"], -r["overdue"]))
+    return out
+
+
+def reteach(db, group_id):
+    """Everything the reteaching page needs for one class."""
+    return {"words": reteach_words(db, group_id),
+            "steps": reteach_steps(db, group_id),
+            "students": quiet_strugglers(db, group_id)}
+
+
 def vocab_stats(db, student_id):
     """A word counts as known once it has been recalled 3 times in a row."""
     rows = db.execute(

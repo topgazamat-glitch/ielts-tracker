@@ -1629,3 +1629,19 @@ main.portal:has(.booksheet) { max-width: 940px; }
   .rail .fill, .rail .car { transition: none; }
   .rail .car.bump { animation: none; }
 }
+
+/* ------------------------------------------------- what to reteach
+
+   One number carries this page: the share of answers a class gets right.
+   It is read down a column, so it is tabular and it is coloured, because
+   the teacher is scanning for the bad ones rather than reading them all. */
+
+.pct { display: inline-block; min-width: 46px; text-align: right;
+  padding: 2px var(--sp-2); border-radius: var(--r-full);
+  font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; }
+.pct-bad { background: var(--warn-soft); color: var(--warn); }
+.pct-ok { background: #e4f8ee; color: #06713f; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pct-ok { background: #123324; color: #7fd9ab; }
+}
+:root[data-theme="dark"] .pct-ok { background: #123324; color: #7fd9ab; }

@@ -59,7 +59,7 @@ def page(title, body, active="", music=False):
 <header class="top">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
-{nav('/ratings', 'Progress')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
+{nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}
 {nav('/settings', 'Settings')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
@@ -4274,6 +4274,129 @@ table anyone can win &mdash; it asks nothing about how strong they already were.
 
 
 
+def view_reteach(req, db):
+    """What to put on the board on Monday, read out of the answers.
+
+    Everything else on this site reports what a student did. This reports
+    what they got wrong, which is the only part a lesson can act on.
+    """
+    gid = req["query"].get("group", [None])[0]
+    gid = int(gid) if gid and gid.isdigit() else None
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    if gid is None and groups:
+        gid = groups[0]["id"]
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    tabs = ('<div class="tabs">'
+            + "".join(tab(f'/reteach?group={g["id"]}', g["name"], gid == g["id"])
+                      for g in groups) + "</div>")
+    if not groups:
+        return html_response(page("Reteach", "<h1>Reteach</h1>"
+                                  "<p class='sub'>No classes yet.</p>", "Reteach"))
+
+    r = core.reteach(db, gid)
+    name = next((g["name"] for g in groups if g["id"] == gid), "")
+
+    # ---- the words
+    if r["words"]:
+        rows = ""
+        for w in r["words"]:
+            bar = int(round(w["pct"]))
+            rows += (f'<tr><td><strong>{E(w["term"])}</strong>'
+                     f'<div class="sub">{E(w["answer"])}</div></td>'
+                     f'<td class="sub">{E(w["list"])}</td>'
+                     f'<td class="num">{w["who"]}</td>'
+                     f'<td class="num">{w["seen"]}</td>'
+                     f'<td class="num"><span class="pct pct-bad">{bar}%</span></td>'
+                     f'</tr>')
+        words = (f'<div class="tablewrap"><table class="rank">'
+                 f'<tr><th>Word</th><th>From</th><th class="num">Students</th>'
+                 f'<th class="num">Answers</th><th class="num">Right</th></tr>'
+                 f'{rows}</table></div>'
+                 f'<p class="sub gap-2">A word appears here once at least '
+                 f'{core.RETEACH_MIN_WHO} students have met it '
+                 f'{core.RETEACH_MIN_SEEN} times between them and the class is '
+                 f'getting it right {core.RETEACH_HARD}% of the time or less.</p>')
+    else:
+        words = ('<div class="card"><p class="flush">Nothing to report yet. '
+                 'Words appear here once the class has answered them enough '
+                 'times for the figure to mean anything.</p></div>')
+
+    # ---- the steps
+    if r["steps"]:
+        rows = ""
+        for s in r["steps"]:
+            cls = "pct-bad" if s["pct"] < core.SOLO_PASS else "pct-ok"
+            rows += (f'<tr><td><a href="/vocab/{s["list_id"]}">'
+                     f'{E(s["title"])}</a>'
+                     + (f'<div class="sub">{E(s["book"])}</div>' if s["book"] else "")
+                     + f'</td><td class="num">{s["who"]}</td>'
+                     f'<td class="num">{s["runs"]}</td>'
+                     f'<td class="num">{s["passes"]}</td>'
+                     f'<td class="num"><span class="pct {cls}">{s["pct"]}%</span>'
+                     f'</td></tr>')
+        steps = (f'<div class="tablewrap"><table class="rank">'
+                 f'<tr><th>Step</th><th class="num">Students</th>'
+                 f'<th class="num">Rounds</th><th class="num">Passed</th>'
+                 f'<th class="num">Average</th></tr>{rows}</table></div>'
+                 f'<p class="sub gap-2">Passing a step is {core.SOLO_PASS}% right. '
+                 f'A step needs four rounds before it is judged.</p>')
+    else:
+        steps = ('<div class="card"><p class="flush">Nobody in this class has '
+                 'finished enough rounds in Play yet.</p></div>')
+
+    # ---- the students
+    # When nobody in the class has opened Play for a fortnight, every name
+    # qualifies and the list stops being a list of people. That is a fact
+    # about the class, so it is said once rather than twenty times.
+    only_quiet = [x for x in r["students"] if x["reasons"] == [
+        "nothing since %s" % (x["last"] or "never")[:10]]]
+    total = db.execute("SELECT COUNT(*) c FROM students WHERE active=1"
+                       " AND group_id IS ?", (gid,)).fetchone()["c"]
+    herd = ""
+    if total and len(only_quiet) > total / 2:
+        newest = max((x["last"] or "") for x in only_quiet)[:10]
+        herd = (f'<div class="card"><p class="flush">'
+                f'<strong>{len(only_quiet)} of {total} students</strong> in this '
+                f'class have not answered anything in Play since {E(newest)}. '
+                f'That is a habit of the whole class rather than a worry about '
+                f'individuals, so they are not listed one by one.</p></div>')
+        r["students"] = [x for x in r["students"] if x not in only_quiet]
+
+    if r["students"]:
+        cards = ""
+        for s in r["students"]:
+            why = " &middot; ".join(E(x) for x in s["reasons"])
+            flag = ('<span class="pill watch">homework looks fine</span>'
+                    if s["homework_fine"] else
+                    '<span class="pill mute">already flagged on Overview</span>')
+            cards += (f'<div class="testfile"><div>'
+                      f'<a href="/students/{s["id"]}"><strong>'
+                      f'{E(s["avatar"] or "")} {E(s["name"])}</strong></a> {flag}'
+                      f'<div class="sub">{why}</div></div></div>')
+        students = herd + f'<div class="card">{cards}</div>'
+    else:
+        students = herd or ('<div class="card"><p class="flush">Nobody in this '
+                            'class is slipping quietly.</p></div>')
+
+    body = f"""<h1>What to reteach</h1>
+<p class="sub">Class {E(name)} &middot; read out of every answer the class has
+given in Play, in a battle and in the live game. This is the only page here
+that reports what they got <em>wrong</em>.</p>
+{tabs}
+<h2 class="gap-4">Words this class keeps getting wrong</h2>
+{words}
+<h2 class="gap-4">Steps that are not landing</h2>
+{steps}
+<h2 class="gap-4">Students slipping quietly</h2>
+<p class="sub">The Overview finds students who stop handing work in. These are
+the other kind: the work arrives, so nothing flags them, but the words are not
+going in.</p>
+{students}"""
+    return html_response(page("Reteach", body, "Reteach"))
+
+
 def view_questions(req, db):
     rows = ""
     for q in db.execute(
@@ -6752,6 +6875,7 @@ ROUTES = [
     ("GET",  r"^/prompts/units$", units_json),
     ("POST", r"^/prompts/new$", act_new_prompt),
     ("POST", r"^/prompts/delete$", act_delete_prompt),
+    ("GET",  r"^/reteach$", view_reteach),
     ("GET",  r"^/tests$", view_tests),
     ("GET",  r"^/tests/(\d+)$", view_test),
     ("POST", r"^/tests/(\d+)/key$", act_test_key),
