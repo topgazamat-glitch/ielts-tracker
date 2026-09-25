@@ -71,7 +71,8 @@ SIZES = {
 }
 
 TEACHER_PAGES = [
-    "/", "/queue", "/homework", "/ratings", "/championship", "/assignments",
+    "/", "/queue", "/homework", "/ratings", "/reteach", "/records", "/kpi",
+    "/championship", "/assignments", "/settings",
     "/groups", "/roster", "/materials", "/vocab", "/tests", "/music",
     "/play", "/questions",
 ]

@@ -55,14 +55,48 @@ def demo_banner():
             '<button class="tab">Leave the demo</button></form></div>')
 
 
+# The site grew one link at a time until eighteen of them wrapped to two rows
+# and nobody could tell the day's work from the once-a-term pages. Five
+# sections now, each a question the teacher actually asks: what is on today,
+# what has come in, how are the students, what do I teach with, what does it
+# pay. Every route is unchanged - only where the door to it is.
+SECTIONS = [
+    ("Today", "/", [("/", "Overview")]),
+    ("Homework", "/queue", [("/queue", "Grade"), ("/homework", "Homework"),
+                            ("/assignments", "Assignments")]),
+    ("Students", "/roster", [("/roster", "Students"), ("/groups", "Groups"),
+                             ("/ratings", "Progress"), ("/reteach", "Reteach"),
+                             ("/records", "Records"), ("/questions", "Questions"),
+                             ("/championship", "League")]),
+    ("Materials", "/materials", [("/materials", "Materials"), ("/vocab", "Vocabulary"),
+                                 ("/tests", "Tests"), ("/play", "Play"),
+                                 ("/music", "Music")]),
+    ("KPI", "/kpi", [("/kpi", "KPI")]),
+]
+SECTION_OF = {label: name for name, _home, pages in SECTIONS for _href, label in pages}
+
+
 def page(title, body, active="", music=False):
     """The teacher's shell. Silent unless a page asks otherwise: marking
     for three hours should not come with a soundtrack - but the song of the
     day is the teacher's own choice, so that one plays here too."""
     tune = song_tag()
-    def nav(href, label):
-        cls = ' class="on"' if active == label else ""
+    section = SECTION_OF.get(active, "")
+
+    def link(href, label, on):
+        cls = ' class="on"' if on else ""
         return f'<a href="{href}"{cls}>{label}</a>'
+
+    primary = "".join(link(home, name, name == section)
+                      for name, home, _pages in SECTIONS)
+    # The second row exists only where a section has more than one page, so
+    # Today and KPI do not carry an empty strip under the name.
+    sub = ""
+    for name, _home, pages in SECTIONS:
+        if name == section and len(pages) > 1:
+            links = "".join(link(h, l, l == active) for h, l in pages)
+            sub = f'<nav class="pages" aria-label="{name}">{links}</nav>'
+    settings_on = ' class="on"' if active == "Settings" else ""
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -70,14 +104,13 @@ def page(title, body, active="", music=False):
 <title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head><body>
 {demo_banner()}<header class="top">
+<div class="bar">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
-<nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
-{nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/records', 'Records')}{nav('/kpi', 'KPI')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
-{nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}
-{nav('/settings', 'Settings')}</nav>
+<nav class="sections" aria-label="Sections">{primary}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
   ' onclick="Music.toggle()" title="Music"></button>' if (music or tune) else ''}
-<a href="/logout">Sign out</a></span></header>
+<a href="/settings"{settings_on}>Settings</a><a href="/logout">Sign out</a></span>
+</div>{sub}</header>
 <main>{body}</main>
 {tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
 <script src="/static/nav.js" defer></script>
@@ -214,15 +247,21 @@ def view_overview(req, db):
         risk_html = '<div class="card"><p class="sub">Nobody is flagged. '
         risk_html += "Students appear here after two consecutive misses or a falling trend.</p></div>"
 
+    # Housekeeping is real, but it is not the day's work: it sits last, in
+    # one card, instead of a button and two warnings scattered up the page.
+    worry = core.password_worry()
+    housekeeping = (
+        '<h2>Housekeeping</h2><div class="card">'
+        + disk_note() + disk_breakdown_note()
+        + (f'<p class="flash err">{E(worry)}</p>' if worry else "")
+        + cleanup_button(db)
+        + '<p class="sub flush gap-3">Everything here lives on one disk. '
+          '<a class="linky" href="/backup">Download a copy of the database</a> '
+          'and keep it somewhere else &mdash; the bot sends you one every day '
+          'as well.</p></div>')
     body = f"""{today_block(db, pending)}
-{cleanup_button(db)}{disk_breakdown_note()}
 <h2>Where everyone stands</h2>{cards}<h2>Needs attention</h2>{risk_html}
-{disk_note()}
-{f'<p class="flash err gap-5">{E(core.password_worry())}</p>'
-  if core.password_worry() else ''}
-<p class="sub gap-5">Everything here lives on one disk.
-<a class="linky" href="/backup">Download a copy of the database</a> and keep it
-somewhere else &mdash; the bot sends you one every day as well.</p>"""
+{housekeeping}"""
     return html_response(page("Overview", body, "Overview"))
 
 
@@ -309,9 +348,9 @@ def disk_breakdown_note():
 
 def cleanup_button(db):
     last = core.meta_get(db, "last_cleanup", "")
-    return ('<form method="post" action="/cleanup" class="gap-2">'
+    return ('<form method="post" action="/cleanup" class="cleanup">'
             '<button class="ghost">Free up space now</button>'
-            '<span class="sub">&nbsp;Lets go of the full-size photographs of '
+            '<span class="sub flush">Lets go of the full-size photographs of '
             'work marked more than %s days ago; they come back from Telegram '
             'when opened.%s</span></form>'
             % (core.load_config().get("photo_keep_days", 10),
@@ -1614,20 +1653,26 @@ def view_roster(req, db):
               + "</div>")
 
     site = core.meta_get(db, "site_url")
-    where_note = (f'Student links use <code>{E(site)}</code>' if site
-                  else '<span style="color:var(--warn)">The public address has not been '
-                       'detected yet &mdash; reload this page once on the real address.</span>')
+    # The address only matters when it is missing; when it is known it is a
+    # footnote, and when it is not it is the one thing to fix before sharing.
+    where_note = (f'<p class="flash warn">The public address has not been detected '
+                  f'yet &mdash; open this page once on the real address, or student '
+                  f'links will not work.</p>' if not site else "")
+    counted = f"{len(people)} shown"
+    if site:
+        counted += f' &middot; student links use <code>{E(site)}</code>'
 
     body = f"""<h1>Students</h1>
-<p class="sub">{len(people)} shown. {where_note}</p>
+<p class="sub">{counted}</p>
+{where_note}
 {tabs}
-{states}
-<form method="get" action="/roster" class="inline" style="margin:12px 0">
+<div class="toolbar">{states}
+<form method="get" action="/roster" class="inline">
 <input type="hidden" name="group" value="{gid or ''}">
 <input type="hidden" name="show" value="{E(show)}">
-<label class="f">Find<input name="q" id="rq" value="{E(q)}" placeholder="type a name"></label>
-<label class="f pushed">&nbsp;<button class="ghost">Search</button></label>
-</form>
+<input name="q" id="rq" value="{E(q)}" placeholder="Find a name" aria-label="Find a name">
+<button class="ghost">Search</button>
+</form></div>
 <form method="post" action="/students/bulk" id="bulk"></form>
 <div class="bulkbar" id="bulkbar" hidden>
   <span><b id="npicked">0</b> selected</span>
@@ -1641,7 +1686,7 @@ def view_roster(req, db):
 <th>Name</th><th>Class</th><th>Average</th><th>Graded</th><th>Missed</th>
 <th>Last seen</th><th></th></tr>
 {rows or '<tr><td colspan=8 class="sub">Nobody matches.</td></tr>'}</table></div>
-<h2 style="margin-top:28px">Add a student by hand</h2>
+<h2>Add a student by hand</h2>
 <div class="card"><form method="post" action="/students/new" class="inline">
 <label class="f">Name<input name="name" required placeholder="For someone not on Telegram"></label>
 <label class="f">Class<select name="group_id">{opts}</select></label>
@@ -6721,15 +6766,15 @@ published until every answer has been set.</p>
 <div class="tablewrap"><table><tr><th>Test</th><th>Level</th><th>Questions</th>
 <th>Answer key</th><th></th><th></th></tr>
 {body_rows or '<tr><td colspan=6 class="sub">None yet.</td></tr>'}</table></div>
-<h2 style="margin-top:26px">Load a test</h2>
+<h2>Load a test</h2>
 <div class="card"><form method="post" action="/tests/new" enctype="multipart/form-data"
  class="inline">
 <label class="f">File<input type="file" name="file" accept=".json,application/json" required></label>
 <label class="f pushed">&nbsp;<button>Load it</button></label>
 </form>
-<p class="sub gap-3">Made with
-<span class="kbd">python3 import_tests.py "full book 1.docx" --test 1</span>, which reads
-the Reading section out of the book. Load the file it writes here.</p></div>"""
+<p class="sub gap-3">A test file is prepared from the practice book on the computer
+that runs the site. Load the file it produces here; the answer key is set on the
+test's own page.</p></div>"""
     return html_response(page("Digital tests", body, "Tests"))
 
 
@@ -6990,8 +7035,9 @@ def view_settings(req, db):
                 ' onsubmit="return confirm(\'Let go of the full-size photos '
                 'older than that? They come back from Telegram when opened.\')">'
                 '<input type="hidden" name="what" value="photos">'
-                '<label class="f">older than<input type="number" name="days"'
-                ' value="30" min="1" max="3650" style="width:80px"> days</label>'
+                '<label class="f">older than<span class="with-unit">'
+                '<input type="number" name="days" value="30" min="1" max="3650">'
+                ' days</span></label>'
                 '<label class="f pushed">&nbsp;<button class="ghost">'
                 'Let them go</button></label></form>')
         elif r["key"] != "materials":
@@ -7015,8 +7061,8 @@ def view_settings(req, db):
     fields = ""
     for key, label, unit, help_ in core.EDITABLE:
         fields += (f'<label class="f">{E(label)}'
-                   f'<input type="number" name="{key}" value="{E(str(cfg.get(key, "")))}"'
-                   f' style="width:110px"> {E(unit)}'
+                   f'<span class="with-unit"><input type="number" name="{key}"'
+                   f' value="{E(str(cfg.get(key, "")))}"> {E(unit)}</span>'
                    f'<span class="sub">{E(help_)}</span></label>')
     boxes = ""
     for key, label, help_ in core.SWITCHES:

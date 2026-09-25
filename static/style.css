@@ -120,20 +120,19 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------------------------------------------------------------- app bar */
 
+/* Two rows with two jobs. The top row names the five sections and never
+   changes shape; the row beneath lists the pages of the section you are in.
+   Eighteen links on one row used to wrap, scroll or cut off depending on the
+   screen - five words fit everywhere, and the second row is short by design. */
 header.top {
-  /* Fourteen sections never fitted beside the name on one line: the strip
-     scrolled, its scrollbar was hidden, and the last links were simply cut
-     off mid-word on every screen. The navigation now takes a row of its own
-     below the name, where all of it fits on a laptop and swipes on a phone. */
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: var(--sp-5);
-  flex-wrap: wrap; row-gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-5);
-  min-height: 60px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: saturate(1.6) blur(12px);
-  -webkit-backdrop-filter: saturate(1.6) blur(12px);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
+}
+header.top .bar {
+  display: flex; align-items: stretch; gap: var(--sp-5);
+  height: 56px; padding: 0 var(--sp-5);
+  max-width: 1120px; margin: 0 auto; box-sizing: border-box;
 }
 
 header.top .brand {
@@ -149,45 +148,71 @@ header.top .brand .mark {
 }
 
 header.top nav {
-  /* On a desktop it wraps to a second line rather than scrolling: a strip
-     with no visible scrollbar reads as a bug, and adding a fifteenth section
-     was enough to cut the last one off again at 1280. A touch screen keeps
-     the swipe strip below, where fifteen wrapped links would be a header
-     taller than the page. */
-  order: 3; flex-basis: 100%;
-  display: flex; gap: var(--sp-1); align-items: center;
-  flex-wrap: wrap; row-gap: var(--sp-1);
-  margin-inline: 0;
-}
-/* Where the row still cannot hold every link, the last one fades rather than
-   ending in a clean cut, so it reads as "keep swiping" and not as a bug. */
-@media (max-width: 1160px) {
-  header.top nav {
-    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
-    mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
-    padding-right: var(--sp-5);
-  }
+  display: flex; align-items: stretch; gap: var(--sp-1);
+  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
 }
 header.top nav::-webkit-scrollbar { display: none; }
 
-header.top nav a {
-  color: var(--ink-2);
-  padding: var(--sp-2) var(--sp-3);
+/* Sections are words with a rule under the current one - the language of a
+   site's top level - so they cannot be confused with the pills beneath. */
+header.top nav.sections a {
+  display: flex; align-items: center;
+  padding: 0 var(--sp-3);
+  color: var(--ink-2); font-size: 14px; font-weight: 500; white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color .14s var(--ease), border-color .14s var(--ease);
+}
+header.top nav.sections a:hover { color: var(--ink); text-decoration: none; }
+header.top nav.sections a.on { color: var(--ink); font-weight: 600;
+  border-bottom-color: var(--accent); }
+
+header.top .right {
+  margin-left: auto; display: flex; align-items: center; gap: var(--sp-2);
+  white-space: nowrap;
+}
+header.top .right a {
+  color: var(--ink-3); font-size: 13px; padding: var(--sp-1) var(--sp-2);
   border-radius: var(--r-sm);
-  font-size: 14px; font-weight: 500; white-space: nowrap;
+}
+header.top .right a:hover { color: var(--ink); background: var(--line-soft);
+  text-decoration: none; }
+header.top .right a.on { color: var(--accent); font-weight: 600; }
+
+/* The pages of the current section: small pills on a quieter band, so the
+   eye reads "inside Students" before it reads the page names. */
+header.top nav.pages {
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-5) var(--sp-2);
+  max-width: 1120px; margin: 0 auto; box-sizing: border-box;
+}
+header.top nav.pages a {
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--r-full);
+  color: var(--ink-2); font-size: 13px; font-weight: 500; white-space: nowrap;
   transition: background .14s var(--ease), color .14s var(--ease);
 }
-header.top nav a:hover { background: var(--line-soft); color: var(--ink); text-decoration: none; }
-header.top nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+header.top nav.pages a:hover { background: var(--line-soft); color: var(--ink);
+  text-decoration: none; }
+header.top nav.pages a.on { background: var(--accent-soft); color: var(--accent);
+  font-weight: 600; }
 
-header.top .right { margin-left: auto; padding-left: var(--sp-4);
-  white-space: nowrap; }
-header.top .right a { color: var(--ink-3); font-size: 13px; }
-
+/* A phone shows the name and the sign-out on the first line and the five
+   sections on the next, each row swiping if it must; the fade at the edge is
+   what says "there is more", since the scrollbar is hidden. */
 @media (max-width: 720px) {
-  header.top { height: auto; flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
-  header.top nav { order: 3; width: 100%; margin: 0; padding-bottom: var(--sp-1); }
-  header.top .right { margin-left: auto; padding: 0; }
+  header.top .bar {
+    flex-wrap: wrap; height: auto; gap: 0 var(--sp-3);
+    padding: var(--sp-2) var(--sp-4) 0;
+  }
+  header.top .brand { height: 40px; }
+  header.top .right { height: 40px; }
+  header.top nav.sections { order: 3; flex-basis: 100%; height: 40px;
+    margin: 0 calc(-1 * var(--sp-4)); padding: 0 var(--sp-2); }
+  header.top nav.sections a { padding: 0 var(--sp-2); font-size: 13px; }
+  header.top nav.pages { padding: var(--sp-2) var(--sp-4); }
+  header.top nav {
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
+  }
 }
 
 /* ------------------------------------------------------------------ layout */
@@ -340,6 +365,9 @@ td a:hover { color: var(--accent); }
 .inline input[type=file] { width: 100%; }
 label.f { display: flex; flex-direction: column; gap: var(--sp-1); font-size: 13px;
   font-weight: 540; color: var(--ink-3); }
+/* a number and its unit on one line: "10 days", not "10" over "days" */
+.with-unit { display: flex; align-items: center; gap: var(--sp-2); }
+.with-unit input { width: 110px; }
 
 input, select, textarea, button {
   font: inherit; color: var(--ink);
@@ -507,6 +535,26 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
   margin-bottom: var(--sp-4); font-size: 14px; font-weight: 500;
 }
 .flash.err { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+.flash.warn { background: var(--gold-soft); color: var(--ink); border-color: var(--gold); }
+
+/* A page's controls sit on one line: the state switch on the left, the
+   search on the right. Stacked strips read as three different pages. */
+.toolbar {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+.toolbar .tabs { margin-bottom: 0; }
+
+/* the one maintenance action on the overview: button, then its explanation */
+form.cleanup { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin: 0; }
+form.cleanup .sub { flex: 1 1 320px; }
+.toolbar form.inline { margin: 0 0 0 auto; gap: var(--sp-2); align-items: center; }
+.toolbar form.inline input { width: 200px; max-width: 100%; }
+@media (max-width: 720px) {
+  .toolbar form.inline { margin-left: 0; width: 100%; }
+  .toolbar form.inline input { flex: 1; width: auto; }
+}
 
 .login {
   max-width: 360px; margin: 14vh auto 0;
@@ -783,13 +831,10 @@ button.ghost.danger:hover { background: var(--warn-soft); }
    brand runs through the mark, the buttons and whatever is currently selected.
    ========================================================================== */
 
-header.top { background: var(--surface); backdrop-filter: none; }
 header.top .brand .mark {
   width: 28px; height: 28px; border-radius: 9px; font-size: 14px;
   background: linear-gradient(135deg, var(--brand-deep), var(--brand));
 }
-header.top nav a.on { background: var(--accent-soft); color: var(--brand);
-  font-weight: 600; }
 
 button {
   background: linear-gradient(100deg, var(--brand-deep) 0%, var(--brand) 62%,
@@ -1004,7 +1049,6 @@ label.check input { width: 17px; height: 17px; accent-color: var(--brand); }
 .musicbtn:hover { filter: none; border-color: var(--accent-line); color: var(--brand); }
 .musicbtn.on { background: var(--accent-soft); color: var(--brand);
   border-color: var(--accent-line); }
-header.top .right { display: flex; align-items: center; gap: var(--sp-1); }
 
 /* ------------------------------------------------------------- profile */
 
@@ -1179,6 +1223,8 @@ ul.attn li {
 }
 ul.attn li:last-child { border-bottom: 0; }
 ul.attn a { font-weight: 600; }
+/* a .sub inside a row is a label, not a paragraph: no paragraph margin */
+ul.attn li .sub { margin: 0; font-size: 13px; }
 
 /* ------------------------------------------ homework batches */
 .card.batch { padding: var(--sp-3) var(--sp-4); }
@@ -1206,6 +1252,8 @@ button.ghost.danger { color: var(--red); border-color: var(--red); }
   font-size: 13px;
 }
 .bulkbar form { margin: 0; }
+/* display:flex would otherwise beat the hidden attribute the script sets */
+.bulkbar[hidden] { display: none; }
 #roster td { vertical-align: middle; }
 
 /* one practice test: paper, audio and answers together */
@@ -1338,12 +1386,6 @@ button.mk.one { min-width: 28px; padding: var(--sp-1) var(--sp-2); font-size: 12
   }
   button.mk, button.mk.one { min-width: 44px; }
 
-  /* Fifteen sections wrapped would be a header taller than the page, so on a
-     touch screen the navigation stays one line and swipes. */
-  header.top nav {
-    flex-wrap: nowrap;
-    overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
-  }
   .chip, .tabs .tab { padding-left: var(--sp-3); padding-right: var(--sp-3); }
   .markpad, .scorepad, .chips { gap: var(--sp-2); }
 
