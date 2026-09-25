@@ -4640,6 +4640,186 @@ going in.</p>
     return html_response(page("Reteach", body, "Reteach"))
 
 
+def scatter(points, x_label, y_label, width=560, height=300):
+    """A scatter plot as inline SVG.
+
+    Drawn by hand rather than with a library because the site loads none,
+    and a chart that needs a network to appear is no use on a phone in a
+    classroom. Every axis label names a value the chart actually reaches.
+    """
+    pts = [(p[0], p[1], p[2]) for p in points
+           if p[0] is not None and p[1] is not None]
+    pad_l, pad_b, pad_t, pad_r = 44, 34, 12, 12
+    w, h = width - pad_l - pad_r, height - pad_t - pad_b
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    # A chart drawn from three points, or from a column where every student
+    # has the same figure, invents an axis out of nothing: it reads 22, 23,
+    # 24 and looks like a finding. If there is nothing to show, show nothing
+    # and let the words underneath do the work.
+    if (len(pts) < core.ENOUGH or len(set(xs)) < 2 or len(set(ys)) < 2):
+        return ""
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+
+    def px(v):
+        return pad_l + w * (v - x0) / (x1 - x0)
+
+    def py(v):
+        return pad_t + h - h * (v - y0) / (y1 - y0)
+
+    grid = ""
+    for i in range(5):
+        y = pad_t + h * i / 4.0
+        val = y1 - (y1 - y0) * i / 4.0
+        grid += (f'<line x1="{pad_l}" y1="{y:.1f}" x2="{pad_l + w}" '
+                 f'y2="{y:.1f}" class="gridline"/>'
+                 f'<text x="{pad_l - 8}" y="{y + 4:.1f}" class="axis" '
+                 f'text-anchor="end">{val + 0:.0f}</text>')
+    for i in range(3):
+        x = pad_l + w * i / 2.0
+        val = x0 + (x1 - x0) * i / 2.0
+        grid += (f'<text x="{x:.1f}" y="{pad_t + h + 20}" class="axis" '
+                 f'text-anchor="middle">{val:.0f}</text>')
+
+    dots = ""
+    for x, y, who in pts:
+        cls = "dot left" if who.get("left") else "dot"
+        dots += (f'<circle cx="{px(x):.1f}" cy="{py(y):.1f}" r="5" '
+                 f'class="{cls}"><title>{E(who["name"])} — '
+                 f'{E(x_label)} {x:g}, {E(y_label)} {y:g}</title></circle>')
+
+    return (f'<svg class="chart" viewBox="0 0 {width} {height}" '
+            f'role="img" aria-label="{E(x_label)} against {E(y_label)}">'
+            f'{grid}'
+            f'<line x1="{pad_l}" y1="{pad_t + h}" x2="{pad_l + w}" '
+            f'y2="{pad_t + h}" class="axisline"/>'
+            f'<line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" '
+            f'y2="{pad_t + h}" class="axisline"/>{dots}'
+            f'<text x="{pad_l + w / 2:.0f}" y="{height - 2}" class="axis" '
+            f'text-anchor="middle">{E(x_label)}</text>'
+            f'<text x="12" y="{pad_t + h / 2:.0f}" class="axis" '
+            f'text-anchor="middle" transform="rotate(-90 12 '
+            f'{pad_t + h / 2:.0f})">{E(y_label)}</text></svg>')
+
+
+def bars(pairs, width=560, height=240):
+    """A small bar chart, for counts rather than pairs."""
+    if not pairs:
+        return '<p class="sub">Nothing to draw yet.</p>'
+    top = max(v for _k, v in pairs) or 1
+    n = len(pairs)
+    pad_l, pad_b, pad_t = 34, 46, 10
+    w = width - pad_l - 12
+    bw = w / max(1, n)
+    out = ""
+    for i, (k, v) in enumerate(pairs):
+        bh = (height - pad_t - pad_b) * v / top
+        x = pad_l + i * bw + bw * 0.15
+        y = height - pad_b - bh
+        out += (f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw * 0.7:.1f}" '
+                f'height="{bh:.1f}" class="bar"/>'
+                f'<text x="{x + bw * 0.35:.1f}" y="{y - 4:.1f}" class="axis" '
+                f'text-anchor="middle">{v}</text>'
+                f'<text x="{x + bw * 0.35:.1f}" y="{height - pad_b + 16:.1f}" '
+                f'class="axis" text-anchor="middle">{E(str(k)[:12])}</text>')
+    return (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img">'
+            f'{out}</svg>')
+
+
+def finding(c):
+    """What the numbers are allowed to say."""
+    cls = {"clear": "good", "nothing": "mute", "few": "mute",
+           "flat": "mute"}.get(c["verdict"], "mute")
+    head = {"clear": "There is something here", "nothing": "Nothing clear",
+            "few": "Not enough yet", "flat": "Nothing to compare"}[c["verdict"]]
+    return (f'<p class="flush"><span class="pill {cls}">{head}</span></p>'
+            f'<p class="sub gap-2">{E(c["says"])}</p>')
+
+
+def charts_panel(db, gid):
+    pts = core.cycle_points(db, gid)
+    here = [p for p in pts if p["exam"] is not None]
+
+    # 1. effort against learning
+    effort = [(p["completion"], p["exam"], p) for p in pts
+              if p["completion"] is not None and p["exam"] is not None]
+    c1 = core.correlate([(a, b) for a, b, _ in effort])
+
+    # 2. going quiet against leaving
+    quiet_left = [p["quiet_days"] for p in pts
+                  if p["left"] and p["quiet_days"] is not None]
+    quiet_here = [p["quiet_days"] for p in pts
+                  if not p["left"] and p["quiet_days"] is not None]
+    c2 = core.correlate([(p["quiet_days"], 1 if p["left"] else 0) for p in pts
+                         if p["quiet_days"] is not None])
+
+    # 3. class tests against the exam
+    tests = [(p["class_tests"], p["exam"], p) for p in pts
+             if p["class_tests"] is not None and p["exam"] is not None]
+    c3 = core.correlate([(a, b) for a, b, _ in tests])
+
+    reasons = {}
+    for p in pts:
+        if p["left"] and p["reason"]:
+            reasons[core.REASON_LABEL.get(p["reason"], p["reason"])] = \
+                reasons.get(core.REASON_LABEL.get(p["reason"], p["reason"]), 0) + 1
+
+    def avg(xs):
+        return round(sum(xs) / len(xs), 1) if xs else None
+
+    quiet_line = ""
+    if quiet_left and quiet_here:
+        quiet_line = (f'<p class="sub gap-2">The ones who left had been quiet '
+                      f'for <strong>{avg(quiet_left)} days</strong> on average. '
+                      f'The ones still here: <strong>{avg(quiet_here)}</strong>.'
+                      f'</p>')
+    elif not quiet_left:
+        quiet_line = ('<p class="sub gap-2">Nobody has been recorded as '
+                      'leaving yet, so there is nothing to compare the quiet '
+                      'ones against. This chart is the reason the leaver '
+                      'register is worth keeping up.</p>')
+
+    return f"""
+<h2 class="gap-4">Homework against the exam</h2>
+<div class="card">
+{scatter(effort, "homework done, %", "exam, %")}
+{finding(c1)}
+<p class="sub gap-2">Every teacher assumes they know the answer to this one.
+Few have seen it for their own students.</p>
+</div>
+
+<h2 class="gap-4">Class tests against the exam</h2>
+<div class="card">
+{scatter(tests, "class tests, %", "exam, %")}
+{finding(c3)}
+<p class="sub gap-2">If these move together, a class test is an early
+warning of the exam result and you have weeks to act on it.</p>
+</div>
+
+<h2 class="gap-4">Going quiet, and leaving</h2>
+<div class="card">
+{scatter([(p["quiet_days"], 100 if p["left"] else 0, p) for p in pts
+          if p["quiet_days"] is not None],
+         "days since their last homework", "left (100) or still here (0)")}
+{finding(c2)}
+{quiet_line}
+</div>
+
+<h2 class="gap-4">Why they left</h2>
+<div class="card">
+{bars(sorted(reasons.items(), key=lambda kv: -kv[1])) if reasons else
+ '<p class="flush">Nothing recorded yet.</p>'}
+<p class="sub gap-2">Only some of these are yours to change. The split is on
+the Who left tab, and it is the difference between a retention figure that
+is fair to you and one that is not.</p>
+</div>
+
+<p class="sub gap-3">{len(here)} of {len(pts)} students have an exam result.
+A dot outlined in red is somebody who has left. Hover or tap a dot for the
+name.</p>"""
+
+
 def view_records(req, db):
     """The cycle: who is here, who left and why, and the marks along the way.
 
@@ -4665,6 +4845,8 @@ def view_records(req, db):
              + tab(f"/records?v=exams&amp;group={gid}", "Exams",
                    which == "exams")
              + tab("/records?v=leavers", "Who left", which == "leavers")
+             + tab(f"/records?v=charts&amp;group={gid}", "Charts",
+                   which == "charts")
              + "</div>")
     classes = ('<div class="tabs">'
                + "".join(tab(f'/records?v={which}&amp;group={g["id"]}',
@@ -4679,6 +4861,8 @@ def view_records(req, db):
         (gid,)).fetchall()
     if which == "exams":
         body = exams_panel(db, gid, students)
+    elif which == "charts":
+        body = charts_panel(db, gid)
     else:
         body = scores_panel(db, gid, students, q)
     return html_response(page("Records", f"""<h1>Records</h1>

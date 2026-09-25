@@ -2950,6 +2950,129 @@ def money(n, currency="so'm"):
                       currency)
 
 
+# ---------------------------------------------------------- what relates
+#
+# The honest part of this program. With twenty students you can find a
+# relationship between homework and exam results that is entirely chance,
+# and a teacher will believe it because a computer printed it. So the rule
+# here is that nothing is claimed until the numbers can carry the claim.
+#
+# Two-tailed critical values of r at p = 0.05, by degrees of freedom (n - 2).
+# Hard-coded because this program has no scientific library and does not
+# need one for a table that has not changed since Pearson.
+R_CRITICAL = {1: .997, 2: .950, 3: .878, 4: .811, 5: .754, 6: .707, 7: .666,
+              8: .632, 9: .602, 10: .576, 11: .553, 12: .532, 13: .514,
+              14: .497, 15: .482, 16: .468, 17: .456, 18: .444, 19: .433,
+              20: .423, 22: .404, 24: .388, 26: .374, 28: .361, 30: .349,
+              35: .325, 40: .304, 45: .288, 50: .273, 60: .250, 70: .232,
+              80: .217, 90: .205, 100: .195}
+ENOUGH = 8          # fewer pairs than this and nothing is said at all
+
+
+def _critical(df):
+    keys = sorted(R_CRITICAL)
+    for k in keys:
+        if df <= k:
+            return R_CRITICAL[k]
+    return R_CRITICAL[keys[-1]]
+
+
+def correlate(pairs):
+    """Pearson's r, and whether it is worth saying out loud.
+
+    Returns a verdict rather than a number on its own, because a number on
+    its own is what gets misread.
+    """
+    pairs = [(float(a), float(b)) for a, b in pairs
+             if a is not None and b is not None]
+    n = len(pairs)
+    if n < ENOUGH:
+        return {"n": n, "r": None, "verdict": "few",
+                "says": "Too few students to say anything yet. "
+                        "%d of the %d needed." % (n, ENOUGH)}
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxy = sum((x - mx) * (y - my) for x, y in pairs)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    if sxx <= 0 or syy <= 0:
+        return {"n": n, "r": None, "verdict": "flat",
+                "says": "Every student has the same figure, so there is "
+                        "nothing to compare."}
+    r = sxy / ((sxx ** 0.5) * (syy ** 0.5))
+    crit = _critical(max(1, n - 2))
+    strong = abs(r) >= crit
+    if not strong:
+        return {"n": n, "r": round(r, 2), "verdict": "nothing",
+                "says": "No clear relationship in these %d students. "
+                        "With this many, anything weaker than %.2f could "
+                        "easily be chance." % (n, crit)}
+    direction = "together" if r > 0 else "in opposite directions"
+    return {"n": n, "r": round(r, 2), "verdict": "clear",
+            "says": "These move %s (r = %.2f across %d students), and with "
+                    "this many that is unlikely to be chance."
+                    % (direction, r, n)}
+
+
+def cycle_points(db, group_id=None):
+    """One row per student: what they put in, what came out, and what
+    happened to them.
+
+    Everything the charts draw comes from here, so the joins are done once
+    and the drawing has nothing to decide.
+    """
+    sql = "SELECT * FROM students WHERE 1=1"
+    args = []
+    if group_id:
+        sql += " AND group_id=?"; args.append(group_id)
+    out = []
+    for s in db.execute(sql + " ORDER BY name", args).fetchall():
+        st = student_stats(db, s["id"])
+        marks = db.execute(
+            "SELECT AVG((punctuality + behaviour + participation) / 3.0) m,"
+            " COUNT(*) n FROM lesson_marks WHERE student_id=?",
+            (s["id"],)).fetchone()
+        tests = db.execute(
+            "SELECT AVG(x.score * 100.0 / t.max_score) m, COUNT(*) n"
+            " FROM class_test_scores x JOIN class_tests t ON t.id=x.test_id"
+            " WHERE x.student_id=? AND x.score IS NOT NULL",
+            (s["id"],)).fetchone()
+        exams = {}
+        for kind in ("mid", "final"):
+            row = db.execute(
+                "SELECT AVG(score * 100.0 / max_score) m FROM exam_results"
+                " WHERE student_id=? AND kind=? AND score IS NOT NULL",
+                (s["id"], kind)).fetchone()
+            exams[kind] = round(row["m"], 1) if row["m"] is not None else None
+        e = db.execute(
+            "SELECT * FROM enrolments WHERE student_id=?"
+            " ORDER BY id DESC LIMIT 1", (s["id"],)).fetchone()
+        quiet = None
+        last = db.execute(
+            "SELECT MAX(created_at) c FROM submissions WHERE student_id=?",
+            (s["id"],)).fetchone()["c"]
+        end = (e["ended_at"] if e and e["ended_at"] else iso(now()))
+        if last:
+            quiet = max(0, (parse(end) - parse(last)).days)
+        out.append({
+            "id": s["id"], "name": s["name"], "group_id": s["group_id"],
+            "active": s["active"],
+            "homework": st["average"],           # out of 10
+            "completion": st["completion"],      # %
+            "participation": round(marks["m"], 2) if marks["m"] is not None else None,
+            "participation_n": marks["n"],
+            "class_tests": round(tests["m"], 1) if tests["m"] is not None else None,
+            "class_tests_n": tests["n"],
+            "mid": exams["mid"], "final": exams["final"],
+            "exam": exams["final"] if exams["final"] is not None else exams["mid"],
+            "left": bool(e and e["ended_at"]),
+            "reason": e["reason"] if e else None,
+            "quiet_days": quiet,
+        })
+    return out
+
+
 def vocab_stats(db, student_id):
     """A word counts as known once it has been recalled 3 times in a row."""
     rows = db.execute(
