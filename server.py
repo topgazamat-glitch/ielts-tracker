@@ -2427,8 +2427,9 @@ def portal_handouts(db, s, token, query):
                       f'<div class="tile-title">{E(b["title"])}</div>'
                       f'<div class="sub">{note}</div></a>')
         return (f'<h2>Handouts</h2><p class="sub">Your booklets, to work '
-                f'through here. Nothing is timed and nothing is marked — what '
-                f'you write is saved as you go.</p>'
+                f'through here. Nothing is timed. What you write is saved as '
+                f'you go, and you can check your own answers whenever you '
+                f'like — you do not have to wait for your teacher.</p>'
                 f'<div class="tiles">{cards}</div>')
 
     t = db.execute("SELECT * FROM dtests WHERE id=? AND published=1"
@@ -2453,7 +2454,11 @@ def portal_handouts(db, s, token, query):
     return f"""<p class="sub"><a class="crumb" href="{base}">Handouts</a> ›
 {E(t["title"])}</p>
 <div class="booksheet handout">{filled}</div>
-<div class="savebar" id="savebar"><span id="savenote">Saved as you type</span></div>
+<div class="savebar" id="savebar">
+  <span id="savenote">Saved as you type</span>
+  <span id="marknote" class="marknote"></span>
+  <button type="button" class="checkbtn" id="checkbtn">Check my answers</button>
+</div>
 <script>
 const SAVE = '/s/{E(token)}/handout/{hid}/save';
 let timer = null, dirty = false;
@@ -2482,6 +2487,56 @@ document.addEventListener('input', e => {{
 window.addEventListener('beforeunload', push);
 document.addEventListener('visibilitychange', () => {{
   if (document.visibilityState === 'hidden') push();
+}});
+
+// ---- marking, straight away, without waiting for the teacher
+const CHECK = '/s/{E(token)}/handout/{hid}/check';
+function boxes() {{
+  return Array.from(document.querySelectorAll('.booksheet [name^="q"]'));
+}}
+function clearMark(el) {{
+  el.classList.remove('right', 'wrong', 'teacher');
+  const tag = el.parentNode.querySelector('.bk-answer');
+  if (tag) tag.remove();
+}}
+document.addEventListener('input', e => {{
+  if (e.target.closest('.booksheet')) clearMark(e.target);
+}});
+document.getElementById('checkbtn').addEventListener('click', async () => {{
+  const body = new URLSearchParams();
+  boxes().forEach(el => {{
+    if (el.type === 'radio' || el.type === 'checkbox') {{
+      if (el.checked) body.append(el.name, el.value);
+    }} else body.append(el.name, el.value);
+  }});
+  document.getElementById('marknote').textContent = 'Checking…';
+  const r = await fetch(CHECK, {{method: 'POST', body: body,
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}}});
+  const out = await r.json();
+  if (!out.ok) {{ document.getElementById('marknote').textContent =
+      'Could not check just now.'; return; }}
+  let first = null;
+  boxes().forEach(el => {{
+    clearMark(el);
+    const m = out.marks[el.name.slice(1)];
+    if (!m) return;
+    el.classList.add(m.state);
+    if (m.state === 'wrong') {{
+      if (!first) first = el;
+      const tag = document.createElement('button');
+      tag.type = 'button';
+      tag.className = 'bk-answer';
+      tag.textContent = 'answer';
+      tag.onclick = () => {{ tag.textContent = m.answer; tag.disabled = true; }};
+      el.insertAdjacentElement('afterend', tag);
+    }}
+  }});
+  const bits = [out.right + ' right'];
+  if (out.wrong) bits.push(out.wrong + ' to look at again');
+  if (out.blank) bits.push(out.blank + ' still empty');
+  if (out.teacher) bits.push(out.teacher + ' for your teacher');
+  document.getElementById('marknote').textContent = bits.join(' · ');
+  if (first) first.scrollIntoView({{block: 'center', behavior: 'smooth'}});
 }});
 </script>"""
 
@@ -2517,6 +2572,66 @@ def act_handout_save(req, db, token, hid):
         saved += 1
     db.commit()
     return json_response({"ok": True, "saved": saved})
+
+
+
+def act_handout_check(req, db, token, hid):
+    """Mark what the student has typed, straight away.
+
+    The point of a handout is that nobody waits for it. Everything with an
+    answer in the key is marked here and now, by the same comparison the
+    tests use - forgiving about case, spacing and a stray full stop, strict
+    about the word. The rest (a sentence of their own, a discussion, the
+    listening tasks) has no right answer to compare with, and is reported as
+    'for your teacher' rather than quietly counted wrong.
+    """
+    st = core.student_by_token(db, token)
+    if not st:
+        return json_response({"ok": False})
+    t = db.execute("SELECT id FROM dtests WHERE id=? AND published=1"
+                   " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
+    if not t:
+        return json_response({"ok": False})
+    attempt = db.execute(
+        "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
+        " ORDER BY id DESC LIMIT 1", (hid, st["id"])).fetchone()
+    aid = attempt["id"] if attempt else core.start_attempt(db, hid, st["id"])
+
+    qs = {q["id"]: q for q in db.execute(
+        "SELECT id, kind, answer FROM dquestions WHERE test_id=?", (hid,))}
+    typed = {}
+    for key, values in req["form"].items():
+        m = re.match(r"^q(\d+)$", key)
+        if m and int(m.group(1)) in qs:
+            typed[int(m.group(1))] = (values[0] or "").strip()
+
+    marks, right, wrong, open_ = {}, 0, 0, 0
+    for qid, text in typed.items():
+        q = qs[qid]
+        if q["kind"] == "open" or not q["answer"]:
+            if text:
+                open_ += 1
+                marks[qid] = {"state": "teacher"}
+            ok = None
+        elif not text:
+            ok = None
+        else:
+            ok = core.answer_matches(text, q["answer"])
+            marks[qid] = {"state": "right" if ok else "wrong",
+                          "answer": q["answer"] if not ok else None}
+            right += 1 if ok else 0
+            wrong += 0 if ok else 1
+        db.execute(
+            "INSERT INTO dresponses (attempt_id, question_id, given, correct)"
+            " VALUES (?,?,?,?) ON CONFLICT(attempt_id, question_id)"
+            " DO UPDATE SET given=excluded.given, correct=excluded.correct",
+            (aid, qid, text, None if ok is None else (1 if ok else 0)))
+    db.commit()
+    return json_response({"ok": True, "marks": marks, "right": right,
+                          "wrong": wrong, "teacher": open_,
+                          "blank": sum(1 for q in qs.values()
+                                       if q["kind"] != "open" and q["answer"]
+                                       and not typed.get(q["id"], ""))})
 
 
 
@@ -7550,14 +7665,16 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 db.close()
 
-        m = re.match(r"^/s/([A-Za-z0-9_-]+)/handout/(\d+)/save$", path)
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/handout/(\d+)/(save|check)$", path)
         if m:
             form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
                                          keep_blank_values=True)
             db = core.connect()
             try:
-                return self._send(*act_handout_save(
-                    {"form": form}, db, m.group(1), int(m.group(2))))
+                fn = (act_handout_save if m.group(3) == "save"
+                      else act_handout_check)
+                return self._send(*fn({"form": form}, db, m.group(1),
+                                      int(m.group(2))))
             finally:
                 db.close()
 

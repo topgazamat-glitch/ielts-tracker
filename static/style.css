@@ -1691,3 +1691,36 @@ main.portal:has(.booksheet.handout) { max-width: 980px; }
   border-top-color: var(--line-soft); border-radius: 0 0 var(--r-sm) var(--r-sm);
   font-size: 13px; color: var(--ink-2); text-align: right;
 }
+
+/* the handout marks itself, so the marks have to read at a glance */
+
+.savebar { display: flex; align-items: center; gap: var(--sp-3); }
+.savebar #savenote { flex: 0 0 auto; }
+.marknote { flex: 1 1 auto; text-align: right; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; }
+.checkbtn { flex: 0 0 auto; min-height: 36px; padding: 0 var(--sp-4);
+  font-size: 14px; }
+
+.booksheet.handout .bk-blank.right {
+  background: #e4f8ee; border-bottom-color: #2E9E5B; color: #06713f; }
+.booksheet.handout .bk-blank.wrong {
+  background: var(--warn-soft); border-bottom-color: var(--warn);
+  color: var(--warn); }
+/* not wrong - nobody can mark a sentence of your own */
+.booksheet.handout .bk-blank.teacher {
+  background: var(--gold-soft); border-bottom-color: #d8ae4a; }
+
+/* the answer is one tap away, not given for free */
+.bk-answer {
+  margin-left: 6px; padding: 1px 8px; border-radius: var(--r-full);
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink-2); font-size: 12px; line-height: 1.6; cursor: pointer; }
+.bk-answer:disabled {
+  background: #e4f8ee; border-color: #a8e6c6; color: #06713f;
+  cursor: default; font-weight: 600; }
+
+@media (max-width: 720px) {
+  .savebar { flex-wrap: wrap; gap: var(--sp-2); }
+  .marknote { order: 3; flex: 1 0 100%; text-align: left; }
+  .checkbtn { flex: 1 0 auto; }
+}
