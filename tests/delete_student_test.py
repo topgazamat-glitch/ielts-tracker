@@ -89,6 +89,14 @@ theirs = core.create_battle(db, rival_row, wl, q_count=2)
 core.invite_to_battle(db, rival_row, theirs, sid)
 db.commit()
 
+# the cycle: a spell here, a class test score, and an exam result
+core.backfill_enrolments(db)
+ct = core.new_class_test(db, g, "Unit 1 test", 20, core.iso(core.now())[:10])
+core.save_class_scores(db, ct, {sid: 15})
+core.save_exam(db, g, "mid", "Mid-course", 100, core.iso(core.now())[:10],
+               {sid: 64}, marked_by="Azamat")
+db.commit()
+
 db.execute("INSERT INTO seasons (no, started_at, closed_at, winner_id, winner_name,"
            " winner_points, standing) VALUES (1,?,?,?,'Ali',5.0,'[]')",
            (core.iso(core.now()), core.iso(core.now()), sid))

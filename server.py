@@ -59,7 +59,7 @@ def page(title, body, active="", music=False):
 <header class="top">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
-{nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
+{nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/records', 'Records')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}
 {nav('/settings', 'Settings')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
@@ -1763,7 +1763,7 @@ def view_word_list(req, db, wid):
 words the group answers correctly less than 60% of the time — worth reteaching.</p>
 <details class="adder"><summary>Rename, or change the class, level, book or step</summary>
 <div class="card"><form method="post" action="/vocab/{wid}/rename" class="inline">
-<label class="f" style="flex:1">Title<input name="title" value="{E(wl["title"])}"
+<label class="f grow">Title<input name="title" value="{E(wl["title"])}"
  required class="wide"></label>
 <label class="f">Class<select name="group_id">
 <option value=""{"" if wl["group_id"] else " selected"}>every class</option>{classes}
@@ -4078,7 +4078,7 @@ function drawLobby() {{
     '<div class="bigcode">' + esc(st.code) + '</div>' +
     '<div class="gsmall">Read it out, or tap a classmate below</div></div>' +
     '<h3>On the grid (' + st.track.length + ' of ' + st.seats + ')</h3>' +
-    '<div class="grid">' + st.track.map((t, i) =>
+    '<div class="seats">' + st.track.map((t, i) =>
       '<div class="seat"><span class="car c' + (i % 4) + '">' + CARS[i % 4] + '</span>' +
       esc(t.name) + (t.me ? ' <span class="sub">(you)</span>' : '') + '</div>').join('') +
     '</div>' +
@@ -4638,6 +4638,302 @@ the other kind: the work arrives, so nothing flags them, but the words are not
 going in.</p>
 {students}"""
     return html_response(page("Reteach", body, "Reteach"))
+
+
+def view_records(req, db):
+    """The cycle: who is here, who left and why, and the marks along the way.
+
+    Two jobs on one page because they are the same job. A teacher entering
+    this week's test scores is the teacher most likely to notice that
+    somebody has stopped coming.
+    """
+    core.backfill_enrolments(db)
+    q = req["query"]
+    which = (q.get("v", ["scores"])[0] or "scores")
+    gid = q.get("group", [None])[0]
+    gid = int(gid) if gid and gid.isdigit() else None
+    groups = db.execute("SELECT * FROM groups WHERE archived=0"
+                        " ORDER BY name").fetchall()
+    if gid is None and groups:
+        gid = groups[0]["id"]
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    views = ('<div class="tabs">'
+             + tab(f"/records?v=scores&amp;group={gid}", "Scores",
+                   which == "scores")
+             + tab(f"/records?v=exams&amp;group={gid}", "Exams",
+                   which == "exams")
+             + tab("/records?v=leavers", "Who left", which == "leavers")
+             + "</div>")
+    classes = ('<div class="tabs">'
+               + "".join(tab(f'/records?v={which}&amp;group={g["id"]}',
+                             g["name"], gid == g["id"]) for g in groups)
+               + "</div>") if which != "leavers" else ""
+
+    if which == "leavers":
+        return html_response(page("Records", leavers_panel(db) , "Records"))
+
+    students = db.execute(
+        "SELECT * FROM students WHERE active=1 AND group_id=? ORDER BY name",
+        (gid,)).fetchall()
+    if which == "exams":
+        body = exams_panel(db, gid, students)
+    else:
+        body = scores_panel(db, gid, students, q)
+    return html_response(page("Records", f"""<h1>Records</h1>
+<p class="sub">The whole cycle in one place: the marks a class gets along the
+way, the exams at the end of it, and who left and why. Retention cannot be
+worked out from anything else.</p>
+{views}{classes}{body}""", "Records"))
+
+
+def scores_panel(db, gid, students, q):
+    """In-class tests. Effort and learning are kept apart, so this is only
+    the learning half; the participation marks live on the Grade page."""
+    tid = q.get("t", [None])[0]
+    tid = int(tid) if tid and tid.isdigit() else None
+    tests = core.class_tests(db, gid)
+    listing = ""
+    for t in tests[:12]:
+        on = " on" if tid == t["id"] else ""
+        listing += (f'<a class="steprow{on}" href="/records?v=scores&amp;'
+                    f'group={gid}&amp;t={t["id"]}">'
+                    f'<span class="steptitle">{E(t["title"])}</span>'
+                    f'<span class="sub">{E(t["sat_on"][:10])} &middot; '
+                    f'out of {t["max_score"]:g} &middot; {t["marked"]} marked'
+                    f'</span></a>')
+    today = core.iso(core.now())[:10]
+    adder = f"""<details class="adder"><summary>New class test</summary>
+<div class="card"><form method="post" action="/records/test/new" class="inline">
+<input type="hidden" name="group" value="{gid}">
+<label class="f grow">Title
+  <input name="title" placeholder="Unit 3 vocabulary" required class="wide"></label>
+<label class="f">Out of<input name="max" value="20" class="tiny"></label>
+<label class="f">Date<input type="date" name="sat_on" value="{today}"></label>
+<button>Add</button></form></div></details>"""
+
+    if not tid:
+        return (adder + (f'<div class="steps gap-3">{listing}</div>' if listing
+                else '<div class="card"><p class="flush">No class tests for '
+                     'this class yet.</p></div>'))
+
+    test = db.execute("SELECT * FROM class_tests WHERE id=?", (tid,)).fetchone()
+    have = core.class_test_scores(db, tid)
+    rows = ""
+    for s in students:
+        r = have.get(s["id"])
+        val = "" if not r or r["score"] is None else "%g" % r["score"]
+        absent = " checked" if r and r["absent"] else ""
+        rows += (f'<tr><td class="who">{E(s["avatar"] or "")} {E(s["name"])}</td>'
+                 f'<td class="num"><input class="scorebox" name="s{s["id"]}"'
+                 f' value="{val}" inputmode="decimal" autocomplete="off"></td>'
+                 f'<td class="num"><label class="f"><input type="checkbox"'
+                 f' name="a{s["id"]}"{absent}> absent</label></td></tr>')
+    return f"""{adder}
+<h2 class="gap-4">{E(test["title"])}</h2>
+<p class="sub">{E(test["sat_on"][:10])} &middot; out of {test["max_score"]:g}.
+Leave a box empty if you have not marked it yet; tick absent so it is not
+counted as a zero.</p>
+<form method="post" action="/records/test/{tid}/save">
+<div class="tablewrap"><table class="rank">
+<tr><th>Student</th><th class="num">Score</th><th class="num"></th></tr>
+{rows}</table></div>
+<div class="gap-3"><button>Save scores</button>
+<a class="tab" href="/records?v=scores&amp;group={gid}">Back to the list</a></div>
+</form>"""
+
+
+def exams_panel(db, gid, students):
+    """The centre's mid and final exams, and the shape of the marks."""
+    today = core.iso(core.now())[:10]
+    out = ['<details class="adder" open><summary>Enter exam results</summary>'
+           '<div class="card">'
+           f'<form method="post" action="/records/exam/save">'
+           f'<input type="hidden" name="group" value="{gid}">'
+           '<div class="inline setrow">'
+           '<label class="f">Which<select name="kind">'
+           '<option value="mid">Mid-course</option>'
+           '<option value="final">Final</option></select></label>'
+           '<label class="f grow">Title'
+           '<input name="title" placeholder="Mid-course exam" class="wide"></label>'
+           '<label class="f">Out of<input name="max" value="100" class="tiny"></label>'
+           f'<label class="f">Date<input type="date" name="sat_on" value="{today}"></label>'
+           '<label class="f">Marked by<input name="marked_by" '
+           'placeholder="your name"></label></div>']
+    rows = ""
+    for s in students:
+        rows += (f'<tr><td class="who">{E(s["avatar"] or "")} {E(s["name"])}</td>'
+                 f'<td class="num"><input class="scorebox" name="s{s["id"]}"'
+                 f' inputmode="decimal" autocomplete="off"></td></tr>')
+    out.append(f'<div class="tablewrap"><table class="rank">'
+               f'<tr><th>Student</th><th class="num">Score</th></tr>{rows}'
+               f'</table></div><div class="gap-3"><button>Save results</button>'
+               f'</div></form></div></details>')
+
+    for kind, label in (("mid", "Mid-course"), ("final", "Final")):
+        sp = core.exam_spread(db, kind, gid)
+        if not sp:
+            out.append(f'<h2 class="gap-4">{label}</h2><div class="card">'
+                       f'<p class="flush">No results entered yet.</p></div>')
+            continue
+        widest = max(sp["bands"].values()) or 1
+        bars = ""
+        for band, n in sp["bands"].items():
+            w = int(round(100.0 * n / widest))
+            bars += (f'<div class="lane"><div class="lanetop">'
+                     f'<span class="who">{band}%</span>'
+                     f'<span class="num">{n}</span></div>'
+                     f'<div class="rail"><div class="fill c1" '
+                     f'style="width:{w}%"></div></div></div>')
+        out.append(f"""<h2 class="gap-4">{label}</h2>
+<div class="card"><p class="flush">
+<strong>{sp["mean"]}%</strong> average across {sp["n"]} students &middot;
+median {sp["median"]}% &middot; from {sp["lowest"]}% to {sp["highest"]}%.</p>
+<p class="sub gap-2">The spread matters more than the average. You mark your
+own students' papers, so a mean on its own is easy to doubt; a shape with
+some low marks in it is not.</p>
+<div class="track">{bars}</div></div>""")
+    return "".join(out)
+
+
+def leavers_panel(db):
+    """Who left, when, and whether it was anything you could have changed."""
+    r = core.retention(db)
+    gone = core.leavers(db)
+    here = db.execute("SELECT * FROM students WHERE active=1 ORDER BY name").fetchall()
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    gname = {g["id"]: g["name"] for g in groups}
+
+    reasons = "".join(f'<option value="{k}">{E(label)}</option>'
+                      for k, label, _ours in core.LEAVE_REASONS)
+    picker = "".join(f'<option value="{s["id"]}">{E(s["name"])}'
+                     f' &mdash; {E(gname.get(s["group_id"], "no class"))}'
+                     f'</option>' for s in here)
+    today = core.iso(core.now())[:10]
+
+    rows = ""
+    for e in gone[:40]:
+        ours = core.REASON_OURS.get(e["reason"])
+        pill = ('<span class="pill risk">could be ours</span>' if ours
+                else '<span class="pill mute">outside your control</span>')
+        rows += (f'<tr><td class="who">{E(e["avatar"] or "")} {E(e["name"])}</td>'
+                 f'<td class="sub">{E(e["group_name"] or "—")}</td>'
+                 f'<td class="sub">{E((e["ended_at"] or "")[:10])}</td>'
+                 f'<td>{E(core.REASON_LABEL.get(e["reason"], e["reason"] or "—"))}'
+                 f' {pill}</td></tr>')
+
+    rate = ("—" if r["rate"] is None else "%.1f%%" % r["rate"])
+    rate_ours = ("—" if r["rate_ours"] is None else "%.1f%%" % r["rate_ours"])
+    return f"""<h1>Records</h1>
+<p class="sub">The whole cycle in one place.</p>
+<div class="tabs"><a class="tab" href="/records?v=scores">Scores</a>
+<a class="tab" href="/records?v=exams">Exams</a>
+<a class="tab on" href="/records?v=leavers">Who left</a></div>
+
+<div class="grid gap-3">
+  {stat("Kept, last 90 days", rate)}
+  {stat("Ignoring what you cannot control", rate_ours)}
+  {stat("Students in the window", r["here"])}
+  {stat("Left", r["left"])}
+</div>
+<p class="sub gap-2">Counted over {E(r["since"])} to {E(r["until"])}: everybody
+whose time here overlapped the window, and the ones whose time ended inside
+it. {r["ours"]} of the {r["left"]} had a reason you might have changed — the
+rest moved away, ran out of money, or finished.</p>
+
+<details class="adder" open><summary>Mark a student as left</summary>
+<div class="card"><form method="post" action="/records/left" class="inline">
+<label class="f grow">Student<select name="student" required>
+<option value="">choose…</option>{picker}</select></label>
+<label class="f">Reason<select name="reason">{reasons}</select></label>
+<label class="f">Date<input type="date" name="when" value="{today}"></label>
+<label class="f grow">Note (optional)<input name="note" class="wide"></label>
+<button>Record it</button></form>
+<p class="sub gap-2">This takes them off the roll and closes their time here.
+If they come back, add them again and it starts a new spell — the old one
+keeps its reason.</p></div></details>
+
+<h2 class="gap-4">Who has left</h2>
+{'<div class="tablewrap"><table class="rank"><tr><th>Student</th><th>Class</th>'
+ '<th>When</th><th>Why</th></tr>' + rows + '</table></div>' if rows else
+ '<div class="card"><p class="flush">Nobody recorded yet. From now on, every '
+ 'time a student stops coming, put them here — a retention rate cannot be '
+ 'worked out from anything else, and in six months this is the only place '
+ 'the answer will exist.</p></div>'}"""
+
+
+def act_new_class_test(req, db):
+    f = req["form"]
+    gid = (f.get("group", [""])[0] or "")
+    if not gid.isdigit():
+        return redirect("/records")
+    tid = core.new_class_test(db, int(gid), f.get("title", [""])[0],
+                              f.get("max", ["20"])[0],
+                              f.get("sat_on", [core.iso(core.now())[:10]])[0])
+    return redirect(f"/records?v=scores&group={gid}&t={tid}")
+
+
+def act_save_class_scores(req, db, tid):
+    f = req["form"]
+    test = db.execute("SELECT * FROM class_tests WHERE id=?", (tid,)).fetchone()
+    if not test:
+        return redirect("/records")
+    scores, absent = {}, set()
+    for key, values in f.items():
+        m = re.match(r"^s(\d+)$", key)
+        if m:
+            raw = (values[0] or "").strip().replace(",", ".")
+            sid = int(m.group(1))
+            try:
+                scores[sid] = float(raw) if raw else None
+            except ValueError:
+                scores[sid] = None
+        m = re.match(r"^a(\d+)$", key)
+        if m:
+            absent.add(int(m.group(1)))
+    for sid in absent:
+        scores.setdefault(sid, None)
+    core.save_class_scores(db, tid, scores, absent)
+    return redirect(f"/records?v=scores&group={test['group_id']}&t={tid}")
+
+
+def act_save_exam(req, db):
+    f = req["form"]
+    gid = (f.get("group", [""])[0] or "")
+    if not gid.isdigit():
+        return redirect("/records")
+    scores = {}
+    for key, values in f.items():
+        m = re.match(r"^s(\d+)$", key)
+        if not m:
+            continue
+        raw = (values[0] or "").strip().replace(",", ".")
+        if not raw:
+            continue
+        try:
+            scores[int(m.group(1))] = float(raw)
+        except ValueError:
+            pass
+    kind = "final" if f.get("kind", ["mid"])[0] == "final" else "mid"
+    core.save_exam(db, int(gid), kind,
+                   (f.get("title", [""])[0] or "").strip() or None,
+                   f.get("max", ["100"])[0],
+                   f.get("sat_on", [core.iso(core.now())[:10]])[0], scores,
+                   marked_by=(f.get("marked_by", [""])[0] or "").strip())
+    return redirect(f"/records?v=exams&group={gid}")
+
+
+def act_mark_left(req, db):
+    f = req["form"]
+    sid = (f.get("student", [""])[0] or "")
+    if not sid.isdigit():
+        return redirect("/records?v=leavers")
+    core.mark_left(db, int(sid), f.get("reason", [""])[0],
+                   when=(f.get("when", [""])[0] or None),
+                   note=f.get("note", [""])[0])
+    return redirect("/records?v=leavers")
+
 
 
 def view_questions(req, db):
@@ -7119,6 +7415,11 @@ ROUTES = [
     ("POST", r"^/prompts/new$", act_new_prompt),
     ("POST", r"^/prompts/delete$", act_delete_prompt),
     ("GET",  r"^/reteach$", view_reteach),
+    ("GET",  r"^/records$", view_records),
+    ("POST", r"^/records/test/new$", act_new_class_test),
+    ("POST", r"^/records/test/(\d+)/save$", act_save_class_scores),
+    ("POST", r"^/records/exam/save$", act_save_exam),
+    ("POST", r"^/records/left$", act_mark_left),
     ("GET",  r"^/tests$", view_tests),
     ("GET",  r"^/tests/(\d+)$", view_test),
     ("POST", r"^/tests/(\d+)/key$", act_test_key),

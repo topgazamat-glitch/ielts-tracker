@@ -662,6 +662,77 @@ def migrate(db):
         winner_points REAL,
         standing TEXT                      -- the whole table as it stood, as json
     );
+    -- ---------------------------------------------------------------- the cycle
+    --
+    -- A student joins, works, sits the exams, and then either stays or goes.
+    -- None of that was ever written down: `students.active` was a flag nobody
+    -- set, so a retention rate could not be worked out from this database at
+    -- all. These four tables are what make the cycle a record rather than a
+    -- memory.
+    --
+    -- Every one of them carries a teacher_id from the first day. There is one
+    -- teacher today and no login for anybody else, but adding the column now
+    -- costs nothing and means opening this to colleagues is a login screen
+    -- rather than a migration of every row.
+    CREATE TABLE IF NOT EXISTS teachers (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        ielts REAL,                        -- the teacher's own band
+        celta INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    -- one row per spell at the centre, so a student who leaves and comes back
+    -- has two, and neither overwrites the other
+    CREATE TABLE IF NOT EXISTS enrolments (
+        id INTEGER PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        teacher_id INTEGER REFERENCES teachers(id),
+        group_id INTEGER REFERENCES groups(id),
+        started_at TEXT NOT NULL,
+        ended_at TEXT,                     -- null means still here
+        reason TEXT,                       -- why they left, from a fixed list
+        note TEXT,
+        created_at TEXT NOT NULL
+    );
+    -- work done in the room. Kept apart from the participation marks on
+    -- purpose: one measures effort, the other measures learning, and
+    -- averaging them together hides both.
+    CREATE TABLE IF NOT EXISTS class_tests (
+        id INTEGER PRIMARY KEY,
+        teacher_id INTEGER REFERENCES teachers(id),
+        group_id INTEGER REFERENCES groups(id),
+        title TEXT NOT NULL,
+        max_score REAL NOT NULL DEFAULT 100,
+        sat_on TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS class_test_scores (
+        test_id INTEGER NOT NULL REFERENCES class_tests(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        score REAL,
+        absent INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (test_id, student_id)
+    );
+    -- the centre's own mid and final exams. marked_by is recorded because the
+    -- teacher marks their own students, and an average is only believable
+    -- when you can see who produced it.
+    CREATE TABLE IF NOT EXISTS exam_results (
+        id INTEGER PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        teacher_id INTEGER REFERENCES teachers(id),
+        group_id INTEGER REFERENCES groups(id),
+        kind TEXT NOT NULL,                -- 'mid' or 'final'
+        title TEXT,
+        score REAL,
+        max_score REAL NOT NULL DEFAULT 100,
+        sat_on TEXT NOT NULL,
+        marked_by TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS enrolments_by_student
+        ON enrolments(student_id, ended_at);
+    CREATE INDEX IF NOT EXISTS exam_results_by_student
+        ON exam_results(student_id, kind);
     CREATE TABLE IF NOT EXISTS parents (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -2419,6 +2490,264 @@ def reteach(db, group_id):
     return {"words": reteach_words(db, group_id),
             "steps": reteach_steps(db, group_id),
             "students": quiet_strugglers(db, group_id)}
+
+
+# ------------------------------------------------------------- the cycle
+#
+# Why a student left is the one fact nobody ever writes down, and it is the
+# one the whole retention question rests on. A fixed list matters: free text
+# never adds up, and "she moved to Tashkent" and "moved away" have to be the
+# same row when you count them.
+#
+# The split is deliberate. Some reasons are the teacher's to do something
+# about and some are not, and a retention rate that mixes them tells the
+# teacher off for a family moving city.
+LEAVE_REASONS = [
+    ("finished", "Finished the course", False),
+    ("moved", "Moved away", False),
+    ("money", "Could not afford it", False),
+    ("timetable", "Timetable stopped working", False),
+    ("health", "Health or family", False),
+    ("other_centre", "Went to another centre", True),
+    ("progress", "Felt they were not progressing", True),
+    ("unhappy", "Unhappy with the class", True),
+    ("bored", "Lost interest", True),
+    ("unknown", "Just stopped coming", True),
+]
+REASON_LABEL = {k: label for k, label, _ours in LEAVE_REASONS}
+REASON_OURS = {k: ours for k, _label, ours in LEAVE_REASONS}
+
+
+def the_teacher(db):
+    """The one teacher, until there are accounts for others."""
+    row = db.execute("SELECT * FROM teachers ORDER BY id LIMIT 1").fetchone()
+    if row:
+        return row
+    cfg = load_config()
+    tid = db.execute(
+        "INSERT INTO teachers (name, celta, created_at) VALUES (?,0,?)",
+        (cfg.get("teacher_name") or "Teacher", iso(now()))).lastrowid
+    db.commit()
+    return db.execute("SELECT * FROM teachers WHERE id=?", (tid,)).fetchone()
+
+
+def backfill_enrolments(db):
+    """Everybody already on the books is here, and has been since they joined.
+
+    Without this the register would show an empty history and every student
+    would look like they arrived the day the feature was built.
+    """
+    t = the_teacher(db)
+    made = 0
+    for s in db.execute("SELECT * FROM students WHERE active=1").fetchall():
+        has = db.execute("SELECT 1 FROM enrolments WHERE student_id=?",
+                         (s["id"],)).fetchone()
+        if has:
+            continue
+        db.execute(
+            "INSERT INTO enrolments (student_id, teacher_id, group_id,"
+            " started_at, created_at) VALUES (?,?,?,?,?)",
+            (s["id"], t["id"], s["group_id"], s["created_at"] or iso(now()),
+             iso(now())))
+        made += 1
+    if made:
+        db.commit()
+    return made
+
+
+def current_enrolment(db, student_id):
+    return db.execute(
+        "SELECT * FROM enrolments WHERE student_id=? AND ended_at IS NULL"
+        " ORDER BY id DESC LIMIT 1", (student_id,)).fetchone()
+
+
+def mark_left(db, student_id, reason, when=None, note=""):
+    """Close the student's spell here, and take them off the roll."""
+    if reason not in REASON_LABEL:
+        return False
+    e = current_enrolment(db, student_id)
+    if not e:
+        t = the_teacher(db)
+        s = db.execute("SELECT * FROM students WHERE id=?",
+                       (student_id,)).fetchone()
+        if not s:
+            return False
+        e_id = db.execute(
+            "INSERT INTO enrolments (student_id, teacher_id, group_id,"
+            " started_at, created_at) VALUES (?,?,?,?,?)",
+            (student_id, t["id"], s["group_id"], s["created_at"] or iso(now()),
+             iso(now()))).lastrowid
+    else:
+        e_id = e["id"]
+    db.execute("UPDATE enrolments SET ended_at=?, reason=?, note=? WHERE id=?",
+               (when or iso(now()), reason, (note or "").strip(), e_id))
+    db.execute("UPDATE students SET active=0 WHERE id=?", (student_id,))
+    db.commit()
+    return True
+
+
+def mark_returned(db, student_id, group_id=None):
+    """A student who comes back starts a new spell, not a rewritten old one."""
+    s = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if not s:
+        return False
+    if current_enrolment(db, student_id):
+        db.execute("UPDATE students SET active=1 WHERE id=?", (student_id,))
+        db.commit()
+        return True
+    t = the_teacher(db)
+    db.execute(
+        "INSERT INTO enrolments (student_id, teacher_id, group_id, started_at,"
+        " created_at) VALUES (?,?,?,?,?)",
+        (student_id, t["id"], group_id or s["group_id"], iso(now()), iso(now())))
+    db.execute("UPDATE students SET active=1 WHERE id=?", (student_id,))
+    db.commit()
+    return True
+
+
+def leavers(db, since=None, group_id=None):
+    sql = ("SELECT e.*, s.name, s.avatar, g.name group_name FROM enrolments e"
+           " JOIN students s ON s.id=e.student_id"
+           " LEFT JOIN groups g ON g.id=e.group_id"
+           " WHERE e.ended_at IS NOT NULL")
+    args = []
+    if since:
+        sql += " AND e.ended_at >= ?"; args.append(since)
+    if group_id:
+        sql += " AND e.group_id=?"; args.append(group_id)
+    return db.execute(sql + " ORDER BY e.ended_at DESC", args).fetchall()
+
+
+def retention(db, since=None, until=None):
+    """How many were here, how many went, and how much of it was ours.
+
+    Counted over a window: everybody whose spell overlapped it, and of those
+    the ones that ended inside it. A rate over no window at all is only ever
+    flattering.
+    """
+    until = until or iso(now())
+    since = since or iso(now() - timedelta(days=90))
+    here = db.execute(
+        "SELECT COUNT(*) c FROM enrolments"
+        " WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)",
+        (until, since)).fetchone()["c"]
+    gone = db.execute(
+        "SELECT reason, COUNT(*) c FROM enrolments"
+        " WHERE ended_at IS NOT NULL AND ended_at >= ? AND ended_at <= ?"
+        " GROUP BY reason", (since, until)).fetchall()
+    left = sum(r["c"] for r in gone)
+    ours = sum(r["c"] for r in gone if REASON_OURS.get(r["reason"]))
+    return {"here": here, "left": left, "ours": ours,
+            "kept": here - left,
+            "rate": round(100.0 * (here - left) / here, 1) if here else None,
+            "rate_ours": round(100.0 * (here - ours) / here, 1) if here else None,
+            "by_reason": {r["reason"]: r["c"] for r in gone},
+            "since": since[:10], "until": until[:10]}
+
+
+# ------------------------------------------------------------ scores in
+
+def class_tests(db, group_id=None, limit=40):
+    sql = ("SELECT t.*, g.name group_name,"
+           " (SELECT COUNT(*) FROM class_test_scores x WHERE x.test_id=t.id"
+           "  AND x.score IS NOT NULL) marked"
+           " FROM class_tests t LEFT JOIN groups g ON g.id=t.group_id")
+    args = []
+    if group_id:
+        sql += " WHERE t.group_id=?"; args.append(group_id)
+    return db.execute(sql + " ORDER BY t.sat_on DESC, t.id DESC LIMIT ?",
+                      args + [limit]).fetchall()
+
+
+def new_class_test(db, group_id, title, max_score, sat_on):
+    t = the_teacher(db)
+    return db.execute(
+        "INSERT INTO class_tests (teacher_id, group_id, title, max_score,"
+        " sat_on, created_at) VALUES (?,?,?,?,?,?)",
+        (t["id"], group_id, (title or "Class test").strip(),
+         float(max_score or 100), sat_on, iso(now()))).lastrowid
+
+
+def save_class_scores(db, test_id, scores, absent=()):
+    """scores maps student id -> number or None."""
+    for sid, value in scores.items():
+        db.execute(
+            "INSERT INTO class_test_scores (test_id, student_id, score, absent)"
+            " VALUES (?,?,?,?) ON CONFLICT(test_id, student_id)"
+            " DO UPDATE SET score=excluded.score, absent=excluded.absent",
+            (test_id, sid, value, 1 if sid in absent else 0))
+    db.commit()
+
+
+def class_test_scores(db, test_id):
+    return {r["student_id"]: r for r in db.execute(
+        "SELECT * FROM class_test_scores WHERE test_id=?", (test_id,))}
+
+
+def save_exam(db, group_id, kind, title, max_score, sat_on, scores,
+              marked_by=""):
+    """One row per student, so a re-sit is a second row and not an overwrite."""
+    t = the_teacher(db)
+    made = 0
+    for sid, value in scores.items():
+        if value is None:
+            continue
+        existing = db.execute(
+            "SELECT id FROM exam_results WHERE student_id=? AND kind=?"
+            " AND sat_on=?", (sid, kind, sat_on)).fetchone()
+        if existing:
+            # a correction to one mark must not wipe who marked the paper:
+            # only overwrite the name when a new one is actually given
+            db.execute("UPDATE exam_results SET score=?, max_score=?, title=?,"
+                       " marked_by=COALESCE(NULLIF(?,''), marked_by)"
+                       " WHERE id=?",
+                       (value, float(max_score or 100), title, marked_by,
+                        existing["id"]))
+        else:
+            db.execute(
+                "INSERT INTO exam_results (student_id, teacher_id, group_id,"
+                " kind, title, score, max_score, sat_on, marked_by, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (sid, t["id"], group_id, kind, title, value,
+                 float(max_score or 100), sat_on, marked_by, iso(now())))
+        made += 1
+    db.commit()
+    return made
+
+
+def exam_rows(db, group_id=None, kind=None):
+    sql = ("SELECT e.*, s.name, g.name group_name FROM exam_results e"
+           " JOIN students s ON s.id=e.student_id"
+           " LEFT JOIN groups g ON g.id=e.group_id WHERE 1=1")
+    args = []
+    if group_id:
+        sql += " AND e.group_id=?"; args.append(group_id)
+    if kind:
+        sql += " AND e.kind=?"; args.append(kind)
+    return db.execute(sql + " ORDER BY e.sat_on DESC, s.name", args).fetchall()
+
+
+def exam_spread(db, kind, group_id=None):
+    """The shape of a set of marks, not just the middle of it.
+
+    An average is easy to doubt, particularly when the teacher marked the
+    papers themselves. A spread with some low marks in it is believable in a
+    way a bare mean never is.
+    """
+    rows = [r for r in exam_rows(db, group_id, kind) if r["score"] is not None]
+    if not rows:
+        return None
+    pcts = sorted(100.0 * r["score"] / (r["max_score"] or 100) for r in rows)
+    n = len(pcts)
+    bands = {"<40": 0, "40-54": 0, "55-69": 0, "70-84": 0, "85+": 0}
+    for p in pcts:
+        key = ("<40" if p < 40 else "40-54" if p < 55 else "55-69" if p < 70
+               else "70-84" if p < 85 else "85+")
+        bands[key] += 1
+    return {"n": n, "mean": round(sum(pcts) / n, 1),
+            "median": round(pcts[n // 2], 1),
+            "lowest": round(pcts[0], 1), "highest": round(pcts[-1], 1),
+            "bands": bands}
 
 
 def vocab_stats(db, student_id):

@@ -1572,7 +1572,10 @@ main.portal:has(.booksheet) { max-width: 940px; }
 .bigcode { font-size: 46px; font-weight: 700; letter-spacing: .18em;
   line-height: 1.1; margin: var(--sp-1) 0; }
 
-.grid { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* named for what it is. The first version of this called itself .grid and
+   quietly redefined the site-wide stat grid, which turned every row of
+   figures on Overview and Progress into a single stacked column. */
+.seats { display: flex; flex-direction: column; gap: var(--sp-2); }
 .seat { display: flex; align-items: center; gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
   background: var(--line-soft); }
@@ -1724,3 +1727,16 @@ main.portal:has(.booksheet.handout) { max-width: 980px; }
   .marknote { order: 3; flex: 1 0 100%; text-align: left; }
   .checkbtn { flex: 1 0 auto; }
 }
+
+/* ------------------------------------------------- records
+
+   The cycle: marks along the way, the exams, and who left. Entering a class
+   of scores is the job that has to be fast, so the boxes are big enough to
+   tab through without aiming. */
+
+.grow { flex: 1; }
+.setrow { margin-bottom: var(--sp-3); }
+.scorebox { width: 76px; text-align: right;
+  font-variant-numeric: tabular-nums; font-size: 16px; }
+table.rank td .f { flex-direction: row; align-items: center; gap: var(--sp-1);
+  font-size: 12px; color: var(--ink-3); justify-content: flex-end; }
