@@ -3180,12 +3180,26 @@ def seed_demo(db, seed=11):
 
 
 def demo_ready():
-    """Make sure the demo copy exists and is seeded. Safe to call every time."""
-    fresh = not os.path.exists(DEMO_PATH)
-    was = demo_on()
-    demo_on(True)
+    """Make sure the demo copy exists and is whole. Safe to call every time.
+
+    Built at a temporary path and moved into place only once the seed has
+    finished. Seeding is slow on a small disk, and a request that times out
+    half way through must not leave behind a demo file with fourteen
+    students and no exams that then counts as "done" for ever.
+    """
+    if os.path.exists(DEMO_PATH):
+        return False
+    tmp = DEMO_PATH + ".building"
+    for ext in ("", "-wal", "-shm"):
+        try:
+            os.remove(tmp + ext)
+        except FileNotFoundError:
+            pass
+    db = sqlite3.connect(tmp, timeout=30)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=MEMORY")   # one file, no WAL to move
+    db.execute("PRAGMA foreign_keys=ON")
     try:
-        db = connect()
         db.executescript(SCHEMA)
         migrate(db)
         for i, name in enumerate(LEVELS):
@@ -3194,9 +3208,16 @@ def demo_ready():
         db.commit()
         seed_demo(db)
         db.close()
-    finally:
-        demo_on(was)
-    return fresh
+        os.replace(tmp, DEMO_PATH)
+    except Exception:
+        db.close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.remove(tmp + ext)
+            except FileNotFoundError:
+                pass
+        raise
+    return True
 
 
 def demo_reset():
