@@ -410,6 +410,13 @@ def migrate(db):
         # a test can be published for practice without deciding the table
         db.execute("ALTER TABLE dtests ADD COLUMN in_league"
                    " INTEGER NOT NULL DEFAULT 1")
+    tcols = {r["name"] for r in db.execute("PRAGMA table_info(dtests)")}
+    if tcols and "kind" not in tcols:
+        # a handout is a test that is not a test: no clock, no one sitting,
+        # no score to chase. It lives on its own page so the Tests tab stays
+        # a list of things that are actually marked.
+        db.execute("ALTER TABLE dtests ADD COLUMN kind TEXT NOT NULL"
+                   " DEFAULT 'test'")
 
     acols = {r["name"] for r in db.execute("PRAGMA table_info(assignments)")}
     if "prompt" not in acols:
@@ -587,6 +594,7 @@ def migrate(db):
         minutes INTEGER,                   -- a time limit, for an exam
         strict INTEGER NOT NULL DEFAULT 0, -- leaving the window ends it
         once INTEGER NOT NULL DEFAULT 0,   -- one sitting only: an exam, not practice
+        kind TEXT NOT NULL DEFAULT 'test', -- 'test' is marked; 'handout' is worked through
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS dquestions (
@@ -3510,12 +3518,14 @@ def load_test(db, data):
                        (data.get("level", ""),)).fetchone()
     tid = db.execute(
         "INSERT INTO dtests (level_id, number, title, passage, published, layout,"
-        " minutes, strict, once, created_at) VALUES (?,?,?,?,0,?,?,?,?,?)",
+        " minutes, strict, once, kind, created_at)"
+        " VALUES (?,?,?,?,0,?,?,?,?,?,?)",
         (level["id"] if level else None, data.get("number"),
          data.get("title") or "Practice test",
          (data.get("passages") or {}).get("gap") or None,
          data.get("layout"), data.get("minutes"),
          1 if data.get("strict") else 0, 1 if data.get("once") else 0,
+         "handout" if data.get("kind") == "handout" else "test",
          iso(now()))).lastrowid
     for i, q in enumerate(data.get("questions") or []):
         # a reading passage printed as a picture travels inside the file, and is
@@ -3538,7 +3548,13 @@ def load_test(db, data):
     return tid
 
 
-def digital_tests(db, level_id=None, published_only=False):
+def digital_tests(db, level_id=None, published_only=False, kind="test"):
+    """The digital papers for a level.
+
+    `kind` separates the two things that live in this table: 'test' for a
+    paper that is marked, 'handout' for a booklet a student works through.
+    Pass None for both.
+    """
     sql = ("SELECT t.*, l.name level,"
            " (SELECT COUNT(*) FROM dquestions q WHERE q.test_id=t.id) n,"
            " (SELECT COUNT(*) FROM dquestions q WHERE q.test_id=t.id AND q.answer IS NOT NULL) keyed"
@@ -3548,6 +3564,8 @@ def digital_tests(db, level_id=None, published_only=False):
         where.append("(t.level_id IS NULL OR t.level_id=?)"); args.append(level_id)
     if published_only:
         where.append("t.published=1")
+    if kind is not None:
+        where.append("IFNULL(t.kind,'test')=?"); args.append(kind)
     if where:
         sql += " WHERE " + " AND ".join(where)
     return db.execute(sql + " ORDER BY t.number, t.id", args).fetchall()

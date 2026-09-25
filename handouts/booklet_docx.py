@@ -128,6 +128,9 @@ def _table(grid, rows):
 def _row(cells, keep=True):
     # cantSplit is the whole point: a panel or a question table is never
     # allowed to break over a page boundary
+    # cantSplit only where a box would look broken in half. Applied to
+    # everything it pushes whole blocks onto the next page and leaves the
+    # white space he objected to.
     props = "<w:trPr>%s</w:trPr>" % ("<w:cantSplit/>" if keep else "")
     return "<w:tr>%s%s</w:tr>" % (props, "".join(cells))
 
@@ -150,28 +153,33 @@ def cover(unit_line, level, title, lesson, strap, contents, learn,
                 border='<w:pBdr><w:bottom w:val="single" w:sz="6" '
                        'w:space="0" w:color="%s"/></w:pBdr>' % TEAL)]
 
-    rows = [_row([_cell(para(run("In this booklet", SMALL, DEEP, bold=True),
-                             spacing='w:after="60"'), WIDTH, fill=PANEL,
-                        pad=(120, 160, 60, 160))])]
-    items = ""
+    # He put the contents and the aims side by side. Stacked, they eat half
+    # of page one and push the reading onto page two; beside each other they
+    # cost six lines and the lesson starts underneath them.
+    left = para(run("I N   T H I S   B O O K L E T", SMALL, GREY, bold=True),
+                spacing='w:after="70"')
     for n, (name, page) in enumerate(contents, 1):
-        items += para([run("%d    " % n, SMALL, TEAL, bold=True),
-                       run(name, SMALL),
-                       "<w:r><w:tab/></w:r>",
-                       run(str(page), SMALL, GREY)],
-                      spacing='w:after="30"',
-                      tabs='<w:tabs><w:tab w:val="right" w:pos="8900"/>'
-                           '</w:tabs>')
-    rows.append(_row([_cell(items, WIDTH, fill=PANEL,
-                            pad=(0, 160, 120, 160))]))
-    out.append(_table([WIDTH], rows))
-
-    out.append(text("You will learn to", SMALL, DEEP, bold=True, keep=True,
-                    spacing='w:before="160" w:after="60"'))
+        left += para([run("%d  " % n, SMALL, TEAL, bold=True),
+                      run(name, SMALL),
+                      "<w:r><w:tab/></w:r>",
+                      run(str(page), SMALL, DEEP, bold=True)],
+                     spacing='w:after="40"',
+                     tabs='<w:tabs><w:tab w:val="right" w:leader="dot" '
+                          'w:pos="4100"/></w:tabs>')
+    right = para(run("Y O U   W I L L   L E A R N   T O", SMALL, GREY,
+                     bold=True), spacing='w:after="70"')
     for line in learn:
-        out.append(para([run("—  ", SMALL, TEAL), run(line, SMALL)],
-                        spacing='w:after="30"',
-                        ind='w:left="280" w:hanging="280"'))
+        right += para([run("—  ", SMALL, TEAL), run(line, SMALL)],
+                      spacing='w:after="40"',
+                      ind='w:left="240" w:hanging="240"')
+    half = (WIDTH - 200) // 2
+    out.append(_table(
+        [half, 200, WIDTH - half - 200],
+        [_row([_cell(left, half, pad=(120, 40, 60, 120)),
+               _cell(para(""), 200),
+               _cell(right, WIDTH - half - 200, fill=PANEL,
+                     borders={"left": ("single", 12, TEAL)},
+                     pad=(120, 160, 60, 160))], keep=False)]))
     out.append(para(["<w:r><w:tab/></w:r>",
                      run("Prepared by  ", 16, GREY),
                      run(prepared_by, 17, DEEP, bold=True)],
@@ -230,8 +238,55 @@ def panel(heading, lines, fill=PANEL, edge=None, heading_colour=DEEP):
 
 
 def reading(title_text, paragraphs):
-    return panel(title_text, paragraphs, fill="FFFFFF",
-                 edge="D8D8D8", heading_colour=DEEP)
+    """A reading text is not a box.
+
+    He un-boxed it: a bold heading and then running text, which reads like
+    something a person wrote rather than a form to fill in, and fits four
+    more lines on the page.
+    """
+    out = [para(run(title_text, BODY, bold=True),
+                spacing='w:before="160" w:after="80"', keep=True)]
+    for p in paragraphs:
+        if "  " in p and p.split("  ")[0].isupper():
+            head, rest = p.split("  ", 1)
+            out.append(para([run(head + "  ", BODY, bold=True),
+                             run(rest, BODY)],
+                            spacing='w:after="70" w:line="300" '
+                                    'w:lineRule="auto"'))
+        else:
+            out.append(para(run(p, BODY),
+                            spacing='w:after="70" w:line="300" '
+                                    'w:lineRule="auto"'))
+    return "".join(out)
+
+
+def keybox(lines, width=None):
+    """The KEY WORDS box, with its teal tab, sized to sit beside a task."""
+    w = width or (WIDTH - 200) // 2
+    tab = _table([1500], [_row([_cell(
+        para(run("KEY WORDS", 15, "FFFFFF", bold=True, space=30),
+             spacing='w:after="0"'), 1500, fill=TEAL,
+        pad=(30, 90, 30, 90))], keep=False)])
+    inner = tab
+    for term, meaning in lines:
+        inner += para([run(term + "  ", BODY, DEEP, bold=True),
+                       run(meaning, BODY)],
+                      spacing='w:after="50" w:line="290" w:lineRule="auto"')
+    return _table([w], [_row([_cell(inner, w,
+                                    borders={s: ("single", 6, TEAL) for s in
+                                             ("top", "left", "bottom",
+                                              "right")},
+                                    pad=(60, 140, 120, 140))], keep=False)])
+
+
+def beside(left_blocks, right_blocks, split=0.46):
+    """Two things on one line, which is how he got the page to fill."""
+    lw = int((WIDTH - 200) * split)
+    rw = WIDTH - 200 - lw
+    return _table([lw, 200, rw],
+                  [_row([_cell("".join(left_blocks), lw, pad=(0, 0, 0, 80)),
+                         _cell(para(""), 200),
+                         _cell("".join(right_blocks), rw)], keep=False)])
 
 
 def warning(heading, lines):
@@ -287,7 +342,7 @@ def questions(items, dotted=14):
                         spacing='w:after="60" w:line="300" '
                                 'w:lineRule="auto"',
                         ind='w:left="260" w:hanging="260"'))
-    return _table([WIDTH], [_row([_cell("".join(out), WIDTH)])])
+    return "".join(out)
 
 
 def writing_lines(words, per_line=8, minimum=3):
@@ -300,10 +355,9 @@ def writing_lines(words, per_line=8, minimum=3):
     n = max(minimum, int(round(float(words) / per_line)))
     rule = ('<w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" '
             'w:color="C9C9C9"/></w:pBdr>')
-    lines = "".join(
+    return "".join(
         para("", spacing='w:after="0" w:line="400" w:lineRule="auto"',
              border=rule) for _ in range(n))
-    return _table([WIDTH], [_row([_cell(lines, WIDTH)])])
 
 
 def listening(track, intro_lines):

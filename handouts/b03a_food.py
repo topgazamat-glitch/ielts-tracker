@@ -44,15 +44,17 @@ A(B.cover(
 
 # ------------------------------------------------------------------ 1
 A(B.section(1, "Reading  ·  what three families eat in a week"))
-A(B.exercise("1.1", "Tick (✓) the food you ate yesterday."))
-A(B.two_columns(["meat", "fish", "rice", "bread", "fruit", "vegetables",
-                 "eggs", "cheese"], dotted=0))
-A(B.panel("KEY WORDS", [
-    ("a meal", "breakfast, lunch or dinner"),
-    ("fresh", "not old — picked or made today"),
-    ("a market", "a place outside where people sell food"),
-    ("the same", "not different"),
-]))
+# the first task and the key words sit side by side, as they do in his 2C
+A(B.beside(
+    [B.exercise("1.1", "Tick (✓) the food you ate yesterday."),
+     B.text("……  meat      ……  fish      ……  rice"),
+     B.text("……  bread    ……  fruit     ……  eggs"),
+     B.text("……  cheese  ……  vegetables")],
+    [B.keybox([("a meal", "breakfast, lunch or dinner"),
+               ("fresh", "not old — picked or made today"),
+               ("a market", "a place outside where people sell food"),
+               ("the same", "not different")],
+              width=(B.WIDTH - 200) - int((B.WIDTH - 200) * 0.46))]))
 A(B.reading("FOOD FOR ONE WEEK", [
     "A photographer visits three families. Every family puts all its food "
     "for one week on the table. Then he takes a photograph. The three "

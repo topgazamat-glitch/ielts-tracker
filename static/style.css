@@ -1645,3 +1645,49 @@ main.portal:has(.booksheet) { max-width: 940px; }
   :root:not([data-theme="light"]) .pct-ok { background: #123324; color: #7fd9ab; }
 }
 :root[data-theme="dark"] .pct-ok { background: #123324; color: #7fd9ab; }
+
+/* ------------------------------------------------- handouts
+
+   The same booklet on a laptop and on a phone. The paper design is kept -
+   he asked for nothing to change - so the work here is making a page laid
+   out for A4 usable on a 390px screen: the two-column exercise tables
+   become one column, the boxes grow to a thumb's width, and the page never
+   scrolls sideways. */
+
+main.portal:has(.booksheet.handout) { max-width: 980px; }
+
+.booksheet.handout { padding-bottom: 72px; }
+.booksheet.handout .booklet { line-height: 1.55; }
+
+/* a box is typed into, so it is sized for a finger, not for a pointer */
+.booksheet.handout .bk-blank {
+  min-height: 30px; font-size: 16px;      /* 16px stops iOS zooming on focus */
+  padding: 2px 6px;
+}
+.booksheet.handout .bk-blank:focus {
+  outline: 2px solid var(--brand); outline-offset: 1px;
+}
+
+@media (max-width: 720px) {
+  /* Word's side-by-side exercise columns stack, rather than squeezing two
+     columns of questions into 180px each */
+  .booksheet.handout .booklet table.bk,
+  .booksheet.handout .booklet table.bk tbody,
+  .booksheet.handout .booklet table.bk tr,
+  .booksheet.handout .booklet table.bk td {
+    display: block; width: auto !important;
+  }
+  .booksheet.handout .booklet table.bk td { padding: 2px 0; }
+  .booksheet.handout .booklet table.bk td:empty { display: none; }
+  .booksheet.handout .bk-blank { width: 100% !important; max-width: 320px; }
+  .booksheet.handout { overflow-x: hidden; }
+}
+
+/* what the student needs to know without looking for it: that it is saved */
+.savebar {
+  position: sticky; bottom: 0; z-index: 5;
+  margin: calc(-1 * var(--sp-5)) 0 0; padding: var(--sp-2) var(--sp-4);
+  background: var(--surface); border: 1px solid var(--line);
+  border-top-color: var(--line-soft); border-radius: 0 0 var(--r-sm) var(--r-sm);
+  font-size: 13px; color: var(--ink-2); text-align: right;
+}

@@ -2038,7 +2038,8 @@ def student_shell(s, db, token, tab, body):
     """One page, four tabs, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
     tabs = [("home", "Homework"), ("write", "Writing"),
-            ("materials", "Materials"), ("tests", "Tests"), ("play", "Play"),
+            ("materials", "Materials"), ("handouts", "Handouts"),
+            ("tests", "Tests"), ("play", "Play"),
             ("progress", "Progress"), ("class", "Class"), ("goal", "My goal"),
             ("profile", "Profile")]
     nav = "".join(
@@ -2392,6 +2393,131 @@ def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
 
     filled = fill_choices(BLANK_AT.sub(box, layout), qs, given, marks)
     return add_players(filled, level, who)
+
+
+def portal_handouts(db, s, token, query):
+    """The booklets, as pages a student works through on their phone.
+
+    A handout is not a test. There is no clock, nothing is handed in, and
+    nobody is given a mark for it. What the student types is kept, so they
+    can close the page on the bus and pick it up again at home, and so the
+    teacher can see what they wrote.
+    """
+    level_id = core.level_of(db, s["group_id"])
+    base = f"/s/{E(token)}?tab=handouts"
+    hid = query.get("h", [None])[0]
+    hid = int(hid) if hid and hid.isdigit() else None
+
+    if hid is None:
+        books = core.digital_tests(db, level_id, published_only=True,
+                                   kind="handout")
+        if not books:
+            return ('<h2>Handouts</h2><div class="card"><p class="flush">'
+                    'Nothing here yet. Your teacher will put your booklets '
+                    'on this page.</p></div>')
+        cards = ""
+        for b in books:
+            done = db.execute(
+                "SELECT COUNT(*) c FROM dresponses r JOIN dattempts a"
+                " ON a.id=r.attempt_id WHERE a.test_id=? AND a.student_id=?"
+                " AND IFNULL(r.given,'') <> ''", (b["id"], s["id"])).fetchone()["c"]
+            note = (f'{done} of {b["n"]} boxes filled' if done
+                    else f'{b["n"]} things to fill in')
+            cards += (f'<a class="tile small" href="{base}&amp;h={b["id"]}">'
+                      f'<div class="tile-title">{E(b["title"])}</div>'
+                      f'<div class="sub">{note}</div></a>')
+        return (f'<h2>Handouts</h2><p class="sub">Your booklets, to work '
+                f'through here. Nothing is timed and nothing is marked — what '
+                f'you write is saved as you go.</p>'
+                f'<div class="tiles">{cards}</div>')
+
+    t = db.execute("SELECT * FROM dtests WHERE id=? AND published=1"
+                   " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
+    if not t:
+        return '<h2>Handouts</h2><p class="sub">That booklet is not open.</p>'
+    qs = core.test_questions(db, hid)
+    attempt = db.execute(
+        "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
+        " ORDER BY id DESC LIMIT 1", (hid, s["id"])).fetchone()
+    if not attempt:
+        aid = core.start_attempt(db, hid, s["id"])
+        attempt = db.execute("SELECT * FROM dattempts WHERE id=?",
+                             (aid,)).fetchone()
+    given = {r["question_id"]: r["given"] for r in db.execute(
+        "SELECT * FROM dresponses WHERE attempt_id=?", (attempt["id"],))}
+    layout = t["layout"] if "layout" in t.keys() else None
+    if not layout:
+        return '<h2>Handouts</h2><p class="sub">That booklet has no pages.</p>'
+    filled = fill_layout(layout, qs, given,
+                         level=core.level_name(db, t["level_id"]), who=token)
+    return f"""<p class="sub"><a class="crumb" href="{base}">Handouts</a> ›
+{E(t["title"])}</p>
+<div class="booksheet handout">{filled}</div>
+<div class="savebar" id="savebar"><span id="savenote">Saved as you type</span></div>
+<script>
+const SAVE = '/s/{E(token)}/handout/{hid}/save';
+let timer = null, dirty = false;
+function note(t) {{ document.getElementById('savenote').textContent = t; }}
+async function push() {{
+  if (!dirty) return;
+  dirty = false;
+  const body = new URLSearchParams();
+  document.querySelectorAll('.booksheet [name^="q"]').forEach(el => {{
+    if (el.type === 'radio' || el.type === 'checkbox') {{
+      if (el.checked) body.append(el.name, el.value);
+    }} else body.append(el.name, el.value);
+  }});
+  note('Saving…');
+  try {{
+    await fetch(SAVE, {{method: 'POST', body: body,
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}}});
+    note('Saved');
+  }} catch (e) {{ note('Not saved — you are offline'); dirty = true; }}
+}}
+document.addEventListener('input', e => {{
+  if (!e.target.closest('.booksheet')) return;
+  dirty = true; note('Saving…');
+  clearTimeout(timer); timer = setTimeout(push, 900);
+}});
+window.addEventListener('beforeunload', push);
+document.addEventListener('visibilitychange', () => {{
+  if (document.visibilityState === 'hidden') push();
+}});
+</script>"""
+
+
+def act_handout_save(req, db, token, hid):
+    """Keep what the student has typed. Nothing is marked and nothing is
+    finished: a handout is theirs to come back to."""
+    st = core.student_by_token(db, token)
+    if not st:
+        return json_response({"ok": False})
+    t = db.execute("SELECT id FROM dtests WHERE id=? AND published=1"
+                   " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
+    if not t:
+        return json_response({"ok": False})
+    attempt = db.execute(
+        "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
+        " ORDER BY id DESC LIMIT 1", (hid, st["id"])).fetchone()
+    if not attempt:
+        aid = core.start_attempt(db, hid, st["id"])
+    else:
+        aid = attempt["id"]
+    saved = 0
+    for key, values in req["form"].items():
+        m = re.match(r"^q(\d+)$", key)
+        if not m:
+            continue
+        qid, answer = int(m.group(1)), (values[0] or "").strip()
+        db.execute(
+            "INSERT INTO dresponses (attempt_id, question_id, given, correct)"
+            " VALUES (?,?,?,NULL)"
+            " ON CONFLICT(attempt_id, question_id)"
+            " DO UPDATE SET given=excluded.given", (aid, qid, answer))
+        saved += 1
+    db.commit()
+    return json_response({"ok": True, "saved": saved})
+
 
 
 def portal_tests(db, s, token, query):
@@ -3970,6 +4096,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_play(db, s, token, query)
     elif tab == "battle":
         body = portal_battle(db, s, token, query)
+    elif tab == "handouts":
+        body = portal_handouts(db, s, token, query)
     elif tab == "class":
         sc = (query.get("scope", ["class"])[0] or "class")
         body = portal_class(db, s, token, "school" if sc == "school" else "class")
@@ -7419,6 +7547,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_test(
                     {"query": {}, "form": form}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/handout/(\d+)/save$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_handout_save(
+                    {"form": form}, db, m.group(1), int(m.group(2))))
             finally:
                 db.close()
 
