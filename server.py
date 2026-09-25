@@ -4722,7 +4722,7 @@ def bars(pairs, width=560, height=240):
                 f'<text x="{x + bw * 0.35:.1f}" y="{y - 4:.1f}" class="axis" '
                 f'text-anchor="middle">{v}</text>'
                 f'<text x="{x + bw * 0.35:.1f}" y="{height - pad_b + 16:.1f}" '
-                f'class="axis" text-anchor="middle">{E(str(k)[:12])}</text>')
+                f'class="axis" text-anchor="middle">{E(str(k))}</text>')
     return (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img">'
             f'{out}</svg>')
 
@@ -4762,8 +4762,8 @@ def charts_panel(db, gid):
     reasons = {}
     for p in pts:
         if p["left"] and p["reason"]:
-            reasons[core.REASON_LABEL.get(p["reason"], p["reason"])] = \
-                reasons.get(core.REASON_LABEL.get(p["reason"], p["reason"]), 0) + 1
+            k = core.REASON_SHORT.get(p["reason"], p["reason"])
+            reasons[k] = reasons.get(k, 0) + 1
 
     def avg(xs):
         return round(sum(xs) / len(xs), 1) if xs else None

@@ -2541,6 +2541,12 @@ LEAVE_REASONS = [
     ("unknown", "Just stopped coming", True),
 ]
 REASON_LABEL = {k: label for k, label, _ours in LEAVE_REASONS}
+# the same reasons in a word or two, for the foot of a bar chart
+REASON_SHORT = {"finished": "Finished", "moved": "Moved", "money": "Money",
+                "timetable": "Timetable", "health": "Health",
+                "other_centre": "Other centre", "progress": "No progress",
+                "unhappy": "Unhappy", "bored": "Lost interest",
+                "unknown": "Stopped coming"}
 REASON_OURS = {k: ours for k, _label, ours in LEAVE_REASONS}
 
 
