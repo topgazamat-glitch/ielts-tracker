@@ -733,6 +733,32 @@ def migrate(db):
         ON enrolments(student_id, ended_at);
     CREATE INDEX IF NOT EXISTS exam_results_by_student
         ON exam_results(student_id, kind);
+    -- ------------------------------------------------------------- the KPI
+    --
+    -- Six levels, and what a teacher is paid per student per month at each.
+    -- Every number here is editable, because they are the centre's numbers
+    -- and not mine: the rates change, the thresholds change, and a teacher
+    -- at another centre has a different ladder entirely.
+    CREATE TABLE IF NOT EXISTS kpi_levels (
+        level INTEGER PRIMARY KEY,         -- 1 is where everybody starts
+        name TEXT NOT NULL,
+        per_student INTEGER NOT NULL,      -- so'm, per student, per month
+        ielts_min REAL,                    -- null means no requirement
+        celta INTEGER NOT NULL DEFAULT 0,  -- 1 means the certificate is needed
+        avg_min REAL,                      -- students' average exam score, %
+        retention_min REAL,                -- %
+        note TEXT
+    );
+    CREATE TABLE IF NOT EXISTS kpi_profile (
+        teacher_id INTEGER PRIMARY KEY REFERENCES teachers(id),
+        ielts REAL,
+        celta INTEGER NOT NULL DEFAULT 0,
+        students INTEGER,                  -- headcount to reckon the pay on
+        avg_override REAL,                 -- when the centre's figure differs
+        retention_override REAL,
+        currency TEXT NOT NULL DEFAULT "so'm",
+        updated_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS parents (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -2748,6 +2774,180 @@ def exam_spread(db, kind, group_id=None):
             "median": round(pcts[n // 2], 1),
             "lowest": round(pcts[0], 1), "highest": round(pcts[-1], 1),
             "bands": bands}
+
+
+# ----------------------------------------------------------------- the KPI
+#
+# Six levels. A teacher is paid per student per month, and which level they
+# are on decides the rate. Everybody starts at level 1 whatever their
+# certificates say, and climbs by meeting every requirement of the level
+# above.
+#
+# The numbers are seeded from Azamat's centre and are all editable, because
+# they belong to the centre rather than to this program. Level 2's thresholds
+# are a guess: he described it as "the same IELTS as level 1, the difference
+# is student results" without saying what the results have to be. It is
+# marked as a guess on the page so it gets corrected rather than believed.
+KPI_SEED = [
+    (1, "Level 1", 180000, None, 0, None, None,
+     "Where every teacher starts, whatever their certificates."),
+    (2, "Level 2", 200000, 8.0, 0, 60, 60,
+     "GUESS - you said the difference from level 1 is student results, "
+     "but not what they have to be. Change these two numbers."),
+    (3, "Level 3", 220000, 8.0, 0, 70, 70,
+     "Where most teachers go straight from level 1."),
+    (4, "Level 4", 240000, 8.0, 1, 70, 70, "CELTA from here up."),
+    (5, "Level 5", 280000, 8.5, 1, 70, 70, None),
+    (6, "Level 6", 310000, 9.0, 1, 70, 70, None),
+]
+
+
+def seed_kpi(db):
+    if db.execute("SELECT COUNT(*) c FROM kpi_levels").fetchone()["c"]:
+        return 0
+    for row in KPI_SEED:
+        db.execute("INSERT INTO kpi_levels (level, name, per_student,"
+                   " ielts_min, celta, avg_min, retention_min, note)"
+                   " VALUES (?,?,?,?,?,?,?,?)", row)
+    db.commit()
+    return len(KPI_SEED)
+
+
+def kpi_levels(db):
+    seed_kpi(db)
+    return db.execute("SELECT * FROM kpi_levels ORDER BY level").fetchall()
+
+
+def save_kpi_level(db, level, **fields):
+    allowed = ("name", "per_student", "ielts_min", "celta", "avg_min",
+               "retention_min", "note")
+    sets = [k for k in fields if k in allowed]
+    if not sets:
+        return False
+    db.execute("UPDATE kpi_levels SET %s WHERE level=?"
+               % ", ".join("%s=?" % k for k in sets),
+               [fields[k] for k in sets] + [level])
+    db.commit()
+    return True
+
+
+def kpi_profile(db):
+    t = the_teacher(db)
+    row = db.execute("SELECT * FROM kpi_profile WHERE teacher_id=?",
+                     (t["id"],)).fetchone()
+    if not row:
+        db.execute("INSERT INTO kpi_profile (teacher_id, updated_at)"
+                   " VALUES (?,?)", (t["id"], iso(now())))
+        db.commit()
+        row = db.execute("SELECT * FROM kpi_profile WHERE teacher_id=?",
+                         (t["id"],)).fetchone()
+    return row
+
+
+def save_kpi_profile(db, **fields):
+    t = the_teacher(db)
+    kpi_profile(db)
+    allowed = ("ielts", "celta", "students", "avg_override",
+               "retention_override", "currency")
+    sets = [k for k in fields if k in allowed]
+    if not sets:
+        return False
+    db.execute("UPDATE kpi_profile SET %s, updated_at=? WHERE teacher_id=?"
+               % ", ".join("%s=?" % k for k in sets),
+               [fields[k] for k in sets] + [iso(now()), t["id"]])
+    db.commit()
+    return True
+
+
+def _meets(level, ielts, celta, avg, retention):
+    """Every requirement, and which ones are not met."""
+    missing = []
+    if level["ielts_min"] is not None and (ielts or 0) < level["ielts_min"]:
+        missing.append(("ielts", level["ielts_min"], ielts))
+    if level["celta"] and not celta:
+        missing.append(("celta", 1, 0))
+    if level["avg_min"] is not None and (avg or 0) < level["avg_min"]:
+        missing.append(("avg", level["avg_min"], avg))
+    if (level["retention_min"] is not None
+            and (retention or 0) < level["retention_min"]):
+        missing.append(("retention", level["retention_min"], retention))
+    return missing
+
+
+def kpi_standing(db, ielts=None, celta=None, avg=None, retention_pct=None,
+                 students=None):
+    """Where a teacher stands, and what every level would pay them.
+
+    The climb is a ladder, not a pick-and-mix: you are on the highest level
+    you can reach without skipping one below it. Level 1 has no requirements
+    because everybody starts there.
+    """
+    levels = kpi_levels(db)
+    prof = kpi_profile(db)
+    ielts = prof["ielts"] if ielts is None else ielts
+    celta = (prof["celta"] if celta is None else celta) and 1
+    students = prof["students"] if students is None else students
+    if avg is None:
+        avg = prof["avg_override"]
+        if avg is None:
+            sp = exam_spread(db, "final") or exam_spread(db, "mid")
+            avg = sp["mean"] if sp else None
+    if retention_pct is None:
+        # the teacher's own figure wins; otherwise work it out of the register
+        retention_pct = prof["retention_override"]
+        if retention_pct is None:
+            retention_pct = retention(db)["rate"]
+    students = students or db.execute(
+        "SELECT COUNT(*) c FROM students WHERE active=1").fetchone()["c"]
+
+    rows, reached = [], 1
+    climbing = True
+    for lv in levels:
+        missing = _meets(lv, ielts, celta, avg, retention_pct)
+        if lv["level"] == 1:
+            missing = []
+        ok = not missing
+        if climbing and ok:
+            reached = lv["level"]
+        elif not ok:
+            climbing = False
+        rows.append({"level": lv["level"], "name": lv["name"],
+                     "per_student": lv["per_student"],
+                     "pay": lv["per_student"] * (students or 0),
+                     "met": ok, "missing": missing, "note": lv["note"],
+                     "ielts_min": lv["ielts_min"], "celta": lv["celta"],
+                     "avg_min": lv["avg_min"],
+                     "retention_min": lv["retention_min"]})
+    here = next(r for r in rows if r["level"] == reached)
+    nxt = next((r for r in rows if r["level"] == reached + 1), None)
+    return {"levels": rows, "level": reached, "here": here, "next": nxt,
+            "students": students, "ielts": ielts, "celta": celta,
+            "avg": avg, "retention": retention_pct,
+            "gap": (nxt["pay"] - here["pay"]) if nxt else 0}
+
+
+def kpi_inputs(db):
+    """The figures the teacher's own records already know.
+
+    Offered rather than imposed: the centre's numbers are the ones that pay,
+    and if they disagree with these the teacher should be able to say so.
+    """
+    r = retention(db)
+    final = exam_spread(db, "final")
+    mid = exam_spread(db, "mid")
+    return {"retention": r["rate"], "retention_ours": r["rate_ours"],
+            "retention_window": (r["since"], r["until"]),
+            "avg_final": final["mean"] if final else None,
+            "avg_final_n": final["n"] if final else 0,
+            "avg_mid": mid["mean"] if mid else None,
+            "avg_mid_n": mid["n"] if mid else 0,
+            "students": db.execute("SELECT COUNT(*) c FROM students"
+                                   " WHERE active=1").fetchone()["c"]}
+
+
+def money(n, currency="so'm"):
+    return "%s %s" % ("{:,}".format(int(round(n or 0))).replace(",", " "),
+                      currency)
 
 
 def vocab_stats(db, student_id):

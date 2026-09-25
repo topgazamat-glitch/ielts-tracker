@@ -59,7 +59,7 @@ def page(title, body, active="", music=False):
 <header class="top">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
-{nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/records', 'Records')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
+{nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/records', 'Records')}{nav('/kpi', 'KPI')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
 {nav('/roster', 'Students')}{nav('/materials', 'Materials')}{nav('/vocab', 'Vocabulary')}{nav('/tests', 'Tests')}{nav('/music', 'Music')}{nav('/play', 'Play')}{nav('/questions', 'Questions')}
 {nav('/settings', 'Settings')}</nav>
 <span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
@@ -4936,6 +4936,211 @@ def act_mark_left(req, db):
 
 
 
+NICE = {"ielts": "IELTS band", "celta": "CELTA", "avg": "students' average",
+        "retention": "retention"}
+
+
+def view_kpi(req, db):
+    """What the ladder pays, where you stand on it, and what the next rung
+    is worth in money.
+
+    The point of the page is the last of those. "You could earn more" moves
+    nobody; "the certificate is worth 1 700 000 a month at your headcount"
+    is a decision.
+    """
+    q = req["query"]
+
+    def num(key, default=None):
+        raw = (q.get(key, [""])[0] or "").strip().replace(",", ".")
+        if raw == "":
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
+    prof = core.kpi_profile(db)
+    ins = core.kpi_inputs(db)
+    ielts = num("ielts", prof["ielts"])
+    celta = 1 if q.get("celta") else (0 if "ielts" in q else prof["celta"])
+    students = int(num("students", prof["students"] or ins["students"]) or 0)
+    avg = num("avg", prof["avg_override"])
+    if avg is None:
+        avg = ins["avg_final"] if ins["avg_final"] is not None else ins["avg_mid"]
+    ret = num("retention", prof["retention_override"])
+    if ret is None:
+        ret = ins["retention"]
+    st = core.kpi_standing(db, ielts=ielts, celta=celta, avg=avg,
+                           retention_pct=ret, students=students)
+    cur = prof["currency"] or "so'm"
+
+    rows = ""
+    for r in st["levels"]:
+        here = r["level"] == st["level"]
+        mark = ("<span class=\"pill good\">you are here</span>" if here
+                else "<span class=\"pill mute\">reached</span>" if r["met"]
+                else "")
+        needs = []
+        if r["ielts_min"] is not None:
+            needs.append("IELTS %g" % r["ielts_min"])
+        if r["celta"]:
+            needs.append("CELTA")
+        if r["avg_min"] is not None:
+            needs.append("avg %g%%" % r["avg_min"])
+        if r["retention_min"] is not None:
+            needs.append("retention %g%%" % r["retention_min"])
+        short = ", ".join(
+            "%s %g (you have %s)"
+            % (NICE[k], want, "no" if k == "celta" else
+               ("—" if got is None else "%g" % got))
+            for k, want, got in r["missing"])
+        tr = '<tr class="me">' if here else "<tr>"
+        rows += (tr
+                 + f'<td><strong>{E(r["name"])}</strong> {mark}'
+                 + (f'<div class="sub">{E(r["note"])}</div>' if r["note"] else "")
+                 + f'</td><td class="sub">{E(" · ".join(needs) or "nothing")}'
+                 + (f'<div class="sub warn">{E(short)}</div>' if short else "")
+                 + f'</td><td class="num">{core.money(r["per_student"], cur)}</td>'
+                 f'<td class="num"><strong>{core.money(r["pay"], cur)}</strong>'
+                 f'</td></tr>')
+
+    if st["next"]:
+        need = ", ".join(NICE[k] for k, _w, _g in st["next"]["missing"])
+        nextline = (f'<p class="flush"><strong>{E(st["next"]["name"])}</strong> '
+                    f'is worth <strong>{core.money(st["gap"], cur)} more a '
+                    f'month</strong> at {st["students"]} students. '
+                    f'What is missing: {E(need)}.</p>')
+    else:
+        nextline = ('<p class="flush">You are on the top rung. The only way '
+                    'the number grows from here is more students.</p>')
+
+    ladder = ""
+    for r in st["levels"]:
+        lv = db.execute("SELECT * FROM kpi_levels WHERE level=?",
+                        (r["level"],)).fetchone()
+        ladder += f"""<tr><td class="sub">{lv["level"]}</td>
+<td><input name="name" value="{E(lv["name"])}" form="lv{lv["level"]}"></td>
+<td><input name="per_student" value="{lv["per_student"]}" class="scorebox"
+ form="lv{lv["level"]}"></td>
+<td><input name="ielts_min" value="{"" if lv["ielts_min"] is None else "%g" % lv["ielts_min"]}"
+ class="tiny" form="lv{lv["level"]}"></td>
+<td><input type="checkbox" name="celta"{" checked" if lv["celta"] else ""}
+ form="lv{lv["level"]}"></td>
+<td><input name="avg_min" value="{"" if lv["avg_min"] is None else "%g" % lv["avg_min"]}"
+ class="tiny" form="lv{lv["level"]}"></td>
+<td><input name="retention_min" value="{"" if lv["retention_min"] is None else "%g" % lv["retention_min"]}"
+ class="tiny" form="lv{lv["level"]}"></td>
+<td><form method="post" action="/kpi/level/{lv["level"]}" id="lv{lv["level"]}">
+<button>Save</button></form></td></tr>"""
+
+    from_records = []
+    if ins["retention"] is not None:
+        a, b = ins["retention_window"]
+        from_records.append(f'retention <strong>{ins["retention"]}%</strong> '
+                            f'({E(a)} to {E(b)})')
+    if ins["avg_final"] is not None:
+        from_records.append(f'final average <strong>{ins["avg_final"]}%</strong> '
+                            f'from {ins["avg_final_n"]} students')
+    elif ins["avg_mid"] is not None:
+        from_records.append(f'mid average <strong>{ins["avg_mid"]}%</strong> '
+                            f'from {ins["avg_mid_n"]} students')
+    offer = (("Your own records say: " + " &middot; ".join(from_records) + ".")
+             if from_records else
+             "Your records cannot work these out yet — record some leavers "
+             "and enter an exam, and they will fill themselves in.")
+
+    body = f"""<h1>What the ladder pays</h1>
+<p class="sub">Six levels, paid per student per month. Move the figures to
+see what any of them would be worth to you. Nothing here is saved unless you
+press save, so it is safe to play with.</p>
+
+<div class="card">
+<form method="get" action="/kpi" class="inline">
+<label class="f">Your IELTS<input name="ielts" class="tiny"
+ value="{"" if ielts is None else "%g" % ielts}"></label>
+<label class="f">CELTA<input type="checkbox" name="celta"
+ value="1"{" checked" if celta else ""}></label>
+<label class="f">Students<input name="students" class="tiny"
+ value="{students}"></label>
+<label class="f">Students' average %<input name="avg" class="tiny"
+ value="{"" if avg is None else "%g" % avg}"></label>
+<label class="f">Retention %<input name="retention" class="tiny"
+ value="{"" if ret is None else "%g" % ret}"></label>
+<button>Work it out</button>
+</form>
+<p class="sub gap-2">{offer}</p>
+</div>
+
+<div class="grid gap-3">
+  {stat("Where you stand", st["here"]["name"])}
+  {stat("A month, at %d students" % st["students"],
+        core.money(st["here"]["pay"], cur))}
+  {stat("Per student", core.money(st["here"]["per_student"], cur))}
+  {stat("The next rung is worth", core.money(st["gap"], cur) if st["next"] else "—")}
+</div>
+<div class="card">{nextline}</div>
+
+<h2 class="gap-4">Every level, at your headcount</h2>
+<div class="tablewrap"><table class="rank">
+<tr><th>Level</th><th>What it asks for</th><th class="num">Per student</th>
+<th class="num">A month</th></tr>{rows}</table></div>
+<p class="sub gap-2">The ladder is a ladder: you are on the highest level you
+can reach without skipping one below it. Level 1 asks for nothing, which is
+why everybody starts there.</p>
+
+<details class="adder"><summary>Change the ladder</summary>
+<div class="card">
+<p class="sub">These are the centre's numbers, not the program's. Change them
+when the centre changes them. Later this can be the manager's to set, with
+every teacher reading their own standing off it.</p>
+<div class="tablewrap"><table class="rank">
+<tr><th></th><th>Name</th><th>Per student</th><th>IELTS</th><th>CELTA</th>
+<th>Avg %</th><th>Retention %</th><th></th></tr>{ladder}</table></div>
+<form method="post" action="/kpi/profile" class="inline gap-3">
+<label class="f">Save my IELTS<input name="ielts" class="tiny"
+ value="{"" if prof["ielts"] is None else "%g" % prof["ielts"]}"></label>
+<label class="f">CELTA<input type="checkbox" name="celta" value="1"
+{" checked" if prof["celta"] else ""}></label>
+<label class="f">Currency<input name="currency" value="{E(cur)}"></label>
+<button>Save my details</button></form>
+</div></details>"""
+    return html_response(page("KPI", body, "KPI"))
+
+
+def act_save_kpi_level(req, db, level):
+    f = req["form"]
+
+    def num(key):
+        raw = (f.get(key, [""])[0] or "").strip().replace(",", ".")
+        if raw == "":
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    per = num("per_student")
+    core.save_kpi_level(
+        db, level,
+        name=(f.get("name", [""])[0] or "").strip() or "Level %d" % level,
+        per_student=int(per) if per is not None else 0,
+        ielts_min=num("ielts_min"), celta=1 if f.get("celta") else 0,
+        avg_min=num("avg_min"), retention_min=num("retention_min"))
+    return redirect("/kpi")
+
+
+def act_save_kpi_profile(req, db):
+    f = req["form"]
+    raw = (f.get("ielts", [""])[0] or "").strip().replace(",", ".")
+    try:
+        ielts = float(raw) if raw else None
+    except ValueError:
+        ielts = None
+    core.save_kpi_profile(db, ielts=ielts, celta=1 if f.get("celta") else 0,
+                          currency=(f.get("currency", [""])[0] or "so'm").strip())
+    return redirect("/kpi")
+
+
 def view_questions(req, db):
     rows = ""
     for q in db.execute(
@@ -7416,6 +7621,9 @@ ROUTES = [
     ("POST", r"^/prompts/delete$", act_delete_prompt),
     ("GET",  r"^/reteach$", view_reteach),
     ("GET",  r"^/records$", view_records),
+    ("GET",  r"^/kpi$", view_kpi),
+    ("POST", r"^/kpi/level/(\d+)$", act_save_kpi_level),
+    ("POST", r"^/kpi/profile$", act_save_kpi_profile),
     ("POST", r"^/records/test/new$", act_new_class_test),
     ("POST", r"^/records/test/(\d+)/save$", act_save_class_scores),
     ("POST", r"^/records/exam/save$", act_save_exam),
