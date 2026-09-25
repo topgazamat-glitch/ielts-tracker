@@ -42,6 +42,19 @@ FOIL = {"light": "#f7e3a1", "mid": "#d8b04a", "deep": "#a97c1c", "edge": "#8a641
 
 # ------------------------------------------------------------------ layout
 
+def demo_banner():
+    """Impossible to miss, on purpose. Nobody should ever wonder whether the
+    class they are looking at is real."""
+    if not core.demo_on():
+        return ""
+    return ('<div class="demobar"><strong>Demo.</strong> Every student on '
+            'these pages is invented, and nothing here touches your real '
+            'classes. <form method="post" action="/demo/reset">'
+            '<button class="tab">Reset the demo</button></form>'
+            '<form method="post" action="/demo/off">'
+            '<button class="tab">Leave the demo</button></form></div>')
+
+
 def page(title, body, active="", music=False):
     """The teacher's shell. Silent unless a page asks otherwise: marking
     for three hours should not come with a soundtrack - but the song of the
@@ -56,7 +69,7 @@ def page(title, body, active="", music=False):
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head><body>
-<header class="top">
+{demo_banner()}<header class="top">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 <nav>{nav('/', 'Overview')}{nav('/queue', 'Grade')}{nav('/homework', 'Homework')}
 {nav('/ratings', 'Progress')}{nav('/reteach', 'Reteach')}{nav('/records', 'Records')}{nav('/kpi', 'KPI')}{nav('/championship', 'League')}{nav('/assignments', 'Assignments')}{nav('/groups', 'Groups')}
@@ -5233,6 +5246,16 @@ def view_kpi(req, db):
              "Your records cannot work these out yet — record some leavers "
              "and enter an exam, and they will fill themselves in.")
 
+    # the invitation to the demo, hidden while the demo is what is showing
+    invite = "" if core.demo_on() else (
+        '<div class="card gap-4"><p class="flush"><strong>Showing this to '
+        'management?</strong> The demo puts an invented class of twenty-eight '
+        'through a whole term \u2014 homework, tests, exams, six leavers \u2014 '
+        'so every chart and figure on the site has something in it. It is a '
+        'separate copy: nothing you do in it can reach your real students, '
+        'and a banner stays on every page until you leave.</p>'
+        '<form method="post" action="/demo/on" class="gap-2">'
+        '<button>Open the demo</button></form></div>')
     body = f"""<h1>What the ladder pays</h1>
 <p class="sub">Six levels, paid per student per month. Move the figures to
 see what any of them would be worth to you. Nothing here is saved unless you
@@ -5272,6 +5295,11 @@ press save, so it is safe to play with.</p>
 can reach without skipping one below it. Level 1 asks for nothing, which is
 why everybody starts there.</p>
 
+{invite} The demo puts an invented class of twenty-eight through a
+whole term — homework, tests, exams, six leavers — so every chart and figure
+on the site has something in it. It is a separate copy: nothing you do in it
+can reach your real students, and a banner stays on every page until you
+leave.</p>
 <details class="adder"><summary>Change the ladder</summary>
 <div class="card">
 <p class="sub">These are the centre's numbers, not the program's. Change them
@@ -5323,6 +5351,26 @@ def act_save_kpi_profile(req, db):
     core.save_kpi_profile(db, ielts=ielts, celta=1 if f.get("celta") else 0,
                           currency=(f.get("currency", [""])[0] or "so'm").strip())
     return redirect("/kpi")
+
+
+def act_demo_on(req, db):
+    """Show management. Seeds the demo copy on first use, then sets a cookie
+    that only a signed-in teacher's requests will honour."""
+    core.demo_ready()
+    return (303, [("Location", "/kpi"),
+                  ("Set-Cookie", "ta_demo=1; Path=/; SameSite=Lax")], b"")
+
+
+def act_demo_off(req, db):
+    return (303, [("Location", "/"),
+                  ("Set-Cookie", "ta_demo=; Path=/; Max-Age=0; SameSite=Lax")],
+            b"")
+
+
+def act_demo_reset(req, db):
+    core.demo_reset()
+    return redirect("/kpi")
+
 
 
 def view_questions(req, db):
@@ -7806,6 +7854,9 @@ ROUTES = [
     ("GET",  r"^/reteach$", view_reteach),
     ("GET",  r"^/records$", view_records),
     ("GET",  r"^/kpi$", view_kpi),
+    ("POST", r"^/demo/on$", act_demo_on),
+    ("POST", r"^/demo/off$", act_demo_off),
+    ("POST", r"^/demo/reset$", act_demo_reset),
     ("POST", r"^/kpi/level/(\d+)$", act_save_kpi_level),
     ("POST", r"^/kpi/profile$", act_save_kpi_profile),
     ("POST", r"^/records/test/new$", act_new_class_test),
@@ -7918,11 +7969,34 @@ class Handler(BaseHTTPRequestHandler):
         token = self._token()
         if not token:
             return False
-        db = core.connect()
+        db = core.connect(real=True)     # sessions live in the real file only
         try:
             return core.session_live(db, token)
         finally:
             db.close()
+
+    def _cookie(self, name):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def _enter_demo_if_asked(self, path):
+        """Point this thread at the demo copy, for a signed-in teacher only.
+
+        Student pages, parent pages and the static files never switch: a
+        student's link is looked up in the real file whatever cookies the
+        browser happens to carry. The bot and the jobs run on other threads
+        and cannot see this at all.
+        """
+        core.demo_on(False)
+        if path.startswith(("/s/", "/p/", "/static/", "/login", "/demo/")):
+            return
+        if self._cookie("ta_demo") == "1" and self._session():
+            core.demo_ready()
+            core.demo_on(True)
 
     def _serve_static(self, path):
         name = os.path.basename(path)
@@ -8104,6 +8178,13 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        self._enter_demo_if_asked(urllib.parse.urlsplit(self.path).path)
+        try:
+            return self._do_GET_inner()
+        finally:
+            core.demo_on(False)
+
+    def _do_GET_inner(self):
         parsed = urllib.parse.urlsplit(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
 
@@ -8217,6 +8298,13 @@ class Handler(BaseHTTPRequestHandler):
                                             "headers": self.headers})
 
     def do_POST(self):
+        self._enter_demo_if_asked(urllib.parse.urlsplit(self.path).path)
+        try:
+            return self._do_POST_inner()
+        finally:
+            core.demo_on(False)
+
+    def _do_POST_inner(self):
         parsed = urllib.parse.urlsplit(self.path)
         path = parsed.path
         length = int(self.headers.get("Content-Length") or 0)

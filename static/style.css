@@ -1759,3 +1759,23 @@ table.rank td .f { flex-direction: row; align-items: center; gap: var(--sp-1);
 .chart .dot.left { fill: var(--warn-soft); stroke: var(--warn);
   stroke-width: 2; fill-opacity: 1; }
 .chart .bar { fill: var(--brand); fill-opacity: .75; rx: 2; }
+
+/* ------------------------------------------------- demo mode
+
+   A band across the top of every page while the demo copy is showing. It
+   is loud on purpose: the one thing worse than no demo is a manager who
+   cannot tell which class is real. */
+
+.demobar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--gold-soft); color: #5c4400;
+  border-bottom: 2px solid #d8ae4a; font-size: 14px;
+}
+.demobar form { margin: 0; }
+.demobar form:first-of-type { margin-left: auto; }
+.demobar .tab { min-height: 30px; }
+@media (max-width: 720px) {
+  .demobar { padding: var(--sp-2) var(--sp-4); }
+  .demobar form:first-of-type { margin-left: 0; }
+}

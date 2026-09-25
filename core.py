@@ -203,11 +203,28 @@ def local_day(dt, cfg):
     return (dt + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%Y-%m-%d")
 
 
-def connect():
+# Demo mode. A separate database file of invented students, so that showing
+# the tracker to management never puts a made-up name next to a real one.
+# The switch is per thread: the request that carries the demo cookie sets
+# it, and the bot and the scheduled jobs - which run on their own threads -
+# never see it, so nothing invented can be sent to a real student's phone.
+DEMO_PATH = os.path.join(DATA_DIR, "demo.db")
+_thread = __import__("threading").local()
+
+
+def demo_on(flag=None):
+    """Read, or set, whether this thread is looking at the demo copy."""
+    if flag is not None:
+        _thread.demo = bool(flag)
+    return bool(getattr(_thread, "demo", False))
+
+
+def connect(real=False):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(MATERIAL_DIR, exist_ok=True)
     os.makedirs(MUSIC_DIR, exist_ok=True)
-    db = sqlite3.connect(DB_PATH, timeout=30)
+    path = DEMO_PATH if (demo_on() and not real) else DB_PATH
+    db = sqlite3.connect(path, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
@@ -3077,6 +3094,119 @@ def cycle_points(db, group_id=None):
             "quiet_days": quiet,
         })
     return out
+
+
+# ------------------------------------------------------------ demo data
+
+DEMO_NAMES = ["Aziz", "Malika", "Jasur", "Nodira", "Bek", "Dilnoza", "Sardor",
+              "Kamola", "Otabek", "Shahnoza", "Farrukh", "Iroda", "Sanjar",
+              "Madina", "Rustam", "Nilufar", "Bekzod", "Zarina", "Temur",
+              "Gulnora", "Javohir", "Sevara", "Umid", "Feruza", "Doston",
+              "Aziza", "Shoxrux", "Dilshod"]
+
+
+def seed_demo(db, seed=11):
+    """One invented class and one invented term, for showing the tracker.
+
+    Twenty-eight students with habits: each one keeps to a homework habit
+    roughly, and the class tests and exams follow it with noise, so the
+    charts have something true to find. Six leave, for six different
+    reasons, most of them the ones who had already gone quiet.
+    Every figure is made up. The shape is the point.
+    """
+    if db.execute("SELECT COUNT(*) c FROM students").fetchone()["c"]:
+        return 0
+    rnd = random.Random(seed)
+    t0 = now()
+    lvl = db.execute("SELECT id FROM levels WHERE name='Pre-Intermediate'"
+                     ).fetchone()
+    g = db.execute("INSERT INTO groups (name, join_code, created_at, level_id)"
+                   " VALUES ('Demo 214','DEMO',?,?)",
+                   (iso(t0 - timedelta(days=150)), lvl["id"] if lvl else None)
+                   ).lastrowid
+    ids = []
+    for n in DEMO_NAMES:
+        sid = add_student(db, n, g)
+        db.execute("UPDATE students SET created_at=? WHERE id=?",
+                   (iso(t0 - timedelta(days=rnd.randint(120, 150))), sid))
+        ids.append(sid)
+    db.commit()
+    backfill_enrolments(db)
+
+    def habit(i):
+        return 0.35 + 0.6 * ((i * 7919) % 100) / 100.0
+
+    for wk in range(12):
+        due = t0 - timedelta(days=120 - wk * 9)
+        a = db.execute("INSERT INTO assignments (group_id, title, created_at,"
+                       " published, due_at) VALUES (?,?,?,1,?)",
+                       (g, "Homework %d" % (wk + 1),
+                        iso(due - timedelta(days=3)), iso(due))).lastrowid
+        for i, sid in enumerate(ids):
+            if rnd.random() < habit(i):
+                score = max(3, min(10, round(rnd.gauss(4 + 6 * habit(i), 1.1))))
+                db.execute("INSERT INTO submissions (student_id, assignment_id,"
+                           " status, score, created_at, kind)"
+                           " VALUES (?,?,'graded',?,?,'photo')",
+                           (sid, a, score, iso(due - timedelta(days=1))))
+        for i, sid in enumerate(ids):
+            if rnd.random() < 0.8:
+                m = max(1, min(5, round(rnd.gauss(2 + 3 * habit(i), 0.7))))
+                db.execute("INSERT INTO lesson_marks (student_id, day,"
+                           " punctuality, behaviour, participation, created_at)"
+                           " VALUES (?,?,?,?,?,?)",
+                           (sid, iso(due)[:10], m, m, m, iso(due)))
+    db.commit()
+    for title, mx, day in (("Units 1-3 test", 20, 95), ("Units 4-6 test", 20, 60),
+                           ("Units 7-9 test", 20, 30)):
+        t = new_class_test(db, g, title, mx, iso(t0 - timedelta(days=day))[:10])
+        save_class_scores(db, t, {
+            sid: max(4, min(mx, round(rnd.gauss(mx * (0.35 + 0.55 * habit(i)), 2))))
+            for i, sid in enumerate(ids)})
+    for kind, day in (("mid", 70), ("final", 12)):
+        save_exam(db, g, kind, kind.title() + "-course exam", 100,
+                  iso(t0 - timedelta(days=day))[:10],
+                  {sid: max(18, min(98, round(rnd.gauss(32 + 55 * habit(i), 7))))
+                   for i, sid in enumerate(ids)},
+                  marked_by="Demo teacher")
+    order = sorted(range(len(ids)), key=lambda i: (i * 7919) % 100)
+    for i, reason, ago in ((order[0], "bored", 80), (order[1], "progress", 62),
+                           (order[2], "money", 44), (order[3], "moved", 30),
+                           (order[4], "unknown", 20), (order[5], "timetable", 9)):
+        mark_left(db, ids[i], reason, when=iso(t0 - timedelta(days=ago)))
+    save_kpi_profile(db, ielts=8.0, celta=0, students=28)
+    db.commit()
+    return len(ids)
+
+
+def demo_ready():
+    """Make sure the demo copy exists and is seeded. Safe to call every time."""
+    fresh = not os.path.exists(DEMO_PATH)
+    was = demo_on()
+    demo_on(True)
+    try:
+        db = connect()
+        db.executescript(SCHEMA)
+        migrate(db)
+        for i, name in enumerate(LEVELS):
+            db.execute("INSERT OR IGNORE INTO levels (name, sort) VALUES (?,?)",
+                       (name, i))
+        db.commit()
+        seed_demo(db)
+        db.close()
+    finally:
+        demo_on(was)
+    return fresh
+
+
+def demo_reset():
+    """Throw the demo copy away and make it again."""
+    for ext in ("", "-wal", "-shm"):
+        try:
+            os.remove(DEMO_PATH + ext)
+        except FileNotFoundError:
+            pass
+    return demo_ready()
 
 
 def vocab_stats(db, student_id):
