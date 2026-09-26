@@ -4375,7 +4375,20 @@ def view_homework(req, db):
     for r, items, key, pill in rows:
         if key != last_key:
             n = sum(1 for t in rows if t[2] == key)
-            lines += f'<h2 class="hwhead">{heading[key]} <span class="sub">{n}</span></h2>'
+            lines += f'<h2 class="hwhead">{heading[key]} <span class="sub">{n}</span>'
+            if key == "past":
+                # One press for the whole pile: the pieces keep every mark
+                # and every photo, they just stop being open.
+                where = ("everything" if gid is None
+                         else f"everything for {group_name(db, gid)}")
+                lines += (f'<form method="post" action="/assignments/close-past" '
+                          f'class="hwclose" onsubmit="return confirm('
+                          f'{json.dumps("Close %s past its deadline? %d piece(s). Marks and photos are kept." % (where, n))})">'
+                          f'<input type="hidden" name="group_id" value="{gid or ""}">'
+                          f'<input type="hidden" name="back" value="{E(here)}">'
+                          f'<button class="ghost">Close all {n} past their deadline</button>'
+                          f'</form>')
+            lines += '</h2>'
             last_key = key
         g = r["group_id"]
         due = r["due_at"]
@@ -4431,10 +4444,17 @@ def view_homework(req, db):
         lines = (f'<div class="card"><p class="sub flush">{what}. '
                  f'Set some on the <a class="linky" href="/assignments">Set homework</a> '
                  f'page.</p></div>')
+    just = (q.get("closed", [""])[0] or "").strip()
+    flash = ""
+    if just.isdigit():
+        n = int(just)
+        flash = (f'<p class="flash">Closed {n} piece{"" if n == 1 else "s"} of homework. '
+                 f'They are under <a class="linky" href="/homework?show=closed">Closed</a>.</p>'
+                 if n else '<p class="flash">Nothing was past its deadline.</p>')
     body = f"""<h1>Homework</h1>
 <p class="sub">Everything you have set, nearest deadline first. Open one to see who has
 done it before the lesson starts.</p>
-<div class="toolbar">{classes}{states}</div>
+{flash}<div class="toolbar">{classes}{states}</div>
 <div class="hwlist">{lines}</div>"""
     return html_response(page("Homework", body, "Homework"))
 
@@ -4970,43 +4990,79 @@ def finding(c):
             f'<p class="sub gap-2">{E(c["says"])}</p>')
 
 
-def donut(slices, big="", small=""):
-    """A donut chart as inline SVG: (label, value, class) per slice, the
-    class naming what the slice is so the colour means the same thing on
-    every chart. The figure in the middle is the one to remember."""
+def donut(slices, big="", small="", size=200, empty="", labels=True):
+    """A donut chart as inline SVG.
+
+    Drawn as one ring of stroked arcs rather than pie wedges with a hole cut
+    out: the arcs sit on a single circle with a hairline gap between them,
+    which is what makes it read as a chart rather than a clip-art pie. Each
+    slice is (label, value, class); the class names what the slice *is* -
+    kept, ours, theirs - so the colour means the same thing on every chart.
+    Slices worth a tenth or more carry their percentage; the legend carries
+    all of them, with counts and shares. When there is nothing to draw the
+    ring is drawn faint and says why, instead of vanishing."""
     total = sum(v for _l, v, _c in slices)
+    c = size / 2.0
+    ring, width = size * 0.40, size * 0.13
     if not total:
-        return '<p class="sub flush">Nothing to draw yet.</p>'
-    cx = cy = 75
-    r, hole = 66, 42
-    out = ""
-    ang = -math.pi / 2
-    for label, v, cls in slices:
-        if not v:
-            continue
-        frac = v / total
-        title = f"<title>{E(label)}: {v}</title>"
-        if frac >= 0.9999:
-            out += f'<circle cx="{cx}" cy="{cy}" r="{r}" class="slice {cls}">{title}</circle>'
-            continue
-        a2 = ang + 2 * math.pi * frac
-        x1, y1 = cx + r * math.cos(ang), cy + r * math.sin(ang)
-        x2, y2 = cx + r * math.cos(a2), cy + r * math.sin(a2)
-        large = 1 if frac > 0.5 else 0
-        out += (f'<path d="M{cx},{cy} L{x1:.1f},{y1:.1f} A{r},{r} 0 {large} 1 '
-                f'{x2:.1f},{y2:.1f} Z" class="slice {cls}">{title}</path>')
-        ang = a2
-    out += f'<circle cx="{cx}" cy="{cy}" r="{hole}" class="hole"/>'
+        return (f'<div class="donut empty"><svg viewBox="0 0 {size} {size}" role="img" '
+                f'aria-label="{E(empty)}"><circle cx="{c}" cy="{c}" r="{ring}" '
+                f'class="ring-empty"/>'
+                f'<text x="{c}" y="{c + 5}" text-anchor="middle" class="small">'
+                f'{E(empty or "nothing yet")}</text></svg></div>')
+    shown = [(l, v, cls) for l, v, cls in slices if v]
+    gap = 1.4 if len(shown) > 1 else 0
+    arcs, marks = "", ""
+    start = 0.0
+    for label, v, cls in shown:
+        pct = 100.0 * v / total
+        length = max(0.0, pct - gap)
+        arcs += (f'<circle cx="{c}" cy="{c}" r="{ring}" pathLength="100" '
+                 f'class="slice {cls}" style="stroke-width:{width:.0f}" '
+                 f'stroke-dasharray="{length:.2f} {100 - length:.2f}" '
+                 f'stroke-dashoffset="{-(start + gap / 2):.2f}" '
+                 f'transform="rotate(-90 {c} {c})">'
+                 f'<title>{E(label)}: {v} ({pct:.0f}%)</title></circle>')
+        # a share on the slice, unless it is the only slice: the middle says it
+        if labels and pct >= 10 and len(shown) > 1:
+            mid = math.radians((start + pct / 2) * 3.6 - 90)
+            x, y = c + ring * math.cos(mid), c + ring * math.sin(mid)
+            marks += (f'<text x="{x:.1f}" y="{y + 4:.1f}" text-anchor="middle" '
+                      f'class="share">{pct:.0f}%</text>')
+        start += pct
+    centre = ""
     if big:
-        y = cy + 9 if not small else cy + 3
-        out += f'<text x="{cx}" y="{y}" text-anchor="middle" class="big">{E(big)}</text>'
+        y = c + 9 if not small else c + 3
+        centre += f'<text x="{c}" y="{y:.0f}" text-anchor="middle" class="big">{E(big)}</text>'
     if small:
-        out += f'<text x="{cx}" y="{cy + 22}" text-anchor="middle" class="small">{E(small)}</text>'
-    legend = "".join(f'<li><i class="{cls}"></i>{E(label)}<span class="n">{v}</span></li>'
-                     for label, v, cls in slices)
-    return (f'<div class="donut"><svg viewBox="0 0 150 150" role="img" '
-            f'aria-label="{E(big)} {E(small)}">{out}</svg>'
+        centre += (f'<text x="{c}" y="{c + 22:.0f}" text-anchor="middle" class="small">'
+                   f'{E(small)}</text>')
+    legend = "".join(
+        f'<li><i class="{cls}"></i><span class="what">{E(label)}</span>'
+        f'<span class="n">{v}</span><span class="pc">{100.0 * v / total:.0f}%</span></li>'
+        for label, v, cls in slices)
+    return (f'<div class="donut"><svg viewBox="0 0 {size} {size}" role="img" '
+            f'aria-label="{E(big)} {E(small)}">{arcs}{marks}{centre}</svg>'
             f'<ul class="legend">{legend}</ul></div>')
+
+
+def band_pies(rows, empty_note):
+    """One small pie per band: kept against left, the share kept in the
+    middle. The sentence under each is the one a manager would ask for."""
+    out = ""
+    for r in rows:
+        if not r["n"]:
+            continue
+        kept_pct = "%.0f%%" % (100.0 * r["kept"] / r["n"])
+        pie = donut([("Still here", r["kept"], "kept"), ("Left", r["left"], "ours")],
+                    big=kept_pct, small="still here", size=150, labels=False)
+        pie = pie.replace('<ul class="legend">', '<ul class="legend" hidden>')
+        out += (f'<div class="pie"><div class="pie-title">{E(r["label"])}</div>'
+                f'<div class="sub">{E(r["note"])}</div>{pie}'
+                f'<div class="pie-note"><strong>{r["left"]} of {r["n"]}</strong> left</div></div>')
+    if not out:
+        return f'<p class="sub flush">{empty_note}</p>'
+    return f'<div class="pies">{out}</div>'
 
 
 def compare_rows(rows):
@@ -5105,7 +5161,7 @@ def view_insights(req, db):
     keep = donut([("Still here", len(here), "kept"),
                   ("Left — could be ours", ours, "ours"),
                   ("Left — outside your control", theirs, "theirs")],
-                 big=kept_pct, small="still here")
+                 big=kept_pct, small="still here", empty="no students yet")
     reasons = {}
     for p in left:
         k = core.REASON_SHORT.get(p["reason"], p["reason"] or "unknown")
@@ -5113,7 +5169,17 @@ def view_insights(req, db):
     letters = "abcdef"
     why = donut([(k, v, letters[i % 6]) for i, (k, v) in
                  enumerate(sorted(reasons.items(), key=lambda kv: -kv[1]))],
-                big=str(len(left)), small="left")
+                big=str(len(left)), small="left", empty="nobody has left")
+    no_leavers = ("" if left else
+                  '<p class="sub gap-2 flush">Nobody has been recorded as leaving yet. '
+                  'When a student stops coming, mark them on the '
+                  '<a class="linky" href="/records?v=leavers">Who left</a> tab and '
+                  'these pies start to mean something.</p>')
+    hw_pies = band_pies(core.bands(pts, "completion", core.HABIT_BANDS),
+                        "No homework recorded yet.")
+    room_pies = band_pies(core.bands(pts, "participation", core.ROOM_BANDS),
+                          "No classroom marks recorded yet - they are given on the "
+                          "Grade page, lesson by lesson.")
 
     # ----------------------------------------------------- the comparisons
     cmp_rows = core.left_vs_stayed(pts)
@@ -5161,9 +5227,20 @@ only what the numbers can back.</p>
 <p class="sub gap-2 flush">"Could be ours" is a reason a teacher might have changed:
 bored, no progress, a fallout. Moving away, money and finishing are not.</p></div>
 <div class="card"><h3 class="flush gap-3">Why they left</h3>{why}
-<p class="sub gap-2 flush">Recorded on the <a class="linky" href="/records?v=leavers">Who
-left</a> tab, one student at a time. This chart is only as honest as that habit.</p></div>
+{no_leavers or '<p class="sub gap-2 flush">Recorded on the <a class="linky" href="/records?v=leavers">Who left</a> tab, one student at a time. This chart is only as honest as that habit.</p>'}</div>
 </div>
+
+<h2>Who leaves, by homework habit</h2>
+<div class="card">{hw_pies}
+<p class="sub gap-3 flush">Every student sorted by how much of the homework they
+do, and in each group the share who are still here. If the weak-homework pie is
+the red one, the homework is your early warning.</p></div>
+
+<h2>Who leaves, by how they are in the classroom</h2>
+<div class="card">{room_pies}
+<p class="sub gap-3 flush">The same, by the classroom marks - punctuality,
+behaviour and taking part, averaged. These are the two habits a teacher can
+see with their own eyes, weeks before a student stops coming.</p></div>
 
 <h2>What the leavers looked like before they left</h2>
 <div class="card">{compare_rows(cmp_rows)}
@@ -7921,6 +7998,27 @@ def act_batch_close(req, db):
     return redirect(_back(req, "/assignments"))
 
 
+def act_close_past(req, db):
+    """Close every published piece whose deadline has passed - the whole
+    school, or one class when the list was filtered to it. Nothing about
+    the students' work changes; the pieces simply stop being open."""
+    f = req["form"]
+    gid = (f.get("group_id", [""])[0] or "").strip()
+    rows = db.execute(
+        "SELECT id, group_id, due_at FROM assignments"
+        " WHERE closed=0 AND published=1 AND due_at IS NOT NULL"
+        + (" AND group_id=?" if gid.isdigit() else ""),
+        (int(gid),) if gid.isdigit() else ()).fetchall()
+    cfg = core.load_config()
+    shut = [r["id"] for r in rows if not core.still_open(r["due_at"], cfg)]
+    for aid in shut:
+        db.execute("UPDATE assignments SET closed=1 WHERE id=?", (aid,))
+    db.commit()
+    back = _back(req, "/homework")
+    joiner = "&" if "?" in back else "?"
+    return redirect(f"{back}{joiner}closed={len(shut)}")
+
+
 def act_batch_open(req, db):
     gid, due, items = _batch_of(req, db)
     for a in items:
@@ -8275,6 +8373,7 @@ ROUTES = [
     ("GET",  r"^/insights$", view_insights),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/batch/close$", act_batch_close),
+    ("POST", r"^/assignments/close-past$", act_close_past),
     ("POST", r"^/assignments/batch/open$", act_batch_open),
     ("POST", r"^/assignments/batch/publish$", act_batch_publish),
     ("POST", r"^/assignments/batch/delete$", act_batch_delete),

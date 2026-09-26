@@ -128,10 +128,38 @@ print("   closed ones leave the open list:", "114" not in get("/homework").split
 print("   and appear under Closed:", '<span class="pill mute">closed</span>' in get("/homework?show=closed"))
 assert '<span class="pill mute">closed</span>' in get("/homework?show=closed")
 
+print("\n3b. ONE BUTTON CLOSES EVERYTHING PAST ITS DEADLINE")
+post("/assignments/batch/open", {"group_id": g1, "due": due2})     # 114 open again, due 2030
+post("/assignments/list", {"group_id": g1, "items": "Old essay\nOld grammar",
+                           "task_type": "other", "due": "2020-01-10", "due_time": "18:00",
+                           "publish": "1"})
+post("/assignments/list", {"group_id": g2, "items": "Old words",
+                           "task_type": "other", "due": "2020-01-11", "due_time": "18:00",
+                           "publish": "1"})
+pg = get("/homework")
+print("   the button names the pile:", "Close all 2 past their deadline" in pg)
+assert "Close all 2 past their deadline" in pg
+where, pg = post("/assignments/close-past", {"group_id": g2, "back": "/homework?group=%d" % g2})
+db = core.connect()
+still = db.execute("SELECT COUNT(*) c FROM assignments WHERE closed=0 AND due_at LIKE '2020%'").fetchone()["c"]
+db.close()
+print("   one class only, when the list was filtered:", still == 2 and "closed=1" in where)
+assert still == 2 and "closed=1" in where
+where, pg = post("/assignments/close-past", {"group_id": "", "back": "/homework"})
+db = core.connect()
+still = db.execute("SELECT COUNT(*) c FROM assignments WHERE closed=0 AND due_at LIKE '2020%'").fetchone()["c"]
+future = db.execute("SELECT COUNT(*) c FROM assignments WHERE closed=0 AND due_at LIKE '2030%'").fetchone()["c"]
+db.close()
+print("   then the whole school:", still == 0, " and 2030's homework stays open:", future == 4)
+assert still == 0 and future == 4   # 114's three and 216's one
+print("   told how many:", "Closed 2 pieces" in pg)
+assert "Closed 2 pieces" in pg
+
 print("\n4. DELETING KEEPS THE STUDENTS' WORK")
 where, _ = post("/assignments/batch/delete", {"group_id": g1, "due": due2, "back": "/homework"})
 db = core.connect()
-left = db.execute("SELECT COUNT(*) c FROM assignments WHERE group_id=?", (g1,)).fetchone()["c"]
+left = db.execute("SELECT COUNT(*) c FROM assignments WHERE group_id=? AND due_at=?",
+                  (g1, due2)).fetchone()["c"]
 kept = db.execute("SELECT COUNT(*) c FROM submissions WHERE student_id=?",
                   (kids["Diyora"],)).fetchone()["c"]
 db.close()
