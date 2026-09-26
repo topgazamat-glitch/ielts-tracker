@@ -87,15 +87,28 @@ def page(title, body, active="", music=False):
         cls = ' class="on"' if on else ""
         return f'<a href="{href}"{cls}>{label}</a>'
 
-    primary = "".join(link(home, name, name == section)
-                      for name, home, _pages in SECTIONS)
+    # A section with several pages opens a menu of them on hover, and says so
+    # with a small arrow: a section name alone looked like a page, and the
+    # pages inside it could not be found without clicking through.
+    def section_html(name, home, pages):
+        on = name == section
+        if len(pages) == 1:
+            return link(home, name, on)
+        menu = "".join(link(h, l, l == active) for h, l in pages)
+        a_cls = "on has-menu" if on else "has-menu"
+        return (f'<div class="sec"><a href="{home}" class="{a_cls}">'
+                f'{name}</a><div class="menu">{menu}</div></div>')
+
+    primary = "".join(section_html(name, home, pages)
+                      for name, home, pages in SECTIONS)
     # The second row exists only where a section has more than one page, so
     # Today and KPI do not carry an empty strip under the name.
     sub = ""
     for name, _home, pages in SECTIONS:
         if name == section and len(pages) > 1:
             links = "".join(link(h, l, l == active) for h, l in pages)
-            sub = f'<nav class="pages" aria-label="{name}">{links}</nav>'
+            sub = (f'<div class="pagesband"><nav class="pages" aria-label="{name}">'
+                   f'{links}</nav></div>')
     settings_on = ' class="on"' if active == "Settings" else ""
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">

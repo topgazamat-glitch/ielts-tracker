@@ -60,9 +60,7 @@
         var here = document.querySelector("main");
         here.parentNode.replaceChild(fresh, here);
 
-        var oldNav = document.querySelector("header nav");
-        var newNav = doc.querySelector("header nav");
-        if (oldNav && newNav) { oldNav.innerHTML = newNav.innerHTML; }
+        swapHeader(doc);
         if (doc.title) { document.title = doc.title; }
 
         if (push) { window.history.pushState({nav: 1}, "", href); }
@@ -71,6 +69,33 @@
         document.dispatchEvent(new CustomEvent("pageswap"));
       })
       .catch(function () { if (mine === busy) { full(href); } });
+  }
+
+  // The teacher's header is two rows: the sections, and the pages of the
+  // current section. Both change from page to page, and the second row may
+  // appear or vanish, so each is brought over from the new document. The
+  // music button and the sign-out link live between them and are left alone.
+  function swapHeader(doc) {
+    var oldTop = document.querySelector("header.top");
+    var newTop = doc.querySelector("header.top");
+    var oldSec = oldTop && oldTop.querySelector("nav.sections");
+    if (!oldSec) {
+      var oldNav = document.querySelector("header nav");
+      var newNav = doc.querySelector("header nav");
+      if (oldNav && newNav) { oldNav.innerHTML = newNav.innerHTML; }
+      return;
+    }
+    if (!newTop) return;
+    var newSec = newTop.querySelector("nav.sections");
+    if (newSec) { oldSec.innerHTML = newSec.innerHTML; }
+    var oldBand = oldTop.querySelector(".pagesband");
+    var newBand = newTop.querySelector(".pagesband");
+    if (oldBand && newBand) { oldBand.innerHTML = newBand.innerHTML; }
+    else if (oldBand) { oldBand.parentNode.removeChild(oldBand); }
+    else if (newBand) { oldTop.appendChild(newBand); }
+    var oldSet = oldTop.querySelector('.right a[href="/settings"]');
+    var newSet = newTop.querySelector('.right a[href="/settings"]');
+    if (oldSet && newSet) { oldSet.className = newSet.className; }
   }
 
   document.addEventListener("click", function (e) {
@@ -90,4 +115,40 @@
   window.addEventListener("popstate", function (e) {
     if (e.state && e.state.nav) { go(window.location.href, false); }
   });
+})();
+
+
+/* On a phone there is no hover, so the arrow beside a section opens its
+ * menu on a tap instead of leaving the page. The menu is pinned just under
+ * the header, outside the strip that scrolls sideways, or the strip would
+ * clip it. A second tap on the same section, or a tap anywhere else, closes
+ * it. Registered on the capture phase so it runs before the page-swapping
+ * handler above, which honours preventDefault.
+ */
+(function () {
+  if (window.matchMedia && window.matchMedia("(hover: hover)").matches) return;
+  if (!document.querySelector("nav.sections")) return;
+  var open = null;
+  function close() { if (open) { open.classList.remove("open"); open = null; } }
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var a = t.closest("nav.sections a.has-menu");
+    if (a) {
+      e.preventDefault();
+      var sec = a.parentNode;
+      if (sec === open) { close(); return; }
+      close();
+      var head = document.querySelector("header.top");
+      var menu = sec.querySelector(".menu");
+      if (head && menu) {
+        menu.style.top = Math.round(head.getBoundingClientRect().bottom) + "px";
+      }
+      sec.classList.add("open");
+      open = sec;
+      return;
+    }
+    if (!t.closest("nav.sections .menu")) close();
+  }, true);
+  document.addEventListener("pageswap", function () { open = null; });
 })();
