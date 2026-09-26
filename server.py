@@ -5717,19 +5717,16 @@ def act_demo_on(req, db):
     """Show management. Seeds the demo copy on first use, then sets a cookie
     that only a signed-in teacher's requests will honour."""
     core.demo_ready()
-    return (303, [("Location", "/insights"),
-                  ("Set-Cookie", "ta_demo=1; Path=/; SameSite=Lax")], b"")
+    return redirect("/insights", [("Set-Cookie", "ta_demo=1; Path=/; SameSite=Lax")])
 
 
 def act_demo_off(req, db):
-    return (303, [("Location", "/"),
-                  ("Set-Cookie", "ta_demo=; Path=/; Max-Age=0; SameSite=Lax")],
-            b"")
+    return redirect("/", [("Set-Cookie", "ta_demo=; Path=/; Max-Age=0; SameSite=Lax")])
 
 
 def act_demo_reset(req, db):
     core.demo_reset()
-    return redirect("/kpi")
+    return redirect("/insights")
 
 
 
