@@ -1898,6 +1898,82 @@ table.rank td .f { flex-direction: row; align-items: center; gap: var(--sp-1);
   stroke-width: 2; fill-opacity: 1; }
 .chart .bar { fill: var(--brand); fill-opacity: .75; rx: 2; }
 
+/* a donut: the slices carry the class of what they are, so a slice for
+   "left, and it was ours" is the same red everywhere on the site */
+.donut { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap; }
+.donut svg { width: 150px; height: 150px; flex: none; }
+.donut .slice.kept { fill: var(--ok); }
+.donut .slice.ours { fill: var(--warn); }
+.donut .slice.theirs { fill: var(--amber); }
+.donut .slice.a { fill: var(--brand); }
+.donut .slice.b { fill: var(--brand-lift); }
+.donut .slice.c { fill: var(--amber); }
+.donut .slice.d { fill: var(--info); }
+.donut .slice.e { fill: var(--ink-3); }
+.donut .slice.f { fill: var(--violet); }
+.donut .hole { fill: var(--surface); }
+.donut .big { fill: var(--ink); font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+.donut .small { fill: var(--ink-3); font-size: 11px; }
+.donut .legend { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1);
+  font-size: 14px; min-width: 200px; }
+.donut .legend li { display: flex; align-items: center; gap: var(--sp-2); }
+.donut .legend i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.donut .legend .n { margin-left: auto; font-variant-numeric: tabular-nums;
+  color: var(--ink-2); }
+.donut .legend .kept { background: var(--ok); }
+.donut .legend .ours { background: var(--warn); }
+.donut .legend .theirs { background: var(--amber); }
+.donut .legend .a { background: var(--brand); }
+.donut .legend .b { background: var(--brand-lift); }
+.donut .legend .c { background: var(--amber); }
+.donut .legend .d { background: var(--info); }
+.donut .legend .e { background: var(--ink-3); }
+.donut .legend .f { background: var(--violet); }
+
+/* stayed against left: one measure per row, two bars on one scale */
+.cmp { display: grid; gap: var(--sp-3); }
+.cmp .row { display: grid; grid-template-columns: 180px 1fr; gap: var(--sp-3);
+  align-items: center; }
+.cmp .label { font-size: 14px; font-weight: 500; }
+.cmp .label .sub { margin: 0; font-size: 12px; }
+.cmp .pair { display: grid; gap: var(--sp-1); }
+.cmp .line { display: grid; grid-template-columns: 52px 1fr 56px; gap: var(--sp-2);
+  align-items: center; font-size: 12px; color: var(--ink-3); }
+.cmp .line .track { height: 10px; background: var(--line-soft); border-radius: 999px;
+  overflow: hidden; }
+.cmp .line .fill { height: 100%; border-radius: 999px; background: var(--ok); }
+.cmp .line.left .fill { background: var(--warn); }
+.cmp .line .v { text-align: right; color: var(--ink); font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .cmp .row { grid-template-columns: 1fr; gap: var(--sp-1); }
+}
+
+/* what moves with the exam: a signed bar of r per measure */
+.drivers { display: grid; gap: var(--sp-2); }
+.drivers .row { display: grid; grid-template-columns: 180px 1fr auto; gap: var(--sp-3);
+  align-items: center; font-size: 14px; }
+.drivers .axis { position: relative; height: 12px; background: var(--line-soft);
+  border-radius: 999px; }
+.drivers .axis::before { content: ""; position: absolute; left: 50%; top: -3px;
+  width: 1px; height: 18px; background: var(--line); }
+.drivers .r { position: absolute; top: 0; height: 12px; background: var(--brand);
+  opacity: .8; border-radius: 999px; }
+.drivers .r.neg { background: var(--warn); }
+.drivers .r.faint { opacity: .3; }
+.drivers .verdict { font-size: 12px; white-space: nowrap; }
+@media (max-width: 720px) {
+  .drivers .row { grid-template-columns: 1fr; gap: var(--sp-1); }
+}
+
+/* the page in sentences */
+ol.findings { margin: 0; padding-left: 22px; display: grid; gap: var(--sp-2);
+  font-size: 15px; line-height: 1.5; }
+ol.findings li::marker { color: var(--brand); font-weight: 600; }
+.insight-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
+.insight-grid .card { margin: 0; }
+@media (max-width: 900px) { .insight-grid { grid-template-columns: 1fr; } }
+
 /* ------------------------------------------------- demo mode
 
    A band across the top of every page while the demo copy is showing. It

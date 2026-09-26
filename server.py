@@ -4,6 +4,7 @@ Runs on the Python standard library alone: python3 server.py
 """
 import html
 import json
+import math
 import time
 import os
 import re
@@ -71,7 +72,7 @@ SECTIONS = [
     ("Materials", "/materials", [("/materials", "Materials"), ("/vocab", "Vocabulary"),
                                  ("/tests", "Tests"), ("/play", "Play"),
                                  ("/music", "Music")]),
-    ("KPI", "/kpi", [("/kpi", "KPI")]),
+    ("Insights", "/insights", [("/insights", "Insights"), ("/kpi", "KPI")]),
 ]
 SECTION_OF = {label: name for name, _home, pages in SECTIONS for _href, label in pages}
 
@@ -4969,87 +4970,228 @@ def finding(c):
             f'<p class="sub gap-2">{E(c["says"])}</p>')
 
 
-def charts_panel(db, gid):
+def donut(slices, big="", small=""):
+    """A donut chart as inline SVG: (label, value, class) per slice, the
+    class naming what the slice is so the colour means the same thing on
+    every chart. The figure in the middle is the one to remember."""
+    total = sum(v for _l, v, _c in slices)
+    if not total:
+        return '<p class="sub flush">Nothing to draw yet.</p>'
+    cx = cy = 75
+    r, hole = 66, 42
+    out = ""
+    ang = -math.pi / 2
+    for label, v, cls in slices:
+        if not v:
+            continue
+        frac = v / total
+        title = f"<title>{E(label)}: {v}</title>"
+        if frac >= 0.9999:
+            out += f'<circle cx="{cx}" cy="{cy}" r="{r}" class="slice {cls}">{title}</circle>'
+            continue
+        a2 = ang + 2 * math.pi * frac
+        x1, y1 = cx + r * math.cos(ang), cy + r * math.sin(ang)
+        x2, y2 = cx + r * math.cos(a2), cy + r * math.sin(a2)
+        large = 1 if frac > 0.5 else 0
+        out += (f'<path d="M{cx},{cy} L{x1:.1f},{y1:.1f} A{r},{r} 0 {large} 1 '
+                f'{x2:.1f},{y2:.1f} Z" class="slice {cls}">{title}</path>')
+        ang = a2
+    out += f'<circle cx="{cx}" cy="{cy}" r="{hole}" class="hole"/>'
+    if big:
+        y = cy + 9 if not small else cy + 3
+        out += f'<text x="{cx}" y="{y}" text-anchor="middle" class="big">{E(big)}</text>'
+    if small:
+        out += f'<text x="{cx}" y="{cy + 22}" text-anchor="middle" class="small">{E(small)}</text>'
+    legend = "".join(f'<li><i class="{cls}"></i>{E(label)}<span class="n">{v}</span></li>'
+                     for label, v, cls in slices)
+    return (f'<div class="donut"><svg viewBox="0 0 150 150" role="img" '
+            f'aria-label="{E(big)} {E(small)}">{out}</svg>'
+            f'<ul class="legend">{legend}</ul></div>')
+
+
+def compare_rows(rows):
+    """Stayed against left, one measure per row, both bars on one scale."""
+    out = ""
+    for row in rows:
+        if row["stayed"] is None or row["left"] is None:
+            continue
+        unit = row["unit"]
+        top = {"%": 100.0, "/10": 10.0, "/5": 5.0}.get(
+            unit, max(row["stayed"], row["left"], 1) * 1.15)
+        shown = "" if unit == "d" else unit
+        v = row["test"]["verdict"]
+        word = {"clear": "a real gap", "nothing": "could be chance",
+                "few": "too few to say", "flat": "no difference"}[v]
+
+        def line(name, val, cls):
+            pct = max(0, min(100, 100 * val / top))
+            return (f'<div class="line {cls}"><span>{name}</span>'
+                    f'<div class="track"><div class="fill" style="width:{pct:.0f}%"></div></div>'
+                    f'<span class="v">{val:g}{shown}</span></div>')
+        out += (f'<div class="row"><div class="label">{E(row["label"])}'
+                f'<div class="sub">{row["n_stayed"]} stayed &middot; {row["n_left"]} left '
+                f'&middot; {word}</div></div><div class="pair">'
+                + line("Stayed", row["stayed"], "stayed")
+                + line("Left", row["left"], "left") + "</div></div>")
+    return f'<div class="cmp">{out}</div>' if out else '<p class="sub flush">Nothing to compare yet.</p>'
+
+
+def driver_rows(drivers):
+    """A signed bar of r per measure, faint where it could be chance."""
+    out = ""
+    for d in drivers:
+        c = d["test"]
+        r = c["r"]
+        if r is None:
+            bar = ""
+        else:
+            left = 50 if r >= 0 else 50 + r * 50
+            cls = "r" + (" neg" if r < 0 else "") + ("" if c["verdict"] == "clear" else " faint")
+            bar = f'<div class="{cls}" style="left:{left:.0f}%;width:{abs(r) * 50:.0f}%"></div>'
+        word = {"clear": "r = %.2f, unlikely to be chance" % (r or 0),
+                "nothing": "r = %.2f, could be chance" % (r or 0),
+                "few": "%d of %d students needed" % (c["n"], core.ENOUGH),
+                "flat": "nothing to compare"}[c["verdict"]]
+        out += (f'<div class="row"><span>{E(d["label"])}</span>'
+                f'<div class="axis">{bar}</div>'
+                f'<span class="verdict sub">{E(word)}</span></div>')
+    return f'<div class="drivers">{out}</div>'
+
+
+def view_insights(req, db):
+    """The teaching cycle, read back: what students put in, what came out,
+    who left and what they looked like before they did. Whole school by
+    default, one class on request. Every chart says what it is allowed to
+    say and no more."""
+    core.backfill_enrolments(db)
+    q = req["query"]
+    gid = (q.get("group", [""])[0] or "").strip()
+    gid = int(gid) if gid.isdigit() else None
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+
     pts = core.cycle_points(db, gid)
-    here = [p for p in pts if p["exam"] is not None]
+    ret = core.retention(db)
+    left = [p for p in pts if p["left"]]
+    here = [p for p in pts if not p["left"]]
 
-    # 1. effort against learning
-    effort = [(p["completion"], p["exam"], p) for p in pts
-              if p["completion"] is not None and p["exam"] is not None]
-    c1 = core.correlate([(a, b) for a, b, _ in effort])
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    classes = ('<div class="tabs">' + tab("/insights", "Whole school", gid is None)
+               + "".join(tab(f'/insights?group={g["id"]}', g["name"], gid == g["id"])
+                         for g in groups) + "</div>")
 
-    # 2. going quiet against leaving
-    quiet_left = [p["quiet_days"] for p in pts
-                  if p["left"] and p["quiet_days"] is not None]
-    quiet_here = [p["quiet_days"] for p in pts
-                  if not p["left"] and p["quiet_days"] is not None]
-    c2 = core.correlate([(p["quiet_days"], 1 if p["left"] else 0) for p in pts
-                         if p["quiet_days"] is not None])
+    # ------------------------------------------------------- in sentences
+    findings = "".join(f"<li>{E(s)}</li>" for s in core.cycle_findings(pts, ret))
 
-    # 3. class tests against the exam
-    tests = [(p["class_tests"], p["exam"], p) for p in pts
-             if p["class_tests"] is not None and p["exam"] is not None]
-    c3 = core.correlate([(a, b) for a, b, _ in tests])
+    # ------------------------------------------------------------ figures
+    def avg(key):
+        v = core._mean([p[key] for p in pts])
+        return "—" if v is None else f"{v:g}"
+    tiles = ('<div class="grid">'
+             + stat("Students", len(pts), f"{len(here)} here, {len(left)} left")
+             + stat("Homework done", avg("completion") + ("%" if avg("completion") != "—" else ""),
+                    "of what was set, on average")
+             + stat("In the classroom", avg("participation"), "out of 5, on average")
+             + stat("Class tests", avg("class_tests") + ("%" if avg("class_tests") != "—" else ""),
+                    "on average")
+             + stat("Exam", avg("exam") + ("%" if avg("exam") != "—" else ""),
+                    "latest exam, on average")
+             + "</div>")
 
+    # ------------------------------------------------------------- donuts
+    ours = sum(1 for p in left if core.REASON_OURS.get(p["reason"], True))
+    theirs = len(left) - ours
+    kept_pct = ("%.0f%%" % (100.0 * len(here) / len(pts))) if pts else "—"
+    keep = donut([("Still here", len(here), "kept"),
+                  ("Left — could be ours", ours, "ours"),
+                  ("Left — outside your control", theirs, "theirs")],
+                 big=kept_pct, small="still here")
     reasons = {}
-    for p in pts:
-        if p["left"] and p["reason"]:
-            k = core.REASON_SHORT.get(p["reason"], p["reason"])
-            reasons[k] = reasons.get(k, 0) + 1
+    for p in left:
+        k = core.REASON_SHORT.get(p["reason"], p["reason"] or "unknown")
+        reasons[k] = reasons.get(k, 0) + 1
+    letters = "abcdef"
+    why = donut([(k, v, letters[i % 6]) for i, (k, v) in
+                 enumerate(sorted(reasons.items(), key=lambda kv: -kv[1]))],
+                big=str(len(left)), small="left")
 
-    def avg(xs):
-        return round(sum(xs) / len(xs), 1) if xs else None
-
+    # ----------------------------------------------------- the comparisons
+    cmp_rows = core.left_vs_stayed(pts)
+    drivers = core.exam_drivers(pts)
+    top = drivers[0] if drivers and drivers[0]["test"]["r"] is not None else None
+    top_chart = ""
+    if top:
+        top_chart = scatter([(p[top["key"]], p["exam"], p) for p in pts
+                             if p[top["key"]] is not None and p["exam"] is not None],
+                            top["label"].lower() + ", " + top["unit"].strip("/"),
+                            "exam, %")
+    hb_pairs = [(p["completion"], p["participation"], p) for p in pts
+                if p["completion"] is not None and p["participation"] is not None]
+    hb = core.correlate([(a, b) for a, b, _ in hb_pairs])
+    quiet_pairs = [(p["quiet_days"], 100 if p["left"] else 0, p) for p in pts
+                   if p["quiet_days"] is not None]
+    qc = core.correlate([(a, 1 if b else 0) for a, b, _ in quiet_pairs])
+    quiet_left = core._mean([p["quiet_days"] for p in left])
+    quiet_here = core._mean([p["quiet_days"] for p in here])
     quiet_line = ""
-    if quiet_left and quiet_here:
-        quiet_line = (f'<p class="sub gap-2">The ones who left had been quiet '
-                      f'for <strong>{avg(quiet_left)} days</strong> on average. '
-                      f'The ones still here: <strong>{avg(quiet_here)}</strong>.'
-                      f'</p>')
-    elif not quiet_left:
-        quiet_line = ('<p class="sub gap-2">Nobody has been recorded as '
-                      'leaving yet, so there is nothing to compare the quiet '
-                      'ones against. This chart is the reason the leaver '
-                      'register is worth keeping up.</p>')
+    if quiet_left is not None and quiet_here is not None:
+        quiet_line = (f'<p class="sub gap-2">The ones who left had been quiet for '
+                      f'<strong>{quiet_left:g} days</strong> on average. The ones still '
+                      f'here: <strong>{quiet_here:g}</strong>.</p>')
+    elif not left:
+        quiet_line = ('<p class="sub gap-2">Nobody has been recorded as leaving yet, '
+                      'so there is nothing to compare the quiet ones against. This '
+                      'chart is the reason the leaver register is worth keeping up.</p>')
 
-    return f"""
-<h2 class="gap-4">Homework against the exam</h2>
-<div class="card">
-{scatter(effort, "homework done, %", "exam, %")}
-{finding(c1)}
-<p class="sub gap-2">Every teacher assumes they know the answer to this one.
-Few have seen it for their own students.</p>
+    who = "the whole school" if gid is None else E(group_name(db, gid))
+    body = f"""<h1>Insights</h1>
+<p class="sub">The teaching cycle read back, for {who}: what students put in, what
+came out, who left, and what they looked like before they did. Every chart says
+only what the numbers can back.</p>
+{classes}
+
+<h2>What the numbers say</h2>
+<div class="card"><ol class="findings">{findings}</ol></div>
+
+<h2>Where things stand</h2>
+{tiles}
+
+<div class="insight-grid gap-4">
+<div class="card"><h3 class="flush gap-3">Who is still here</h3>{keep}
+<p class="sub gap-2 flush">"Could be ours" is a reason a teacher might have changed:
+bored, no progress, a fallout. Moving away, money and finishing are not.</p></div>
+<div class="card"><h3 class="flush gap-3">Why they left</h3>{why}
+<p class="sub gap-2 flush">Recorded on the <a class="linky" href="/records?v=leavers">Who
+left</a> tab, one student at a time. This chart is only as honest as that habit.</p></div>
 </div>
 
-<h2 class="gap-4">Class tests against the exam</h2>
-<div class="card">
-{scatter(tests, "class tests, %", "exam, %")}
-{finding(c3)}
-<p class="sub gap-2">If these move together, a class test is an early
-warning of the exam result and you have weeks to act on it.</p>
-</div>
+<h2>What the leavers looked like before they left</h2>
+<div class="card">{compare_rows(cmp_rows)}
+<p class="sub gap-3 flush">The same students, measured before they went. A gap
+marked "a real gap" is one too large to be chance for this many students; the
+rest may still be true, but the numbers cannot yet say so.</p></div>
 
-<h2 class="gap-4">Going quiet, and leaving</h2>
-<div class="card">
-{scatter([(p["quiet_days"], 100 if p["left"] else 0, p) for p in pts
-          if p["quiet_days"] is not None],
-         "days since their last homework", "left (100) or still here (0)")}
-{finding(c2)}
-{quiet_line}
-</div>
+<h2>What moves with the exam</h2>
+<div class="card">{driver_rows(drivers)}
+{top_chart}
+<p class="sub gap-3 flush">Strongest first. A bar to the right means the two rise
+together; to the left, one rises as the other falls. A faint bar could be chance.
+Whatever is at the top is your earliest warning of the exam result, weeks before it.</p></div>
 
-<h2 class="gap-4">Why they left</h2>
-<div class="card">
-{bars(sorted(reasons.items(), key=lambda kv: -kv[1])) if reasons else
- '<p class="flush">Nothing recorded yet.</p>'}
-<p class="sub gap-2">Only some of these are yours to change. The split is on
-the Who left tab, and it is the difference between a retention figure that
-is fair to you and one that is not.</p>
-</div>
+<h2>Homework and the classroom</h2>
+<div class="card">{scatter(hb_pairs, "homework done, %", "in the classroom, /5")}
+{finding(hb)}
+<p class="sub gap-2 flush">Whether the ones who do the homework are also the ones
+who are present in the room - or whether those are two different students.</p></div>
 
-<p class="sub gap-3">{len(here)} of {len(pts)} students have an exam result.
-A dot outlined in red is somebody who has left. Hover or tap a dot for the
-name.</p>"""
+<h2>Going quiet, then leaving</h2>
+<div class="card">{scatter(quiet_pairs, "days since their last homework",
+                          "left (100) or still here (0)")}
+{finding(qc)}{quiet_line}</div>
+
+<p class="sub gap-3">{len(pts)} students in all. A dot outlined in red is somebody
+who has left. Hover or tap a dot for the name.</p>"""
+    return html_response(page("Insights", body, "Insights"))
 
 
 def view_records(req, db):
@@ -5077,8 +5219,7 @@ def view_records(req, db):
              + tab(f"/records?v=exams&amp;group={gid}", "Exams",
                    which == "exams")
              + tab("/records?v=leavers", "Who left", which == "leavers")
-             + tab(f"/records?v=charts&amp;group={gid}", "Charts",
-                   which == "charts")
+             + tab(f"/insights?group={gid}", "Insights &rarr;", False)
              + "</div>")
     classes = ('<div class="tabs">'
                + "".join(tab(f'/records?v={which}&amp;group={g["id"]}',
@@ -5087,14 +5228,14 @@ def view_records(req, db):
 
     if which == "leavers":
         return html_response(page("Records", leavers_panel(db) , "Records"))
+    if which == "charts":                     # the old address of the charts
+        return redirect(f"/insights?group={gid}" if gid else "/insights")
 
     students = db.execute(
         "SELECT * FROM students WHERE active=1 AND group_id=? ORDER BY name",
         (gid,)).fetchall()
     if which == "exams":
         body = exams_panel(db, gid, students)
-    elif which == "charts":
-        body = charts_panel(db, gid)
     else:
         body = scores_panel(db, gid, students, q)
     return html_response(page("Records", f"""<h1>Records</h1>
@@ -5576,7 +5717,7 @@ def act_demo_on(req, db):
     """Show management. Seeds the demo copy on first use, then sets a cookie
     that only a signed-in teacher's requests will honour."""
     core.demo_ready()
-    return (303, [("Location", "/kpi"),
+    return (303, [("Location", "/insights"),
                   ("Set-Cookie", "ta_demo=1; Path=/; SameSite=Lax")], b"")
 
 
@@ -8134,6 +8275,7 @@ ROUTES = [
     ("POST", r"^/play/new$", act_new_game),
     ("POST", r"^/play/(\d+)/next$", act_game_next),
     ("GET",  r"^/homework/set$", view_homework_set),
+    ("GET",  r"^/insights$", view_insights),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/batch/close$", act_batch_close),
     ("POST", r"^/assignments/batch/open$", act_batch_open),

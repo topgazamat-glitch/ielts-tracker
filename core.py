@@ -3096,6 +3096,112 @@ def cycle_points(db, group_id=None):
     return out
 
 
+# ---------------------------------------------------------- the cycle, read
+
+# What is compared between the ones who stayed and the ones who left. Each
+# is a column of cycle_points, with the words a teacher would use for it.
+CYCLE_MEASURES = [
+    ("completion", "Homework done", "%"),
+    ("homework", "Homework mark", "/10"),
+    ("participation", "In the classroom", "/5"),
+    ("class_tests", "Class tests", "%"),
+    ("exam", "Exam", "%"),
+    ("quiet_days", "Days since last homework", "d"),
+]
+
+
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return round(sum(xs) / len(xs), 1) if xs else None
+
+
+def left_vs_stayed(pts):
+    """Each measure for the students who left against the ones who stayed,
+    with whether the gap is more than chance.
+
+    A left/stayed split is a yes-or-no column, so Pearson against it is the
+    point-biserial correlation - the honest test for "did the leavers look
+    different before they went".
+    """
+    out = []
+    left = [p for p in pts if p["left"]]
+    here = [p for p in pts if not p["left"]]
+    for key, label, unit in CYCLE_MEASURES:
+        a, b = _mean([p[key] for p in here]), _mean([p[key] for p in left])
+        c = correlate([(p[key], 1 if p["left"] else 0) for p in pts
+                       if p[key] is not None])
+        out.append({"key": key, "label": label, "unit": unit,
+                    "stayed": a, "left": b,
+                    "n_stayed": sum(1 for p in here if p[key] is not None),
+                    "n_left": sum(1 for p in left if p[key] is not None),
+                    "test": c})
+    return out
+
+
+def exam_drivers(pts):
+    """What moves with the exam result, strongest first."""
+    out = []
+    for key, label, unit in CYCLE_MEASURES:
+        if key == "exam":
+            continue
+        c = correlate([(p[key], p["exam"]) for p in pts
+                       if p[key] is not None and p["exam"] is not None])
+        out.append({"key": key, "label": label, "unit": unit, "test": c})
+    out.sort(key=lambda d: -(abs(d["test"]["r"]) if d["test"]["r"] is not None else -1))
+    return out
+
+
+def cycle_findings(pts, ret):
+    """The chart page in sentences: only what the numbers can back."""
+    lines = []
+    n = len(pts)
+    left = [p for p in pts if p["left"]]
+    if ret["rate"] is not None:
+        lines.append("%d of %d students in the last 90 days are still here (%.0f%%)."
+                     % (ret["here"] - ret["left"], ret["here"], ret["rate"])
+                     + (" Leaving aside the ones who moved, ran out of money or "
+                        "finished, it is %.0f%%." % ret["rate_ours"]
+                        if ret["rate_ours"] is not None
+                        and ret["rate_ours"] != ret["rate"] else ""))
+    for row in left_vs_stayed(pts):
+        if row["stayed"] is None or row["left"] is None:
+            continue
+        if row["test"]["verdict"] != "clear":
+            continue
+        if row["key"] == "quiet_days":
+            if row["left"] > row["stayed"]:
+                lines.append("The ones who left had gone quiet first: %s days "
+                             "since their last homework on average, against %s "
+                             "for the ones still here." % (row["left"], row["stayed"]))
+            else:
+                lines.append("The ones who left were still sending homework "
+                             "until the end: %s days since their last piece, "
+                             "against %s for the ones still here."
+                             % (row["left"], row["stayed"]))
+        else:
+            lines.append("%s: the students who left averaged %s%s; the ones "
+                         "who stayed, %s%s." % (row["label"], row["left"],
+                                                row["unit"] if row["unit"] != "d" else "",
+                                                row["stayed"],
+                                                row["unit"] if row["unit"] != "d" else ""))
+    top = [d for d in exam_drivers(pts) if d["test"]["verdict"] == "clear"]
+    if top:
+        d = top[0]
+        lines.append("%s is the best early sign of the exam result (r = %.2f "
+                     "across %d students)." % (d["label"], d["test"]["r"],
+                                               d["test"]["n"]))
+    hb = correlate([(p["completion"], p["participation"]) for p in pts
+                    if p["completion"] is not None and p["participation"] is not None])
+    if hb["verdict"] == "clear":
+        lines.append("Homework and classroom behaviour move %s (r = %.2f)."
+                     % ("together" if hb["r"] > 0 else "in opposite directions",
+                        hb["r"]))
+    if len(lines) <= 1:
+        lines.append("Not enough recorded yet to say more: findings appear once "
+                     "%d students have the figures being compared." % ENOUGH)
+    return lines
+
+
 # ------------------------------------------------------------ demo data
 
 DEMO_NAMES = ["Aziz", "Malika", "Jasur", "Nodira", "Bek", "Dilnoza", "Sardor",
@@ -3136,13 +3242,27 @@ def seed_demo(db, seed=11):
     def habit(i):
         return 0.35 + 0.6 * ((i * 7919) % 100) / 100.0
 
-    for wk in range(12):
-        due = t0 - timedelta(days=120 - wk * 9)
+    # The six who leave are the six weakest habits, and each goes quiet two
+    # and a half weeks before the day they stop coming - which is what the
+    # "going quiet, then leaving" chart exists to show.
+    order = sorted(range(len(ids)), key=lambda i: (i * 7919) % 100)
+    leaving = ((order[0], "bored", 80), (order[1], "progress", 62),
+               (order[2], "money", 44), (order[3], "moved", 30),
+               (order[4], "unknown", 20), (order[5], "timetable", 9))
+    quiet_from = {i: t0 - timedelta(days=ago + 18) for i, _r, ago in leaving}
+
+    def gone(i, day):
+        return i in quiet_from and day > quiet_from[i]
+
+    for wk in range(14):
+        due = t0 - timedelta(days=125 - wk * 9)
         a = db.execute("INSERT INTO assignments (group_id, title, created_at,"
                        " published, due_at) VALUES (?,?,?,1,?)",
                        (g, "Homework %d" % (wk + 1),
                         iso(due - timedelta(days=3)), iso(due))).lastrowid
         for i, sid in enumerate(ids):
+            if gone(i, due):
+                continue
             if rnd.random() < habit(i):
                 score = max(3, min(10, round(rnd.gauss(4 + 6 * habit(i), 1.1))))
                 db.execute("INSERT INTO submissions (student_id, assignment_id,"
@@ -3150,6 +3270,8 @@ def seed_demo(db, seed=11):
                            " VALUES (?,?,'graded',?,?,'photo')",
                            (sid, a, score, iso(due - timedelta(days=1))))
         for i, sid in enumerate(ids):
+            if gone(i, due):
+                continue
             if rnd.random() < 0.8:
                 m = max(1, min(5, round(rnd.gauss(2 + 3 * habit(i), 0.7))))
                 db.execute("INSERT INTO lesson_marks (student_id, day,"
@@ -3169,10 +3291,7 @@ def seed_demo(db, seed=11):
                   {sid: max(18, min(98, round(rnd.gauss(32 + 55 * habit(i), 7))))
                    for i, sid in enumerate(ids)},
                   marked_by="Demo teacher")
-    order = sorted(range(len(ids)), key=lambda i: (i * 7919) % 100)
-    for i, reason, ago in ((order[0], "bored", 80), (order[1], "progress", 62),
-                           (order[2], "money", 44), (order[3], "moved", 30),
-                           (order[4], "unknown", 20), (order[5], "timetable", 9)):
+    for i, reason, ago in leaving:
         mark_left(db, ids[i], reason, when=iso(t0 - timedelta(days=ago)))
     save_kpi_profile(db, ielts=8.0, celta=0, students=28)
     db.commit()
