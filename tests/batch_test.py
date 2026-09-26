@@ -46,22 +46,26 @@ db.execute("INSERT INTO submissions (student_id, assignment_id, created_at, kind
            " VALUES (?,?,?,'photo')", (sids[1], a, core.iso(core.now())))
 db.commit(); db.close()
 
-pg = get("/assignments")
+pg = get("/homework?show=all")
 print("1. GROUPED AS YOU SET THEM")
-n = pg.count('class="card batch"')
+n = pg.count('class="hw"')
 print("   batches shown:", n, "(two postings)")
 assert n == 2, n
-print("   items counted:", "3 item(s)" in pg and "1 item(s)" in pg)
-print("   who has sent:", "2 of 4 students" in pg)
-print("   marked count warned:", "1 marked" in pg)
-assert "3 item(s)" in pg and "2 of 4 students" in pg
+print("   items counted:", "3 items:" in pg and "1 item:" in pg)
+print("   who has not sent:", "2 sent nothing" in pg)
+assert "3 items:" in pg and "2 sent nothing" in pg
+one = get("/homework/set?" + urllib.parse.urlencode({"group": g, "due": first}))
+print("   marked count warned before deleting:", "1 marked piece" in one)
+assert "1 marked piece" in one
 
 print("\n2. BATCH BUTTONS PRESENT")
+print("   delete on the list:", "/assignments/batch/delete" in pg)
+assert "/assignments/batch/delete" in pg
 for act in ("close", "delete", "edit"):
-    print("   %-7s ->" % act, "/assignments/batch/%s" % act in pg)
-    assert "/assignments/batch/%s" % act in pg
+    print("   %-7s on the homework's page ->" % act, "/assignments/batch/%s" % act in one)
+    assert "/assignments/batch/%s" % act in one
 print("   per-item close/delete still there:",
-      "/close" in pg and "/delete" in pg)
+      "/close" in one and "/delete" in one)
 
 print("\n3. MOVE THE WHOLE DEADLINE")
 post("/assignments/batch/edit", {"group_id": g, "due": first,
@@ -86,8 +90,9 @@ print("   closed:", [r["closed"] for r in db.execute(
 assert all(r["closed"] == 1 for r in db.execute(
     "SELECT closed FROM assignments WHERE due_at=?", (moved,)))
 db.close()
-print("   hidden by default:", "Essay" not in get("/assignments"))
-print("   visible with show closed:", "Essay" in get("/assignments?closed=1"))
+print("   hidden by default:", "Essay" not in get("/homework"))
+print("   visible under Closed:", "Essay" in get("/homework?show=closed"))
+assert "Essay" not in get("/homework") and "Essay" in get("/homework?show=closed")
 post("/assignments/batch/open", {"group_id": g, "due": moved})
 db = core.connect()
 assert all(r["closed"] == 0 for r in db.execute(
@@ -107,9 +112,11 @@ print("   the marked 8/10 survives:", sub["score"], sub["status"],
 assert left == 1 and sub["score"] == 8 and sub["assignment_id"] is None
 db.close()
 
-print("\n6. PAGE STILL SWAPPABLE")
-pg = get("/assignments")
-print("   no inline script in main:",
-      "<script" not in re.search(r"<main[^>]*>(.*)</main>", pg, re.S).group(1))
+print("\n6. PAGES STILL SWAPPABLE")
+for path in ("/assignments", "/homework"):
+    pg = get(path)
+    print("   %-13s no inline script in main:" % path,
+          "<script" not in re.search(r"<main[^>]*>(.*)</main>", pg, re.S).group(1))
+    assert "<script" not in re.search(r"<main[^>]*>(.*)</main>", pg, re.S).group(1)
 srv.shutdown(); shutil.rmtree(tmp)
 print("\nBatch management works.")

@@ -79,10 +79,15 @@ B = "http://127.0.0.1:8873"
 jar = http.cookiejar.CookieJar()
 op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 op.open(B + "/login", urllib.parse.urlencode({"password": "pw"}).encode()).read()
-page = op.open(B + "/assignments?closed=1").read().decode("utf-8")
-print("   excluded set is labelled:", "not in the league" in page)
-print("   and offers to count it again:", "Count in the league" in page)
-print("   the others offer to leave them out:", "Leave out of the league" in page)
+page = op.open(B + "/homework?show=all").read().decode("utf-8")
+print("   excluded set is labelled on the list:", "not in the league" in page)
+assert "not in the league" in page
+page = op.open(B + "/homework/set?" + urllib.parse.urlencode(
+    {"group": g, "due": dues[0]})).read().decode("utf-8")
+print("   and its page offers to count it again:", "Count in the league" in page)
+other = op.open(B + "/homework/set?" + urllib.parse.urlencode(
+    {"group": g, "due": dues[1]})).read().decode("utf-8")
+print("   the others offer to leave them out:", "Leave out of the league" in other)
 assert "not in the league" in page and "Count in the league" in page
 
 print("\n5. THE BUTTON WORKS")

@@ -10,7 +10,7 @@ import re
 import secrets
 import traceback
 import urllib.parse
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import charts
@@ -63,7 +63,7 @@ def demo_banner():
 SECTIONS = [
     ("Today", "/", [("/", "Overview")]),
     ("Homework", "/queue", [("/queue", "Grade"), ("/homework", "Homework"),
-                            ("/assignments", "Assignments")]),
+                            ("/assignments", "Set homework")]),
     ("Students", "/roster", [("/roster", "Students"), ("/groups", "Groups"),
                              ("/ratings", "Progress"), ("/reteach", "Reteach"),
                              ("/records", "Records"), ("/questions", "Questions"),
@@ -317,7 +317,7 @@ def today_block(db, pending):
         " WHERE a.closed=0 AND a.published=1 AND a.due_at LIKE ?"
         " GROUP BY a.group_id ORDER BY g.name",
         (today + "%", today + "%")).fetchall():
-        items += todo(f'/groups/{r["group_id"]}?tab=homework',
+        items += todo(f'/homework?group={r["group_id"]}',
                       "%s · due today" % E(r["gname"]),
                       "%d task%s — %d of %d students in"
                       % (r["tasks"], "" if r["tasks"] == 1 else "s",
@@ -1397,117 +1397,17 @@ kb.value = botUser ? "https://t.me/" + botUser + "?start=P{E(core.parent_token(d
     return html_response(page(s["name"], body, "Groups"))
 
 
-def batch_block(db, r, cfg, open_only):
-    """One homework batch: what it is, how it is going, and how to manage it."""
-    gid, due = r["group_id"], r["due_at"]
-    items = core.set_items(db, gid, due)
-    if not items:
-        return ""
-    closed = r["shut"] == 1                       # every item closed
-    draft = r["pubmax"] == 0                      # nothing published yet
-    if open_only and closed:
-        return ""
-
-    day, clock = core.deadline_parts(due, cfg)
-    when = f"{day} at {clock}" if day else "no deadline"
-    got, total = core.set_received(db, gid, due)
-    graded = core.set_graded_count(db, gid, due)
-
-    counts = all(a["in_league"] for a in items)
-    state = ('<span class="pill mute">closed</span>' if closed
-             else '<span class="pill mute">draft</span>' if draft
-             else '<span class="pill">open</span>')
-    if not counts:
-        state += ' <span class="pill mute">not in the league</span>'
-
-    if r["shut"] != r["shutmax"] or (not draft and r["pub"] != r["pubmax"]):
-        state += ' <span class="pill mute">mixed</span>'
-
-    key = f'<input type="hidden" name="group_id" value="{gid}">' \
-          f'<input type="hidden" name="due" value="{E(due or "")}">'
-    def form(action, label, cls="ghost", confirm=None):
-        ask = f' onsubmit="return confirm({json.dumps(confirm)})"' if confirm else ""
-        return (f'<form method="post" action="/assignments/batch/{action}"{ask}>'
-                f'{key}<button class="{cls}">{label}</button></form>')
-
-    buttons = ""
-    if draft:
-        buttons += form("publish", "Publish all", "")
-    elif closed:
-        buttons += form("open", "Reopen all")
-    else:
-        buttons += form("close", "Close all")
-    buttons += form("league", "Count in the league" if not counts
-                    else "Leave out of the league")
-    warn = ("Delete all %d item(s)? %d marked piece(s) stay with the student "
-            "and keep their score - they just stop being linked to this homework."
-            % (len(items), graded)) if graded else \
-           "Delete all %d item(s)? Nothing has been handed in." % len(items)
-    buttons += form("delete", "Delete all", "ghost danger", warn)
-
-    rows = ""
-    for a in items:
-        n = db.execute("SELECT COUNT(*) c FROM submissions WHERE assignment_id=?",
-                       (a["id"],)).fetchone()["c"]
-        if a["closed"]:
-            act = (f'<form method="post" action="/assignments/{a["id"]}/open">'
-                   f'<button class="linky">reopen</button></form>')
-        elif not a["published"]:
-            act = (f'<form method="post" action="/assignments/{a["id"]}/publish">'
-                   f'<button class="linky">publish</button></form>')
-        else:
-            act = (f'<form method="post" action="/assignments/{a["id"]}/close">'
-                   f'<button class="linky">close</button></form>')
-        rows += (f'<tr><td>{E(a["title"])}</td>'
-                 f'<td class="sub">{E(a["task_type"])}'
-                 f'{" &middot; criteria" if a["rubric"] else ""}</td>'
-                 f'<td class="sub">{n} in</td>'
-                 f'<td class="rowacts">{act}'
-                 f'<form method="post" action="/assignments/{a["id"]}/delete"'
-                 f' onsubmit="return confirm({json.dumps("Delete " + a["title"] + "?")})">'
-                 f'<button class="linky danger">delete</button></form></td></tr>')
-
-    edit = f"""<details><summary>Edit this homework</summary>
-<form method="post" action="/assignments/batch/edit" class="inline gap-3">
-{key}
-<label class="f">New deadline<input type="date" name="new_due" value="{E(day)}"></label>
-<label class="f">at<input type="time" name="new_time" value="{E(clock or "23:59")}" step="60"></label>
-<label class="f pushed">&nbsp;<button>Move the deadline</button></label>
-</form>
-<p class="sub gap-2">Moves every item in this batch. A piece already
-handed in after the old deadline stops counting as late. Leaving a set out of the league
-keeps it on the students' page and keeps your marks &mdash; it simply stops awarding
-points.</p>
-<div class="tablewrap gap-3"><table>
-<tr><th>Item</th><th>Type</th><th>Sent</th><th></th></tr>{rows}</table></div>
-</details>"""
-
-    return f"""<div class="card batch">
-  <div class="batchhead">
-    <div><strong>{E(group_name(db, gid))}</strong> &mdash; {E(when)} {state}
-      <div class="sub">{len(items)} item(s) &middot; {got} of {total} students have sent
-        something{" &middot; " + str(graded) + " marked" if graded else ""}</div></div>
-    <div class="batchacts">{buttons}</div>
-  </div>
-  {edit}
-</div>"""
-
-
 def view_assignments(req, db):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
     core.seed_prompts(db)
     sug_levels = "".join(f'<option value="{E(l)}">{E(l)}</option>' for l in core.LEVELS)
     sug_kinds = "".join(f'<option value="{k}">{E(lab)}</option>'
                         for k, lab, _w, _m in core.prompt_kinds())
-    cfg = core.load_config()
-    show_closed = req["query"].get("closed", [""])[0] == "1"
-    sets = core.all_sets(db)
-    blocks = "".join(batch_block(db, r, cfg, not show_closed) for r in sets)
-    shut = sum(1 for r in sets if r["shut"] == 1)
     opts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
-    body = f"""<h1>Assignments</h1>
-<p class="sub">Open assignments are what the bot offers students when they send a photo.</p>
-<h2>Set homework</h2>
+    body = f"""<h1>Set homework</h1>
+<p class="sub">What you set here is what the bot offers students when they send a photo.
+Everything already set is on the <a class="linky" href="/homework">Homework</a> page,
+where you see who has done it, change it or delete it.</p>
 <div class="card gap-3" id="unitbuild">
 <p style="margin-top:0"><strong>A unit\u2019s homework, in one go.</strong></p>
 <p class="sub">The workbook, the handout, the writing and an optional practice
@@ -1575,14 +1475,8 @@ Set the homework</button></div></form>
 <p class="sub gap-3">One line makes one piece of homework, several lines
 make several &mdash; students pick which one they are sending and each gets its own score.
 Without &ldquo;open to students now&rdquo; it is saved as a draft: nobody sees it until you
-press Publish below.</p></div>
-<h2>Homework you have set</h2>
-<p class="sub">Everything posted together is one piece of homework here, the way you set
-it. Close, move or delete the whole batch, or open it to deal with a single item.
-{shut} batch(es) closed &mdash;
-<a href="/assignments?closed={0 if show_closed else 1}">{"hide" if show_closed else "show"} them</a>.</p>
-{blocks or '<div class="card"><p class="sub">Nothing set yet.</p></div>'}"""
-    return html_response(page("Assignments", body, "Assignments"))
+press Publish on the Homework page.</p></div>"""
+    return html_response(page("Set homework", body, "Set homework"))
 
 
 def view_roster(req, db):
@@ -4386,44 +4280,294 @@ def act_student_upload(req, db, token):
                     f"&p={core.page_count(db, sub_id)}")
 
 
+def _back(req, default):
+    """Where a form wants to return to, if it said and the place is ours."""
+    b = (req["form"].get("back", [""])[0] or "").strip()
+    return b if b.startswith("/") and not b.startswith("//") else default
+
+
+def set_url(gid, due):
+    return "/homework/set?" + urllib.parse.urlencode({"group": gid, "due": due or ""})
+
+
+def due_words(due_at, cfg):
+    """A deadline as a teacher reads it at the start of a lesson: the day,
+    the time, and how far away it is."""
+    if not due_at:
+        return "no deadline", ""
+    day, clock = core.deadline_parts(due_at, cfg)
+    when = core.parse(due_at)
+    today = datetime.strptime(core.local_day(core.now(), cfg), "%Y-%m-%d").date()
+    gap = (datetime.strptime(day, "%Y-%m-%d").date() - today).days
+    if gap == 0:
+        rel = "today"
+    elif gap == 1:
+        rel = "tomorrow"
+    elif gap == -1:
+        rel = "yesterday"
+    elif gap > 1:
+        rel = "in %d days" % gap
+    else:
+        rel = "%d days ago" % -gap
+    nice = (when + timedelta(hours=cfg["timezone_offset_hours"])).strftime("%a %-d %b")
+    return f"{nice} at {clock}", rel
+
+
+def batch_state(r, due):
+    """closed, draft, past due or open - the one word that says what a batch
+    needs from the teacher."""
+    if r["shut"] == 1:
+        return "closed", '<span class="pill mute">closed</span>'
+    if r["pubmax"] == 0:
+        return "draft", '<span class="pill mute">draft</span>'
+    if not core.still_open(due):
+        return "past", '<span class="pill watch">deadline passed</span>'
+    return "open", '<span class="pill">open</span>'
+
+
 def view_homework(req, db):
-    """Who has handed in what, per homework set, worst student first."""
-    blocks = ""
-    for g in db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall():
-        sets = core.open_sets(db, g["id"])
-        if not sets:
+    """Everything set, one line each, with the three things a teacher does
+    to a piece of homework: see who has done it, change it, delete it."""
+    cfg = core.load_config()
+    q = req["query"]
+    show = (q.get("show", ["open"])[0] or "open")
+    if show not in ("open", "closed", "all"):
+        show = "open"
+    gid_s = (q.get("group", [""])[0] or "").strip()
+    gid = int(gid_s) if gid_s.isdigit() else None
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+
+    rows = []
+    for r in core.all_sets(db):
+        if gid and r["group_id"] != gid:
             continue
-        for due_at, items in sets:
-            prog = core.group_set_progress(db, g["id"], items)
-            if not prog:
-                continue
-            finished = sum(1 for r in prog if r["percent"] == 100)
-            avg = round(sum(r["percent"] for r in prog) / len(prog))
-            head = "".join(f'<th title="{E(a["title"])}">{E(a["title"][:14])}</th>' for a in items)
-            body = ""
-            for r in prog:
-                cells = "".join(
-                    '<td style="text-align:center">'
-                    + ("&#9989;" if a["id"] in r["done_ids"] else
-                       '<span style="color:var(--muted)">&#11036;</span>')
-                    + "</td>"
-                    for a in items
-                )
-                cls = ' class="pill risk"' if r["percent"] < 50 else ' class="pill"'
-                body += (f'<tr><td><a href="/students/{r["student"]["id"]}">'
-                         f'{E(r["student"]["name"])}</a></td>{cells}'
-                         f'<td><span{cls}>{r["percent"]}%</span></td></tr>')
-            blocks += f"""<h2>{E(g["name"])} — due {E((due_at or "no deadline")[:10])}</h2>
-<p class="sub">{len(items)} task(s) · {finished} of {len(prog)} students finished everything ·
-group average {avg}%</p>
-<div class="tablewrap"><table><tr><th>Student</th>{head}<th>Done</th></tr>{body}</table></div>"""
-    if not blocks:
-        blocks = ('<div class="card"><p>No open homework. '
-                  'Post a list on the Assignments page.</p></div>')
+        items = core.set_items(db, r["group_id"], r["due_at"])
+        if not items:
+            continue
+        key, pill = batch_state(r, r["due_at"])
+        if show == "open" and key == "closed":
+            continue
+        if show == "closed" and key != "closed":
+            continue
+        if not all(a["in_league"] for a in items):
+            pill += ' <span class="pill mute">not in the league</span>'
+        rows.append((r, items, key, pill))
+    # nearest deadline first among what is open; no deadline goes last
+    rows.sort(key=lambda t: (t[2] == "closed", t[0]["due_at"] is None,
+                             t[0]["due_at"] or "", -t[0]["group_id"]))
+
+    here = f"/homework?show={show}" + (f"&group={gid}" if gid else "")
+    lines = ""
+    for r, items, key, pill in rows:
+        g = r["group_id"]
+        due = r["due_at"]
+        when, rel = due_words(due, cfg)
+        prog = core.group_set_progress(db, g, items)
+        done = sum(1 for p in prog if p["percent"] == 100)
+        none = sum(1 for p in prog if not p["done"])
+        total = len(prog)
+        pct = int(100 * done / total) if total else 0
+        titles = ", ".join(a["title"] for a in items[:3])
+        if len(items) > 3:
+            titles += " and %d more" % (len(items) - 3)
+        detail = set_url(g, due)
+        warn = ("Delete this homework for %s? Students' marked work is kept."
+                % group_name(db, g))
+        lines += f"""<div class="hw">
+  <div class="hw-main">
+    <div class="hw-title"><a href="{detail}"><strong>{E(group_name(db, g))}</strong></a>
+      &middot; {E(when)}{f' <span class="rel">({E(rel)})</span>' if rel else ''} {pill}</div>
+    <div class="sub">{len(items)} item{"" if len(items) == 1 else "s"}: {E(titles)}</div>
+  </div>
+  <div class="hw-done">
+    <div class="pbar"><i style="width:{pct}%"></i></div>
+    <div class="n"><strong>{done} of {total}</strong> done everything
+      {f'&middot; <span class="bad">{none} sent nothing</span>' if none else ''}</div>
+  </div>
+  <div class="hw-acts">
+    <a class="btn" href="{detail}">Who's done it</a>
+    <a class="btn ghost" href="{detail}#manage">Change</a>
+    <form method="post" action="/assignments/batch/delete"
+      onsubmit="return confirm({json.dumps(warn)})">
+      <input type="hidden" name="group_id" value="{g}">
+      <input type="hidden" name="due" value="{E(due or "")}">
+      <input type="hidden" name="back" value="{E(here)}">
+      <button class="ghost danger">Delete</button></form>
+  </div>
+</div>"""
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    gq = f"&group={gid}" if gid else ""
+    states = ('<div class="tabs">'
+              + tab(f"/homework?show=open{gq}", "Open", show == "open")
+              + tab(f"/homework?show=closed{gq}", "Closed", show == "closed")
+              + tab(f"/homework?show=all{gq}", "Everything", show == "all") + "</div>")
+    classes = ('<div class="tabs">'
+               + tab(f"/homework?show={show}", "All classes", gid is None)
+               + "".join(tab(f'/homework?show={show}&group={g["id"]}', g["name"],
+                             gid == g["id"]) for g in groups) + "</div>")
+    if not lines:
+        what = {"open": "No open homework", "closed": "Nothing closed yet",
+                "all": "Nothing set yet"}[show]
+        lines = (f'<div class="card"><p class="sub flush">{what}. '
+                 f'Set some on the <a class="linky" href="/assignments">Set homework</a> '
+                 f'page.</p></div>')
     body = f"""<h1>Homework</h1>
-<p class="sub">A tick means the student has sent something for that item. Rows are
-ordered worst first, so whoever needs chasing is at the top.</p>{blocks}"""
+<p class="sub">Everything you have set, nearest deadline first. Open one to see who has
+done it before the lesson starts.</p>
+<div class="toolbar">{classes}{states}</div>
+<div class="hwlist">{lines}</div>"""
     return html_response(page("Homework", body, "Homework"))
+
+
+def view_homework_set(req, db):
+    """One piece of homework: who has done it, who has not, and every way
+    to change it. The lists come first because that is what the lesson
+    opens with; the controls sit below under "Change"."""
+    cfg = core.load_config()
+    q = req["query"]
+    gid_s = (q.get("group", [""])[0] or "").strip()
+    if not gid_s.isdigit():
+        return not_found()
+    gid = int(gid_s)
+    due = (q.get("due", [""])[0] or "").strip() or None
+    g = db.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+    items = core.set_items(db, gid, due)
+    if not g or not items:
+        return not_found()
+    r = db.execute(
+        "SELECT group_id, due_at, COUNT(*) n, MIN(published) pub, MAX(published) pubmax,"
+        " MIN(closed) shut, MAX(closed) shutmax FROM assignments"
+        " WHERE group_id=? AND " + ("due_at IS NULL" if due is None else "due_at=?")
+        + " GROUP BY group_id, due_at", (gid,) if due is None else (gid, due)).fetchone()
+    key, pill = batch_state(r, due)
+    if not all(a["in_league"] for a in items):
+        pill += ' <span class="pill mute">not in the league</span>'
+    when, rel = due_words(due, cfg)
+    here = set_url(gid, due)
+
+    prog = core.group_set_progress(db, gid, items)
+    finished = [p for p in prog if p["percent"] == 100]
+    partly = [p for p in prog if p["done"] and p["percent"] != 100]
+    nothing = [p for p in prog if not p["done"]]
+    partly.sort(key=lambda p: (p["done"], p["student"]["name"]))
+
+    def names(group, missing=False):
+        if not group:
+            return '<li class="sub">nobody</li>'
+        out = ""
+        for p in sorted(group, key=lambda p: p["student"]["name"]):
+            st = p["student"]
+            extra = ""
+            if missing:
+                left = ", ".join(a["title"] for a in p["remaining"])
+                extra = (f'<div class="sub">{p["done"]} of {p["total"]} &middot; '
+                         f'missing {E(left)}</div>')
+            out += f'<li><a href="/students/{st["id"]}">{E(st["name"])}</a>{extra}</li>'
+        return out
+
+    who = f"""<div class="who">
+  <div class="card bad"><h3>Not started <span class="count">{len(nothing)}</span></h3>
+    <ul>{names(nothing)}</ul></div>
+  <div class="card mid"><h3>Partly done <span class="count">{len(partly)}</span></h3>
+    <ul>{names(partly, missing=True)}</ul></div>
+  <div class="card good"><h3>Done <span class="count">{len(finished)}</span></h3>
+    <ul>{names(finished)}</ul></div>
+</div>"""
+
+    head = "".join(f'<th title="{E(a["title"])}">{E(a["title"][:14])}</th>' for a in items)
+    grid = ""
+    for p in prog:
+        cells = "".join(
+            '<td class="tick">' + ("&#9989;" if a["id"] in p["done_ids"] else
+                                   '<span class="mute">&#11036;</span>') + "</td>"
+            for a in items)
+        cls = "pill risk" if p["percent"] < 50 else "pill"
+        grid += (f'<tr><td><a href="/students/{p["student"]["id"]}">'
+                 f'{E(p["student"]["name"])}</a></td>{cells}'
+                 f'<td><span class="{cls}">{p["percent"]}%</span></td></tr>')
+
+    # ------------------------------------------------------------ change it
+    key_fields = (f'<input type="hidden" name="group_id" value="{gid}">'
+                  f'<input type="hidden" name="due" value="{E(due or "")}">'
+                  f'<input type="hidden" name="back" value="{E(here)}">')
+    def form(action, label, cls="ghost", confirm=None, back=here):
+        ask = f' onsubmit="return confirm({json.dumps(confirm)})"' if confirm else ""
+        fields = key_fields.replace(f'value="{E(here)}"', f'value="{E(back)}"')
+        return (f'<form method="post" action="/assignments/batch/{action}"{ask}>'
+                f'{fields}<button class="{cls}">{label}</button></form>')
+    counts = all(a["in_league"] for a in items)
+    graded = core.set_graded_count(db, gid, due)
+    buttons = ""
+    if key == "draft":
+        buttons += form("publish", "Publish to students", "")
+    elif key == "closed":
+        buttons += form("open", "Reopen")
+    else:
+        buttons += form("close", "Close")
+    buttons += form("league", "Count in the league" if not counts
+                    else "Leave out of the league")
+    warn = ("Delete all %d item(s)? %d marked piece(s) stay with the student and "
+            "keep their score - they just stop being linked to this homework."
+            % (len(items), graded)) if graded else \
+           "Delete all %d item(s)? Nothing has been handed in." % len(items)
+    buttons += form("delete", "Delete this homework", "ghost danger", warn,
+                    back="/homework")
+
+    day, clock = core.deadline_parts(due, cfg)
+    item_rows = ""
+    for a in items:
+        n = db.execute("SELECT COUNT(*) c FROM submissions WHERE assignment_id=?",
+                       (a["id"],)).fetchone()["c"]
+        if a["closed"]:
+            flip = ("open", "reopen")
+        elif not a["published"]:
+            flip = ("publish", "publish")
+        else:
+            flip = ("close", "close")
+        item_rows += f"""<tr><td>
+  <form method="post" action="/assignments/{a["id"]}/edit" class="inline rename">
+    <input name="title" value="{E(a["title"])}" aria-label="Title">
+    <input type="hidden" name="due" value="{E(day)}">
+    <input type="hidden" name="due_time" value="{E(clock)}">
+    <input type="hidden" name="back" value="{E(here)}">
+    <button class="ghost">Save</button></form></td>
+  <td class="sub">{E(a["task_type"])}{" &middot; criteria" if a["rubric"] else ""}</td>
+  <td class="sub">{n} in</td>
+  <td class="rowacts">
+    <form method="post" action="/assignments/{a["id"]}/{flip[0]}">
+      <input type="hidden" name="back" value="{E(here)}">
+      <button class="linky">{flip[1]}</button></form>
+    <form method="post" action="/assignments/{a["id"]}/delete"
+      onsubmit="return confirm({json.dumps("Delete " + a["title"] + "?")})">
+      <input type="hidden" name="back" value="{E(here)}">
+      <button class="linky danger">delete</button></form></td></tr>"""
+
+    manage = f"""<h2 id="manage">Change it</h2>
+<div class="card">
+<div class="batchacts">{buttons}</div>
+<form method="post" action="/assignments/batch/edit" class="inline gap-4">
+{key_fields}
+<label class="f">New deadline<input type="date" name="new_due" value="{E(day)}"></label>
+<label class="f">at<input type="time" name="new_time" value="{E(clock or "23:59")}" step="60"></label>
+<label class="f pushed">&nbsp;<button class="ghost">Move the deadline</button></label>
+</form>
+<p class="sub gap-2">Moves every item together. Leaving it out of the league keeps it
+on the students' page and keeps your marks &mdash; it simply stops awarding points.</p>
+<div class="tablewrap gap-3"><table>
+<tr><th>Item</th><th>Type</th><th>Sent</th><th></th></tr>{item_rows}</table></div>
+</div>"""
+
+    body = f"""<p class="crumb"><a href="/homework">&larr; All homework</a></p>
+<h1>{E(g["name"])} &middot; {E(when)} {pill}</h1>
+<p class="sub">{f"{E(rel)} &middot; " if rel else ""}{len(items)} item{"" if len(items) == 1 else "s"}
+&middot; <strong>{len(finished)} of {len(prog)}</strong> have done everything.</p>
+{who}
+<h2>Item by item</h2>
+<div class="tablewrap"><table><tr><th>Student</th>{head}<th>Done</th></tr>{grid}</table></div>
+{manage}"""
+    return html_response(page(f"{g['name']} homework", body, "Homework"))
 
 
 
@@ -7575,13 +7719,13 @@ def act_publish_assignment(req, db, aid):
     db.commit()
     if req["form"].get("announce", [""])[0] == "1":
         announce(db, aid)
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def act_unpublish_assignment(req, db, aid):
     db.execute("UPDATE assignments SET published=0 WHERE id=?", (aid,))
     db.commit()
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def parse_list(text):
@@ -7619,7 +7763,7 @@ def act_batch_close(req, db):
     for a in items:
         db.execute("UPDATE assignments SET closed=1 WHERE id=?", (a["id"],))
     db.commit()
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def act_batch_open(req, db):
@@ -7627,7 +7771,7 @@ def act_batch_open(req, db):
     for a in items:
         db.execute("UPDATE assignments SET closed=0 WHERE id=?", (a["id"],))
     db.commit()
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def act_batch_publish(req, db):
@@ -7641,7 +7785,7 @@ def act_batch_publish(req, db):
             announce_list(db, gid, fresh)
         except Exception:
             traceback.print_exc()
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def act_batch_delete(req, db):
@@ -7652,7 +7796,7 @@ def act_batch_delete(req, db):
                    (a["id"],))
         db.execute("DELETE FROM assignments WHERE id=?", (a["id"],))
     db.commit()
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def act_batch_league(req, db):
@@ -7660,7 +7804,7 @@ def act_batch_league(req, db):
     gid, due, items = _batch_of(req, db)
     if items:
         core.set_in_league(db, gid, due, not all(a["in_league"] for a in items))
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def act_batch_edit(req, db):
@@ -7676,7 +7820,11 @@ def act_batch_edit(req, db):
             "UPDATE submissions SET late=CASE WHEN ? IS NOT NULL AND created_at > ?"
             " THEN 1 ELSE 0 END WHERE assignment_id=?", (when, when, a["id"]))
     db.commit()
-    return redirect("/assignments")
+    back = _back(req, "/assignments")
+    # the homework's own page is addressed by its deadline, which just moved
+    if back.startswith("/homework/set?") and gid:
+        back = set_url(gid, when)
+    return redirect(back)
 
 
 def unit_plan_json(req, db):
@@ -7804,7 +7952,8 @@ def act_edit_assignment(req, db, aid):
     db.execute("UPDATE assignments SET due_at=? WHERE id=?",
                (core.deadline_iso(due, f.get("due_time", [""])[0]), aid))
     db.commit()
-    return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+    return redirect(_back(
+        req, f"/groups/{row['group_id']}?tab=homework" if row else "/assignments"))
 
 
 def act_delete_assignment(req, db, aid):
@@ -7813,20 +7962,22 @@ def act_delete_assignment(req, db, aid):
     db.execute("UPDATE submissions SET assignment_id=NULL WHERE assignment_id=?", (aid,))
     db.execute("DELETE FROM assignments WHERE id=?", (aid,))
     db.commit()
-    return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+    return redirect(_back(
+        req, f"/groups/{row['group_id']}?tab=homework" if row else "/assignments"))
 
 
 def act_open_assignment(req, db, aid):
     row = db.execute("SELECT group_id FROM assignments WHERE id=?", (aid,)).fetchone()
     db.execute("UPDATE assignments SET closed=0 WHERE id=?", (aid,))
     db.commit()
-    return redirect(f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+    return redirect(_back(
+        req, f"/groups/{row['group_id']}?tab=homework" if row else "/assignments"))
 
 
 def act_close_assignment(req, db, aid):
     db.execute("UPDATE assignments SET closed=1 WHERE id=?", (aid,))
     db.commit()
-    return redirect("/assignments")
+    return redirect(_back(req, "/assignments"))
 
 
 def _back_to_group(db, sid):
@@ -7965,6 +8116,7 @@ ROUTES = [
     ("GET",  r"^/play/(\d+)/end$", act_game_end),
     ("POST", r"^/play/new$", act_new_game),
     ("POST", r"^/play/(\d+)/next$", act_game_next),
+    ("GET",  r"^/homework/set$", view_homework_set),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/batch/close$", act_batch_close),
     ("POST", r"^/assignments/batch/open$", act_batch_open),

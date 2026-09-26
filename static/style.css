@@ -167,7 +167,7 @@ header.top nav.sections a.on { color: var(--ink); font-weight: 600;
   border-bottom-color: var(--accent); }
 /* the arrow is the promise of a menu; a section without one is a plain link */
 header.top nav.sections a.has-menu::after {
-  content: "\25BE"; margin-left: var(--sp-1); font-size: 10px; opacity: .55;
+  content: "\25BE"; margin-left: var(--sp-1); font-size: 12px; opacity: .55;
 }
 header.top nav.sections { overflow: visible; }
 header.top nav.sections .sec { position: relative; display: flex; align-items: stretch; }
@@ -1270,6 +1270,65 @@ ul.attn li .sub { margin: 0; font-size: 13px; }
 .batchacts form { margin: 0; }
 .card.batch details { margin-top: var(--sp-2); }
 .card.batch summary { font-size: 13px; color: var(--brand); cursor: pointer; }
+/* ------------------------------------------------- the homework list
+
+   One line per piece of homework, and the three things done to it at the
+   start of a lesson: see who has done it, change it, delete it. */
+.hwlist { display: grid; gap: var(--sp-3); }
+.hw {
+  display: grid; grid-template-columns: 1fr 230px auto; gap: var(--sp-5);
+  align-items: center; padding: var(--sp-3) var(--sp-4);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.hw-title { font-size: 15px; }
+.hw-title .rel { color: var(--ink-3); }
+.hw-main .sub { margin: var(--sp-1) 0 0; font-size: 13px; }
+.hw-done .pbar { margin-bottom: var(--sp-1); }
+.hw-done .n { font-size: 13px; color: var(--ink-2); }
+.hw-done .bad { color: var(--warn); }
+.hw-acts { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.hw-acts form { margin: 0; }
+@media (max-width: 900px) {
+  .hw { grid-template-columns: 1fr; gap: var(--sp-3); }
+}
+
+/* a link dressed as a button, for the actions that only open a page */
+a.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: var(--sp-2) var(--sp-4); border-radius: 10px;
+  background: linear-gradient(100deg, var(--brand-deep) 0%, var(--brand) 62%,
+              var(--brand-lift) 100%);
+  color: var(--accent-ink); font-size: 14px; font-weight: 600; white-space: nowrap;
+}
+a.btn:hover { text-decoration: none; filter: brightness(1.06); }
+a.btn.ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+a.btn.ghost:hover { background: var(--surface-2); filter: none; }
+
+/* who has done it: three lists, worst first */
+.who { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3);
+  margin-bottom: var(--sp-5); }
+.who .card { padding: var(--sp-3) var(--sp-4); margin: 0; }
+.who h3 { margin: 0 0 var(--sp-2); font-size: 14px; display: flex;
+  justify-content: space-between; align-items: baseline; }
+.who .count { font-size: 20px; font-weight: 700; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; }
+.who ul { list-style: none; margin: 0; padding: 0; }
+.who li { padding: var(--sp-2) 0; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
+.who li:last-child { border-bottom: 0; }
+.who li a { color: var(--ink); font-weight: 500; }
+.who li .sub { margin: 0; font-size: 12px; }
+.card.bad { border-left: 4px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 6%, var(--surface)); }
+.card.mid { border-left: 4px solid var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
+@media (max-width: 720px) { .who { grid-template-columns: 1fr; } }
+
+td.tick { text-align: center; }
+td.tick .mute { color: var(--ink-3); }
+.crumb { margin: 0 0 var(--sp-2); font-size: 13px; }
+.crumb a { color: var(--ink-3); }
+form.rename input[name="title"] { min-width: 220px; }
+
 .rowacts { display: flex; gap: var(--sp-3); justify-content: flex-end; }
 .rowacts form { margin: 0; }
 .linky.danger { color: var(--red); }

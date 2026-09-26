@@ -77,12 +77,14 @@ d = db.execute("SELECT published FROM assignments WHERE title='Secret task'").fe
 print("   saved as draft (published=0):", d["published"] == 0)
 assert d["published"] == 0
 db.close()
-pg = get("/assignments")
+pg = get("/homework?show=all")
 print("   Publish button offered:", "/publish" in pg)
-print("   listed in the table:", "Secret task" in pg)
+print("   listed on the Homework page:", "Secret task" in pg)
+assert "Secret task" in pg
 
 print("\n5. THE PAGE STILL WORKS")
 print("   homework page:", "<h1>Homework</h1>" in get("/homework"))
+pg = get("/assignments")
 print("   swappable (music keeps playing):",
       "<script" not in re.search(r"<main[^>]*>(.*)</main>", pg, re.S).group(1))
 srv.shutdown(); shutil.rmtree(tmp)
