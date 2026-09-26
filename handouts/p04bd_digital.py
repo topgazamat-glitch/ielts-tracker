@@ -185,7 +185,7 @@ def build():
                 'autocomplete="off" autocapitalize="off" spellcheck="false">' % n)
     layout = TOKEN.sub(number, inner)
     return {"level": "Pre-Intermediate", "number": 4, "kind": "handout",
-            "title": "P04BD Celebrations (booklet)",
+            "title": "Unit 4B & 4D — Celebrations",
             "passages": {}, "layout": layout, "questions": questions}
 
 
