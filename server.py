@@ -4352,13 +4352,30 @@ def view_homework(req, db):
         if not all(a["in_league"] for a in items):
             pill += ' <span class="pill mute">not in the league</span>'
         rows.append((r, items, key, pill))
-    # nearest deadline first among what is open; no deadline goes last
-    rows.sort(key=lambda t: (t[2] == "closed", t[0]["due_at"] is None,
-                             t[0]["due_at"] or "", -t[0]["group_id"]))
+    # What is coming up, soonest first, is what a lesson opens with; what
+    # has passed follows, most recent first, so last week's is one glance
+    # down and the term's back catalogue is at the bottom.
+    order = {"open": 0, "draft": 1, "past": 2, "closed": 3}
+    heading = {"open": "Coming up", "draft": "Drafts, not yet sent",
+               "past": "Deadline passed", "closed": "Closed"}
+    def when_key(t):
+        due = t[0]["due_at"]
+        return (due is None, due or "") if t[2] == "open" else (due is None,)
+    rows.sort(key=lambda t: (order[t[2]],) + when_key(t))
+    for k in ("draft", "past", "closed"):
+        part = [t for t in rows if t[2] == k]
+        part.sort(key=lambda t: (t[0]["due_at"] is None, t[0]["due_at"] or ""), reverse=True)
+        rows = [t for t in rows if t[2] != k] + part
+    rows.sort(key=lambda t: order[t[2]])          # stable: keeps each part's order
 
     here = f"/homework?show={show}" + (f"&group={gid}" if gid else "")
     lines = ""
+    last_key = None
     for r, items, key, pill in rows:
+        if key != last_key:
+            n = sum(1 for t in rows if t[2] == key)
+            lines += f'<h2 class="hwhead">{heading[key]} <span class="sub">{n}</span></h2>'
+            last_key = key
         g = r["group_id"]
         due = r["due_at"]
         when, rel = due_words(due, cfg)

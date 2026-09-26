@@ -1275,6 +1275,10 @@ ul.attn li .sub { margin: 0; font-size: 13px; }
    One line per piece of homework, and the three things done to it at the
    start of a lesson: see who has done it, change it, delete it. */
 .hwlist { display: grid; gap: var(--sp-3); }
+.hwlist .hwhead { margin: var(--sp-3) 0 0; display: flex; gap: var(--sp-2);
+  align-items: baseline; }
+.hwlist .hwhead:first-child { margin-top: 0; }
+.hwlist .hwhead .sub { margin: 0; font-size: 13px; }
 .hw {
   display: grid; grid-template-columns: 1fr 230px auto; gap: var(--sp-5);
   align-items: center; padding: var(--sp-3) var(--sp-4);
