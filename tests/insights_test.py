@@ -64,8 +64,13 @@ op.open(B + "/login", urllib.parse.urlencode({"password": "testpw123"}).encode()
 def get(u):
     r = op.open(B + u); return r.geturl()[len(B):], r.read().decode("utf-8")
 where, pg = get("/insights")
-print("   two donuts:", pg.count('class="donut"') == 2)
-assert pg.count('class="donut"') == 2
+big = pg.count('class="donut"')
+print("   the two big donuts, and a pie per habit band:", big >= 2 + 3)
+assert big >= 5
+print("   habit pies say how many left:", pg.count('class="pie"') >= 3 and "</strong> left" in pg)
+assert pg.count('class="pie"') >= 3 and "</strong> left" in pg
+print("   slices carry their share:", 'class="share">' in pg)
+assert 'class="share">' in pg
 print("   slices carry what they are:",
       'class="slice kept"' in pg and 'class="slice ours"' in pg)
 assert 'class="slice kept"' in pg and 'class="slice ours"' in pg

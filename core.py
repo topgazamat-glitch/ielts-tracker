@@ -3151,6 +3151,32 @@ def exam_drivers(pts):
     return out
 
 
+# Students sorted into habits, so a pie can show who leaves from each.
+HABIT_BANDS = [
+    ("Strong", "80% or more of homework done", lambda v: v >= 80),
+    ("Middling", "half to 79%", lambda v: 50 <= v < 80),
+    ("Weak", "under half done", lambda v: v < 50),
+]
+ROOM_BANDS = [
+    ("Present", "4 or more out of 5", lambda v: v >= 4),
+    ("Middling", "3 to 4 out of 5", lambda v: 3 <= v < 4),
+    ("Switched off", "under 3 out of 5", lambda v: v < 3),
+]
+
+
+def bands(pts, key, spec):
+    """How many students fall in each band of a measure, and how many of
+    those left. The pies that show homework or behaviour against leaving
+    are drawn from this: one pie per band, kept against left."""
+    out = []
+    for label, note, fits in spec:
+        members = [p for p in pts if p[key] is not None and fits(p[key])]
+        left = sum(1 for p in members if p["left"])
+        out.append({"label": label, "note": note, "n": len(members),
+                    "left": left, "kept": len(members) - left})
+    return out
+
+
 def cycle_findings(pts, ret):
     """The chart page in sentences: only what the numbers can back."""
     lines = []
