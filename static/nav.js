@@ -129,7 +129,17 @@
   if (window.matchMedia && window.matchMedia("(hover: hover)").matches) return;
   if (!document.querySelector("nav.sections")) return;
   var open = null;
-  function close() { if (open) { open.classList.remove("open"); open = null; } }
+  // the strip fades at its edge with a mask, and a mask hides everything the
+  // element paints outside its own box - the pinned menu included - so the
+  // strip drops the fade while a menu is open
+  function strip(sec) { return sec.closest("nav"); }
+  function close() {
+    if (!open) return;
+    open.classList.remove("open");
+    var nav = strip(open);
+    if (nav) nav.classList.remove("menu-open");
+    open = null;
+  }
   document.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
@@ -145,6 +155,8 @@
         menu.style.top = Math.round(head.getBoundingClientRect().bottom) + "px";
       }
       sec.classList.add("open");
+      var nav = strip(sec);
+      if (nav) nav.classList.add("menu-open");
       open = sec;
       return;
     }
