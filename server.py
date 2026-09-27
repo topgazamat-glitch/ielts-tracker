@@ -3449,29 +3449,47 @@ def portal_profile(db, s, token, flash=""):
             opts.append(f'<option value="{key}"{sel}>{E(label)}</option>')
         return f'<select name="{name}">{"".join(opts)}</select>'
 
+    hero_stats, route, earned, opened = "", "", "", ""
     if c:
-        if c["climbed"] >= c["camps"]:
-            line = "You are standing on the summit. Choose a higher one."
+        summit = c["climbed"] >= c["camps"]
+        if summit:
+            nxt = ('<div class="cl-stat"><div class="k">Summit</div><div class="v">Reached</div>'
+                   '<div class="sub">choose a higher one below</div></div>')
         else:
-            line = (f'{c["to_next"]:g} more points and you reach '
-                    f'<strong>{E(c["next_label"])}</strong>')
-        body = (
-            '<div class="pf-figure">'
-            f'<span class="pf-pct">{c["percent"]:g}<small>%</small></span>'
-            f'<span class="pf-of">of the way from {E(c["labels"][0])} '
-            f'to {E(c["labels"][-1])}</span></div>'
-            f'<div class="pf-bar"><i style="width:{c["percent"]:g}%"></i></div>'
-            f'<p class="sub pf-now">Camp reached: <strong>{E(c["at_label"])}</strong>'
-            f' &middot; {line}</p>'
-            + charts.mountain(c)
-            + '<p class="sub pf-earned">Earned by '
-              f'{c["graded"]} marked piece{"" if c["graded"] == 1 else "s"} of homework'
-              f' and {c["words"]} word{"" if c["words"] == 1 else "s"} you have kept.'
-              ' Nothing you type moves the climber &mdash; only work does.</p>')
+            nxt = (f'<div class="cl-stat"><div class="k">Next camp</div>'
+                   f'<div class="v">{E(c["next_label"])}</div>'
+                   f'<div class="sub">{c["to_next"]:g} points to go</div></div>')
+        hero_stats = f"""<div class="cl-stats">
+  <div class="cl-stat"><div class="k">You are at</div><div class="v">{E(c["at_label"])}</div>
+    <div class="sub">{c["into_next"]}% of the way to the next camp</div></div>
+  {nxt}
+  <div class="cl-stat"><div class="k">Whole climb</div><div class="v">{c["percent"]:g}%</div>
+    <div class="sub">{E(c["labels"][0])} &rarr; {E(c["labels"][-1])}</div></div>
+</div>"""
+        reached = int(c["climbed"])
+        steps = ""
+        for i, label in enumerate(c["labels"]):
+            if i < reached or (summit and i == len(c["labels"]) - 1):
+                cls, mark, note = "done", "&#10003;", "reached"
+            elif i == reached:
+                cls, mark = "here", ""
+                note = (f'<div class="cl-mini"><i style="width:{c["into_next"]}%"></i></div>'
+                        f'<span>{c["into_next"]}% to {E(c["labels"][i + 1]) if i + 1 < len(c["labels"]) else "the top"}</span>')
+            else:
+                cls, mark, note = "ahead", "", f'{(i - c["climbed"]) * core.CLIMB_PER_CAMP:.0f} points away'
+            steps += (f'<li class="{cls}"><span class="dot">{mark}</span>'
+                      f'<div><div class="name">{E(label)}</div><div class="sub">{note}</div></div></li>')
+        route = f'<h4 class="cl-h">The route</h4><ol class="route">{steps}</ol>'
+        earned = (f'<p class="sub cl-earned">Earned by <strong>{c["graded"]}</strong> marked '
+                  f'piece{"" if c["graded"] == 1 else "s"} of homework and '
+                  f'<strong>{c["words"]}</strong> word{"" if c["words"] == 1 else "s"} you have '
+                  f'kept. A piece marked 10/10 is one point; a camp is {core.CLIMB_PER_CAMP:g}. '
+                  f'Nothing you type moves you up &mdash; only work does.</p>')
     else:
-        body = ('<p class="sub" style="margin:0 0 4px">Choose the camp you set out '
-                'from and the one you are climbing towards. Your homework and the '
-                'words you learn carry the climber up &mdash; nothing you type does.</p>')
+        opened = " open"
+        earned = ('<p class="sub cl-earned">Choose where you set out from and the summit '
+                  'you are climbing to. Your homework and the words you learn carry you '
+                  'up &mdash; nothing you type does.</p>')
 
     return f"""{flash}
 <div class="pf-head">{photo}
@@ -3480,15 +3498,23 @@ def portal_profile(db, s, token, flash=""):
       &middot; {E(core.level_name(db, core.level_of(db, s["group_id"])) or "")}</p></div>
 </div>
 
-<div class="card pf-card">
-  <h3 class="pf-title">Your climb</h3>
-  {body}
-  <form method="post" action="/s/{E(token)}/profile" enctype="multipart/form-data"
-        class="pf-set">
-    <label class="f">I started at{camps("climb_from", here)}</label>
-    <label class="f">I am climbing to{camps("climb_to", field("climb_to"))}</label>
-    <button>Save</button>
-  </form>
+<div class="card cl-card">
+  <div class="cl-hero">
+    <div class="cl-title">Your climb</div>
+    {charts.mountain(c)}
+    {hero_stats}
+  </div>
+  <div class="cl-body">
+    {route}
+    {earned}
+    <details class="cl-set"{opened}><summary>{"Change my route" if c else "Set my route"}</summary>
+    <form method="post" action="/s/{E(token)}/profile" enctype="multipart/form-data"
+          class="pf-set">
+      <label class="f">I started at{camps("climb_from", here)}</label>
+      <label class="f">I am climbing to{camps("climb_to", field("climb_to"))}</label>
+      <button>Save</button>
+    </form></details>
+  </div>
 </div>
 
 <div class="quote">

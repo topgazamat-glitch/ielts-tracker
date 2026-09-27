@@ -297,91 +297,134 @@ def journey_chart(j, w=560, h=220):
 # The path up the mountain, as a series of points from the foot to the summit.
 # Hand-placed rather than computed, so the slope eases off near the top the way
 # a real ridge does instead of climbing in a straight line.
-_RIDGE = [(52, 300), (118, 279), (178, 258), (238, 232), (292, 210),
-          (344, 183), (396, 158), (444, 131), (490, 108), (532, 84),
-          (566, 66), (596, 50), (614, 38)]
+# The mountain. The route the camps sit on rises from the left foot to the
+# summit at the right; the ridges behind it are only scenery. Everything is
+# drawn in the hero's own dark world - deep brand at the top, brand at the
+# horizon, white and gold on it - so it holds in light and dark mode alike.
+_ROUTE = [(46, 236), (96, 224), (146, 214), (196, 198), (244, 184), (290, 166),
+          (334, 150), (376, 132), (416, 116), (452, 100), (486, 84), (518, 66),
+          (548, 48)]
+_RIDGE_NEAR = ("M 0 300 L 0 262 L 40 244 L 100 232 L 150 220 L 200 204 L 250 188 "
+               "L 300 170 L 340 152 L 380 134 L 420 118 L 458 100 L 492 82 L 522 64 "
+               "L 548 44 L 566 60 L 590 90 L 620 130 L 640 150 L 640 300 Z")
+_RIDGE_MID = ("M 0 300 L 0 230 L 60 210 L 120 224 L 170 200 L 230 214 L 280 186 "
+              "L 330 200 L 380 176 L 430 190 L 470 160 L 520 178 L 570 140 L 610 168 "
+              "L 640 152 L 640 300 Z")
+_RIDGE_FAR = ("M 0 300 L 0 200 L 50 176 L 110 196 L 160 170 L 220 188 L 270 156 "
+              "L 320 174 L 370 146 L 420 164 L 460 136 L 500 150 L 550 118 L 600 146 "
+              "L 640 126 L 640 300 Z")
+_SNOW = "M 522 64 L 548 44 L 566 60 L 578 76 L 560 70 L 548 80 L 534 72 Z"
+_STARS = [(38, 30), (90, 52), (140, 22), (210, 44), (260, 18), (330, 38), (392, 24),
+          (446, 40), (500, 16), (598, 32), (622, 58), (176, 70), (300, 66), (476, 56)]
 
 
 def _along(fraction):
-    """A point some fraction of the way up the ridge."""
+    """A point some fraction of the way up the route."""
     fraction = max(0.0, min(1.0, fraction))
-    spot = fraction * (len(_RIDGE) - 1)
-    i = min(int(spot), len(_RIDGE) - 2)
-    a, b = _RIDGE[i], _RIDGE[i + 1]
+    spot = fraction * (len(_ROUTE) - 1)
+    i = min(int(spot), len(_ROUTE) - 2)
+    a, b = _ROUTE[i], _ROUTE[i + 1]
     t = spot - i
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
 
 
-def mountain(c, w=640, h=340):
-    """Their climb, drawn as a mountain with a camp for every stage.
+def mountain(c, w=640, h=300):
+    """Their climb, drawn as a mountain at night with a camp for every stage.
 
     The climber sits where their marked work has actually carried them, so the
-    picture moves a little every time a piece of homework is graded.
+    picture moves a little every time a piece of homework is graded. Passed
+    camps are lit; the one ahead is ringed; the summit carries the flag. Only
+    the camps that mean something are named on the picture - the route list
+    under it names them all.
     """
+    if c is None:
+        n, climbed, labels = 4, 0.0, []
+    else:
+        n, climbed, labels = c["camps"], c["climbed"], c["labels"]
+    reached = int(climbed)
     out = ['<svg class="climb" viewBox="0 0 %d %d" width="100%%" '
-           'preserveAspectRatio="xMidYMid meet" role="img" aria-label="Climb from '
-           '%s to %s, %d%% of the way">'
-           % (w, h, c["labels"][0], c["labels"][-1], c["percent"])]
+           'preserveAspectRatio="xMidYMid slice" role="img" aria-label="%s">'
+           % (w, h, ("Climb from %s to %s, %d%% of the way"
+                     % (labels[0], labels[-1], c["percent"])) if c else "The mountain")]
     out.append(
-        '<defs>'
-        '<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0%" stop-color="var(--accent-soft)"/>'
-        '<stop offset="100%" stop-color="var(--surface)"/></linearGradient>'
-        '<linearGradient id="rock" x1="0" y1="0" x2="1" y2="1">'
-        '<stop offset="0%" stop-color="var(--accent)" stop-opacity=".85"/>'
-        '<stop offset="100%" stop-color="var(--accent)" stop-opacity=".45"/>'
-        '</linearGradient></defs>')
-    out.append('<rect width="%d" height="%d" fill="url(#sky)" rx="12"/>' % (w, h))
-
-    # a softer ridge behind, for depth
-    out.append('<path d="M0 %d L 150 %d L 250 %d L 360 %d L 470 %d L %d %d Z" '
-               'fill="var(--accent)" opacity=".13"/>' % (h, 210, 245, 175, 205, w, h))
-    # the mountain they are on
-    ridge = " ".join("L %d %d" % p for p in _RIDGE)
-    out.append('<path d="M 20 %d %s L %d %d Z" fill="url(#rock)"/>'
-               % (h - 20, ridge, w - 12, h - 20))
-    # snow on the summit
-    out.append('<path d="M %d %d L %d %d L %d %d L %d %d Z" fill="#ffffff" '
-               'opacity=".75"/>' % (566, 66, 596, 50, 614, 38, 600, 82))
-
-    # the path itself
-    out.append('<polyline points="%s" fill="none" stroke="var(--surface)" '
-               'stroke-width="2" stroke-dasharray="4 5" opacity=".7"/>'
-               % " ".join("%d,%d" % p for p in _RIDGE))
-
-    n = c["camps"]
-    reached = int(c["climbed"])
-    # A long climb has more camps than there is room for names. Name the ones
-    # that mean something - where they began, where they are, what is next and
-    # where they are going - and leave the rest as marks on the path.
-    named = {0, n, reached, min(reached + 1, n)}
-    if n <= 6:
-        named = set(range(n + 1))
-    for i, label in enumerate(c["labels"]):
-        x, y = _along(i / float(n)) if n else _along(0)
-        passed = i <= reached
-        fill = "var(--accent)" if passed else "var(--surface)"
-        out.append('<circle cx="%.1f" cy="%.1f" r="%d" fill="%s" '
-                   'stroke="var(--accent)" stroke-width="2"/>'
-                   % (x, y, 5 if i in named else 3.5, fill))
-        if i not in named:
-            continue
-        up = (i % 2 == 0)
-        anchor = "middle"
-        if i == 0:
-            anchor = "start"
-        elif i == n:
-            anchor = "end"
-        out.append('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="10.5" '
-                   'font-weight="%s" fill="var(--ink-2)">%s</text>'
-                   % (x, y - 13 if up else y + 21, anchor,
-                      "700" if passed else "500", label))
-
-    cx, cy = _along(c["climbed"] / float(n)) if n else _along(0)
-    out.append('<text x="%.1f" y="%.1f" font-size="26" text-anchor="middle">'
-               '\U0001F9D7</text>' % (cx, cy - 6))
+        '<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%" stop-color="var(--brand-deep)"/>'
+        '<stop offset="100%" stop-color="var(--brand)"/></linearGradient>'
+        '<radialGradient id="glow" cx="50%" cy="50%" r="50%">'
+        '<stop offset="0%" stop-color="#fff" stop-opacity=".9"/>'
+        '<stop offset="100%" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>')
+    out.append('<rect width="%d" height="%d" fill="url(#sky)"/>' % (w, h))
+    for x, y in _STARS:
+        out.append('<circle cx="%d" cy="%d" r="%s" fill="#fff" opacity="%s"/>'
+                   % (x, y, "1.3" if (x + y) % 3 else "1.8", ".55" if (x + y) % 2 else ".35"))
+    out.append('<path d="%s" fill="#fff" opacity=".08"/>' % _RIDGE_FAR)
+    out.append('<path d="%s" fill="#fff" opacity=".13"/>' % _RIDGE_MID)
+    out.append('<path d="%s" fill="#fff" opacity=".22"/>' % _RIDGE_NEAR)
+    out.append('<path d="%s" fill="#fff" opacity=".85"/>' % _SNOW)
+    # the route: the stretch already walked is solid, the rest is dashed
+    pts = " ".join("%d,%d" % p for p in _ROUTE)
+    out.append('<polyline points="%s" fill="none" stroke="#fff" stroke-width="2" '
+               'stroke-dasharray="3 6" stroke-linecap="round" opacity=".55"/>' % pts)
+    if c and climbed > 0:
+        walked = [_along(k / 40.0 * climbed / n) for k in range(41)]
+        out.append('<polyline points="%s" fill="none" stroke="#fff" stroke-width="3" '
+                   'stroke-linecap="round" stroke-linejoin="round" opacity=".95"/>'
+                   % " ".join("%.1f,%.1f" % p for p in walked))
+    # the summit flag
     fx, fy = _along(1.0)
-    out.append('<text x="%.1f" y="%.1f" font-size="20" text-anchor="middle">'
-               '\U0001F6A9</text>' % (fx + 10, fy - 10))
+    out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#fff" '
+               'stroke-width="2" stroke-linecap="round"/>' % (fx, fy, fx, fy - 30))
+    out.append('<path d="M %.1f %.1f L %.1f %.1f L %.1f %.1f Z" fill="var(--gold)"/>'
+               % (fx + 1, fy - 30, fx + 24, fy - 23, fx + 1, fy - 15))
+    if not c:
+        out.append("</svg>")
+        return "".join(out)
+    # the camps
+    named = {0, n, reached, min(reached + 1, n)} if n > 5 else set(range(n + 1))
+    for i, label in enumerate(labels):
+        x, y = _along(i / float(n))
+        passed = i <= reached
+        nxt = i == min(reached + 1, n) and i != reached
+        if passed:
+            out.append('<circle cx="%.1f" cy="%.1f" r="5.5" fill="#fff"/>' % (x, y))
+        elif nxt:
+            out.append('<circle cx="%.1f" cy="%.1f" r="6" fill="var(--brand)" '
+                       'stroke="var(--gold)" stroke-width="2.5"/>' % (x, y))
+        else:
+            out.append('<circle cx="%.1f" cy="%.1f" r="4" fill="var(--brand)" '
+                       'stroke="#fff" stroke-width="1.5" opacity=".8"/>' % (x, y))
+        if i not in named or i == reached:
+            continue           # the reached camp is named by the climber's tag
+        anchor = "start" if i == 0 else "end" if i == n else "middle"
+        dy, dx = (24 if i % 2 == 0 else -14), (6 if i == 0 else 0)
+        if i == n:
+            dy, dx, anchor = 4, -12, "end"       # left of the summit, on the sky
+        out.append('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="12" '
+                   'font-weight="%s" fill="#fff" fill-opacity="%s">%s</text>'
+                   % (x + dx, y + dy, anchor,
+                      "700" if (passed or nxt) else "500", ".95" if (passed or nxt) else ".7",
+                      label))
+    # the climber: a lit marker where their work has carried them, with a tag
+    cx, cy = _along(climbed / float(n))
+    out.append('<circle cx="%.1f" cy="%.1f" r="26" fill="url(#glow)" opacity=".45"/>' % (cx, cy))
+    out.append('<circle class="pulse" cx="%.1f" cy="%.1f" r="12" fill="none" '
+               'stroke="#fff" stroke-width="1.5" opacity=".6"/>' % (cx, cy))
+    out.append('<circle cx="%.1f" cy="%.1f" r="8" fill="var(--gold)" stroke="#fff" '
+               'stroke-width="2.5"/>' % (cx, cy))
+    tag = "You"
+    tw = 8 * len(tag) + 18
+    tx = cx - tw / 2.0
+    ty = cy - 44
+    if tx < 8:
+        tx = 8
+    if tx + tw > w - 8:
+        tx = w - 8 - tw
+    out.append('<rect x="%.1f" y="%.1f" width="%d" height="22" rx="11" fill="#fff"/>'
+               % (tx, ty, tw))
+    out.append('<text x="%.1f" y="%.1f" text-anchor="middle" font-size="12" '
+               'font-weight="700" fill="var(--brand-deep)">%s</text>'
+               % (tx + tw / 2.0, ty + 15, tag))
+    out.append('<path d="M %.1f %.1f L %.1f %.1f L %.1f %.1f Z" fill="#fff"/>'
+               % (cx - 5, ty + 22, cx + 5, ty + 22, cx, ty + 29))
     out.append("</svg>")
     return "".join(out)
