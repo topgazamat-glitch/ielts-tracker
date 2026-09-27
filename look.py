@@ -216,7 +216,8 @@ def open_page(url, width, height, mobile, cookie="", settle=1.4):
     return tab
 
 
-def start_chrome():
+def start_chrome(extra=()):
+    """`extra` is for flags a check needs: a fake microphone, say."""
     binary = next((c for c in CHROMES if os.path.exists(c)), None)
     if not binary:
         sys.exit("Google Chrome not found - install it, or add its path to "
@@ -227,7 +228,7 @@ def start_chrome():
          "--disable-background-networking", "--disable-sync",
          f"--remote-debugging-port={DEBUG_PORT}",
          f"--user-data-dir={tempfile.mkdtemp(prefix='look-chrome-')}",
-         "about:blank"],
+         *extra, "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(60):
         try:

@@ -51,7 +51,7 @@ q = op.open(B + "/queue?all=1").read().decode("utf-8")
 print("   the marking panel has a recorder:", 'id="rec"' in q and 'id="voice"' in q)
 assert 'id="rec"' in q and 'id="voice"' in q
 boundary = "----t" + uuid.uuid4().hex
-blob = b"\x1aE\xdf\xa3fake-webm-bytes" * 40
+blob = b"\x1aE\xdf\xa3fake-webm-bytes" * 120
 body = b"".join([
     ("--%s\r\nContent-Disposition: form-data; name=\"submission_id\"\r\n\r\n%d\r\n" % (boundary, sub)).encode(),
     ("--%s\r\nContent-Disposition: form-data; name=\"kind\"\r\n\r\naudio/webm;codecs=opus\r\n" % boundary).encode(),

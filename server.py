@@ -8155,7 +8155,10 @@ def act_grade_voice(req, db):
     if not sub:
         return json_response({"ok": False})
     filename, data = files[0]
-    if not data or len(data) > 15 * 1024 * 1024:
+    if not data or len(data) < 1000:
+        # a recorder that never heard anything hands over a header and no sound
+        return json_response({"ok": False, "why": "empty"})
+    if len(data) > 15 * 1024 * 1024:
         return json_response({"ok": False, "why": "too long"})
     kind = (fields.get("kind", [""])[0] or "").split(";")[0].strip().lower()
     ext = VOICE_EXT.get(kind) or (os.path.splitext(filename or "")[1].lower() or ".webm")
