@@ -414,7 +414,7 @@ def group_name(db, gid):
     return r["name"] if r else "—"
 
 
-AUDIO_EXT = (".oga", ".ogg", ".mp3", ".m4a", ".wav", ".opus", ".weba")
+AUDIO_EXT = (".oga", ".ogg", ".mp3", ".m4a", ".wav", ".opus", ".weba", ".webm", ".mp4")
 
 
 def is_audio(name):
@@ -515,6 +515,17 @@ def grade_form(db, sub, student, assignment, regrade=False, gid=None, due=None):
         <textarea name="note" id="note" rows="2"
           placeholder="One line the student will read">{E(sub["note"] or "")}</textarea></label>
       <div class="chips">{chips}</div>
+      <div class="voice" id="voice" data-sid="{sub["id"]}">
+        <div class="voice-row">
+          <button type="button" class="ghost" id="rec"><i class="dot"></i>Record a voice note</button>
+          <span class="sub" id="rectime"></span>
+        </div>
+        <div class="voice-have" id="recwrap"{"" if sub["voice"] else " hidden"}>
+          <audio controls preload="metadata" id="recplay"
+                 src="{("/media/" + E(sub["voice"])) if sub["voice"] else ""}"></audio>
+          <button type="button" class="linky danger" id="recdel">remove</button>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button id="save"{"" if regrade or sub["score"] else " disabled"}>{save}</button>
         {skip}
@@ -2249,7 +2260,8 @@ ICONS = {
                '<path d="M5 20a7 7 0 0 1 14 0"/></svg>',
 }
 PORTAL = [
-    ("home", "Homework", [("home", "Send"), ("write", "Writing")]),
+    ("home", "Homework", [("home", "Send"), ("write", "Writing"),
+                          ("feedback", "Feedback")]),
     ("learn", "Learn", [("materials", "Materials"), ("handouts", "Handouts"),
                         ("tests", "Tests")]),
     ("play", "Play", [("play", "Play"), ("battle", "Battle")]),
@@ -2265,16 +2277,21 @@ def student_shell(s, db, token, tab, body):
     section = next((key for key, _l, pages in PORTAL
                     if any(p == tab for p, _ in pages)), "home")
     base = f"/s/{E(token)}?tab="
+    # feedback the student has not opened yet is the one thing that should
+    # be impossible to miss: a count on the section, and on its tab
+    unseen = core.unseen_feedback(db, s["id"])
+    badge = f'<i class="badge">{unseen}</i>' if unseen else ""
     nav = "".join(
         f'<a class="{"on" if key == section else ""}" href="{base}{pages[0][0]}">'
-        f'{ICONS[key]}<span>{label}</span></a>'
+        f'{ICONS[key]}{badge if key == "home" else ""}<span>{label}</span></a>'
         for key, label, pages in PORTAL)
     pages = next(pages for key, _l, pages in PORTAL if key == section)
     sub = ""
     if len(pages) > 1:
         sub = ('<div class="tabs stretch psub">'
                + "".join(f'<a class="tab{" on" if p == tab else ""}" href="{base}{p}">'
-                         f'{label}</a>' for p, label in pages) + "</div>")
+                         f'{label}{badge if p == "feedback" else ""}</a>'
+                         for p, label in pages) + "</div>")
     head = f"""<div class="whoami">
   <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
   <div>
@@ -2358,7 +2375,14 @@ def portal_home(db, s, token, flash):
     if drafts:
         drafts = "<h2>Ready to send</h2>" + drafts
 
-    return f"""{flash}
+    unseen = core.unseen_feedback(db, s["id"])
+    nudge = ""
+    if unseen:
+        nudge = (f'<a class="todo urgent fbnudge" href="/s/{E(token)}?tab=feedback">'
+                 f'<div class="todo-head">New feedback from your teacher</div>'
+                 f'<div class="sub gap-1">{unseen} piece{"" if unseen == 1 else "s"} of '
+                 f'homework marked &mdash; see what they said &rarr;</div></a>')
+    return f"""{flash}{nudge}
 <h2>Send your homework</h2>
 <div class="card">
   <form method="post" action="/s/{E(token)}/upload" enctype="multipart/form-data">
@@ -2378,6 +2402,42 @@ def portal_home(db, s, token, flash):
 {drafts}
 <h2>What is left</h2>
 {lists}"""
+
+
+def portal_feedback(db, s, token):
+    """What the teacher said about each piece of work, newest first, with
+    the ones not yet opened marked as new. Opening the page is what marks
+    them read - there is nothing to press."""
+    rows = core.feedback_rows(db, s["id"])
+    fresh = [r for r in rows if not r["seen"]]
+    core.mark_feedback_seen(db, s["id"])
+    if not rows:
+        return ('<h2>Feedback</h2><div class="card"><p class="flush">Nothing marked yet. '
+                'When your teacher marks a piece of homework, what they said about it '
+                'appears here.</p></div>')
+    cards = ""
+    for r in rows:
+        when = (r["graded_at"] or "")[:10]
+        tags = "".join(f'<span class="pill mute">{E(t)}</span>' for t in r["tags"])
+        note = (f'<blockquote class="fb-note">{E(r["note"])}</blockquote>' if r["note"] else "")
+        voice = (f'<div class="fb-voice"><span class="sub">Your teacher says:</span>'
+                 f'<audio controls preload="metadata" '
+                 f'src="/s/{E(token)}/voice/{r["id"]}"></audio></div>'
+                 if r["voice"] else "")
+        nothing = ("" if (r["note"] or r["tags"] or r["voice"]) else
+                   '<p class="sub flush">Marked, with nothing to add.</p>')
+        cards += f"""<div class="card fb{" new" if not r["seen"] else ""}">
+  <div class="fb-head">
+    <div><div class="fb-title">{E(r["title"] or "Homework")}</div>
+      <div class="sub">{E(when)}{' &middot; <span class="pill">new</span>' if not r["seen"] else ''}</div></div>
+    {score_pill(r["score"])}
+  </div>
+  {note}{voice}
+  {f'<div class="fb-tags">{tags}</div>' if tags else ''}{nothing}
+</div>"""
+    head = (f'<p class="sub">{len(fresh)} new since you last looked.</p>' if fresh
+            else '<p class="sub">Everything your teacher has said about your work.</p>')
+    return f"<h2>Feedback</h2>{head}{cards}"
 
 
 def portal_materials(db, s, token, query):
@@ -4444,6 +4504,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_battle(db, s, token, query)
     elif tab == "handouts":
         body = portal_handouts(db, s, token, query)
+    elif tab == "feedback":
+        body = portal_feedback(db, s, token)
     elif tab == "class":
         sc = (query.get("scope", ["class"])[0] or "class")
         body = portal_class(db, s, token, "school" if sc == "school" else "class")
@@ -8077,6 +8139,56 @@ def save_grade(db, sub, form):
     return score
 
 
+VOICE_EXT = {"audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/webm": ".webm",
+             "audio/ogg": ".ogg", "audio/mpeg": ".mp3"}
+
+
+def act_grade_voice(req, db):
+    """Keep the teacher's recording beside the piece it is about. Uploaded
+    the moment the recording stops, so the mark itself can be saved the
+    ordinary way afterwards. A second recording replaces the first."""
+    fields, files = req["files"]
+    sid = (fields.get("submission_id", [""])[0] or "").strip()
+    if not sid.isdigit() or not files:
+        return json_response({"ok": False})
+    sub = db.execute("SELECT id, voice FROM submissions WHERE id=?", (int(sid),)).fetchone()
+    if not sub:
+        return json_response({"ok": False})
+    filename, data = files[0]
+    if not data or len(data) > 15 * 1024 * 1024:
+        return json_response({"ok": False, "why": "too long"})
+    kind = (fields.get("kind", [""])[0] or "").split(";")[0].strip().lower()
+    ext = VOICE_EXT.get(kind) or (os.path.splitext(filename or "")[1].lower() or ".webm")
+    if ext not in (".m4a", ".webm", ".ogg", ".mp3"):
+        ext = ".webm"
+    name = "voice_%d_%s%s" % (sub["id"], core.now().strftime("%Y%m%d%H%M%S"), ext)
+    os.makedirs(core.UPLOAD_DIR, exist_ok=True)
+    with open(os.path.join(core.UPLOAD_DIR, name), "wb") as fh:
+        fh.write(data)
+    if sub["voice"] and sub["voice"] != name:
+        try:
+            os.remove(os.path.join(core.UPLOAD_DIR, sub["voice"]))
+        except OSError:
+            pass
+    db.execute("UPDATE submissions SET voice=? WHERE id=?", (name, sub["id"]))
+    db.commit()
+    return json_response({"ok": True, "name": name, "url": "/media/" + name})
+
+
+def act_grade_voice_delete(req, db):
+    sid = (req["form"].get("submission_id", [""])[0] or "").strip()
+    if sid.isdigit():
+        sub = db.execute("SELECT id, voice FROM submissions WHERE id=?", (int(sid),)).fetchone()
+        if sub and sub["voice"]:
+            try:
+                os.remove(os.path.join(core.UPLOAD_DIR, sub["voice"]))
+            except OSError:
+                pass
+            db.execute("UPDATE submissions SET voice=NULL WHERE id=?", (sub["id"],))
+            db.commit()
+    return json_response({"ok": True})
+
+
 def act_grade(req, db):
     sid = int(req["form"].get("submission_id", [0])[0])
     sub = db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
@@ -8147,8 +8259,13 @@ def notify_graded(db, sid):
     ]
     import bot  # local import keeps the web app importable without the bot
 
+    site = core.meta_get(db, "site_url")
+    url = ("%s/s/%s?tab=feedback" % (site.rstrip("/"), core.student_token(db, row["sid"]))
+           if site else None)
+    voice = db.execute("SELECT voice FROM submissions WHERE id=?", (sid,)).fetchone()["voice"]
     bot.send_score(token, row["telegram_id"], row["lang"], row["title"], row["score"],
-                   tags, row["note"], sid, student_id=row["sid"])
+                   tags, row["note"], sid, student_id=row["sid"], url=url,
+                   voice=os.path.join(core.UPLOAD_DIR, voice) if voice else None)
 
 
 def act_skip(req, db):
@@ -8625,6 +8742,7 @@ ROUTES = [
     ("POST", r"^/notes/new$", act_new_note),
     ("POST", r"^/notes/delete$", act_delete_note),
     ("POST", r"^/skip$", act_skip),
+    ("POST", r"^/grade/voice/delete$", act_grade_voice_delete),
     ("POST", r"^/groups/new$", act_new_group),
     ("POST", r"^/groups/(\d+)/level$", act_set_group_level),
     ("POST", r"^/groups/(\d+)/repeat$", act_repeat_homework),
@@ -8761,7 +8879,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*not_found())
         ctype = ("audio/ogg" if name.endswith((".oga", ".ogg"))
                  else "audio/mpeg" if name.endswith(".mp3")
-                 else "audio/mp4" if name.endswith((".m4a", ".aac"))
+                 else "audio/mp4" if name.endswith((".m4a", ".aac", ".mp4"))
+                 else "audio/webm" if name.endswith((".webm", ".weba"))
                  else "audio/wav" if name.endswith(".wav")
                  else "image/png" if name.endswith(".png") else "image/jpeg")
         size = os.path.getsize(full)
@@ -8947,6 +9066,22 @@ class Handler(BaseHTTPRequestHandler):
                                         ("Cache-Control", "private, max-age=300")], blob)
             finally:
                 db.close()
+        # the teacher's recording, playable from the student's own page only:
+        # the piece must be theirs, and /media/ itself stays the teacher's
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/voice/(\d+)$", path)
+        if m:
+            db = core.connect()
+            try:
+                st = core.student_by_token(db, m.group(1))
+                row = st and db.execute(
+                    "SELECT voice FROM submissions WHERE id=? AND student_id=?",
+                    (int(m.group(2)), st["id"])).fetchone()
+                if not row or not row["voice"]:
+                    return self._send(*not_found())
+                name = row["voice"]
+            finally:
+                db.close()
+            return self._serve_media("/media/" + name)
         if path.startswith("/s/"):
             return self._student_get(path, query)
         if path.startswith("/p/"):
@@ -9067,6 +9202,18 @@ class Handler(BaseHTTPRequestHandler):
             db = core.connect()
             try:
                 return self._send(*act_new_material(
+                    {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        if path == "/grade/voice":
+            if not self._session():
+                return self._send(*json_response({"ok": False}))
+            fields, files = uploads.parse_multipart(
+                body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_grade_voice(
                     {"query": {}, "form": {}, "files": (fields, files)}, db))
             finally:
                 db.close()

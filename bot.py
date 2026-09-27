@@ -32,6 +32,8 @@ T = {
         "which": "Which assignment is this for?",
         "reassigned": "Moved to “{title}” ✅",
         "scored": "“{title}” — {score}/10",
+        "feedback_link": "All your feedback, in one place: {url}",
+        "voice_coming": "🎧 A voice note from your teacher follows.",
         "game_invite": "🎮 Vocabulary game starting now — tap to join:\n{url}",
         "standing_top": "You are {rank} of {of} in the class. {behind} is right behind you.",
         "standing_one": "You are {rank} of {of} in the class. Hand in one more piece of homework and you pass {ahead}.",
@@ -141,6 +143,8 @@ T = {
         "which": "К какому заданию это относится?",
         "reassigned": "Перенесено в «{title}» ✅",
         "scored": "«{title}» — {score}/10",
+        "feedback_link": "Все отзывы учителя в одном месте: {url}",
+        "voice_coming": "🎧 Дальше — голосовое сообщение от учителя.",
         "game_invite": "🎮 Игра по словам началась — нажмите, чтобы войти:\n{url}",
         "standing_top": "Вы {rank}-й из {of} в группе. {behind} сразу за вами.",
         "standing_one": "Вы {rank}-й из {of} в группе. Сдайте ещё одно задание — и обойдёте {ahead}.",
@@ -250,6 +254,8 @@ T = {
         "which": "Bu qaysi topshiriq uchun?",
         "reassigned": "“{title}” ga ko'chirildi ✅",
         "scored": "“{title}” — {score}/10",
+        "feedback_link": "Barcha fikr-mulohazalar bir joyda: {url}",
+        "voice_coming": "🎧 Keyin — o‘qituvchingizdan ovozli xabar.",
         "game_invite": "🎮 So‘z o‘yini boshlandi — qo‘shilish uchun bosing:\n{url}",
         "standing_top": "Siz sinfda {of} tadan {rank}-o‘rindasiz. {behind} ortingizdan kelmoqda.",
         "standing_one": "Siz sinfda {of} tadan {rank}-o‘rindasiz. Yana bitta vazifa topshiring va {ahead}dan o‘tasiz.",
@@ -385,23 +391,65 @@ def send(token, chat_id, text, keyboard=None, markup=None):
     return call(token, "sendMessage", chat_id=chat_id, text=text, reply_markup=markup)
 
 
-def send_score(token, chat_id, lang, title, score, tags, note, sub_id=None,
-               student_id=None):
-    """Called right after a grade is saved, from the dashboard or from Telegram."""
+def score_lines(lang, title, score, tags, note, url=None, voice=False):
+    """The text of a mark, built apart from the sending so it can be read."""
     lang = lang or "en"
     lines = [t(lang, "scored", title=title or "homework", score=f"{score:g}")]
     if tags:
         lines.append("• " + "\n• ".join(tags))
     if note:
-        lines.append(note)
+        lines.append("\U0001F4DD " + note)
+    if voice:
+        lines.append(t(lang, "voice_coming"))
+    if url:
+        lines.append(t(lang, "feedback_link", url=url))
+    return lines
+
+
+def send_score(token, chat_id, lang, title, score, tags, note, sub_id=None,
+               student_id=None, url=None, voice=None):
+    """Called right after a grade is saved, from the dashboard or from Telegram.
+
+    The recording, when there is one, follows the text as a voice message -
+    the one kind of message a phone plays with a single tap."""
+    lang = lang or "en"
+    lines = score_lines(lang, title, score, tags, note, url, bool(voice))
     if student_id:
         where = standing_sentence(lang, student_id)
         if where:
-            lines.append(where)
+            lines.insert(len(lines) - (1 if url else 0), where)
     kb = None
     if sub_id and score is not None and score < 8:
         kb = [[{"text": t(lang, "improve"), "callback_data": f"imp:{sub_id}"}]]
     send(token, chat_id, "\n\n".join(lines), keyboard=kb)
+    if voice and os.path.isfile(voice):
+        try:
+            send_voice(token, chat_id, voice)
+        except Exception:
+            pass
+
+
+def send_voice(token, chat_id, path):
+    """A recording as a voice message where the format allows it (ogg, mp3,
+    m4a), and as a file where it does not (webm from a Chrome recorder)."""
+    ext = os.path.splitext(path)[1].lower()
+    voice_ok = ext in (".ogg", ".oga", ".mp3", ".m4a")
+    method, field = ("sendVoice", "voice") if voice_ok else ("sendDocument", "document")
+    boundary = "----ta" + os.urandom(8).hex()
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"'
+             f"\r\n\r\n{chat_id}\r\n".encode()]
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{field}";'
+        f' filename="feedback{ext}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
+        + blob + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        API.format(token=token, method=method), data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
 
 
 def standing_sentence(lang, student_id):

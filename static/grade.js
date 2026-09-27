@@ -134,11 +134,110 @@
     toast.timer = setTimeout(function () { el.classList.remove("on"); }, 1800);
   }
 
+  // ---- a voice note, recorded here and kept beside the mark
+  //
+  // Uploaded the moment the recording stops, so the mark can then be saved
+  // the ordinary way. mp4 (AAC) is preferred where the browser can record
+  // it: it plays on every phone and Telegram shows it as a voice message.
+  var recorder = null, chunks = [], recTimer = null, recStart = 0;
+  var voicePending = null;                  // an upload still in flight
+  function recMime() {
+    var M = window.MediaRecorder;
+    if (!M || !M.isTypeSupported) return "";
+    var tries = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+    for (var i = 0; i < tries.length; i++) if (M.isTypeSupported(tries[i])) return tries[i];
+    return "";
+  }
+  function recNote(text) {
+    var el = document.getElementById("rectime");
+    if (el) el.textContent = text;
+  }
+  function uploadVoice(blob, mime) {
+    var box = document.getElementById("voice");
+    if (!box) return Promise.resolve();
+    var fd = new FormData();
+    fd.append("submission_id", box.getAttribute("data-sid"));
+    fd.append("kind", mime);
+    var ext = mime.indexOf("mp4") >= 0 ? "m4a" : mime.indexOf("ogg") >= 0 ? "ogg" : "webm";
+    fd.append("file", blob, "voice." + ext);
+    recNote("Saving\u2026");
+    return fetch("/grade/voice", {method: "POST", body: fd, credentials: "same-origin"})
+      .then(function (r) { return r.json(); })
+      .then(function (out) {
+        if (!out.ok) throw new Error("no");
+        var wrap = document.getElementById("recwrap"), play = document.getElementById("recplay");
+        if (play) play.src = out.url;
+        if (wrap) wrap.hidden = false;
+        recNote("Voice note saved");
+        toast("Voice note saved");
+      })
+      .catch(function () { recNote("Could not save the recording"); });
+  }
+  function stopRecording() {
+    if (recorder && recorder.state === "recording") recorder.stop();
+  }
+  function startRecording() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      recNote("This browser cannot record"); return;
+    }
+    navigator.mediaDevices.getUserMedia({audio: true}).then(function (stream) {
+      var mime = recMime();
+      recorder = new MediaRecorder(stream, mime ? {mimeType: mime} : undefined);
+      chunks = [];
+      recorder.ondataavailable = function (ev) { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      recorder.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        clearInterval(recTimer);
+        var btn = document.getElementById("rec");
+        if (btn) { btn.classList.remove("live"); btn.innerHTML = '<i class="dot"></i>Record again'; }
+        var type = recorder.mimeType || mime || "audio/webm";
+        voicePending = uploadVoice(new Blob(chunks, {type: type}), type)
+          .then(function () { voicePending = null; });
+      };
+      recorder.start();
+      recStart = Date.now();
+      var btn = document.getElementById("rec");
+      if (btn) { btn.classList.add("live"); btn.innerHTML = '<i class="dot"></i>Stop'; }
+      recTimer = setInterval(function () {
+        var s = Math.round((Date.now() - recStart) / 1000);
+        recNote("Recording " + Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2));
+        if (s >= 180) stopRecording();          // three minutes is a lecture
+      }, 500);
+    }).catch(function () { recNote("Microphone not allowed"); });
+  }
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest ? e.target.closest("#rec, #recdel") : null;
+    if (!t) return;
+    e.preventDefault();
+    if (t.id === "rec") {
+      if (recorder && recorder.state === "recording") stopRecording(); else startRecording();
+      return;
+    }
+    var box = document.getElementById("voice");
+    if (!box) return;
+    fetch("/grade/voice/delete", {method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body: "submission_id=" + encodeURIComponent(box.getAttribute("data-sid"))})
+      .then(function () {
+        var wrap = document.getElementById("recwrap"), play = document.getElementById("recplay");
+        if (play) play.removeAttribute("src");
+        if (wrap) wrap.hidden = true;
+        var btn = document.getElementById("rec");
+        if (btn) btn.innerHTML = '<i class="dot"></i>Record a voice note';
+        recNote("");
+      });
+  });
+  document.addEventListener("pageswap", function () {
+    stopRecording(); recorder = null; chunks = []; clearInterval(recTimer);
+  });
+
   document.addEventListener("submit", function (e) {
     var form = e.target;
     if (!form || form.id !== "gform" || !window.Nav || !window.fetch) return;
     if (form.dataset.native === "1") return;        // the fallback resubmitting
     e.preventDefault();
+    // a recording still running is finished first, and its upload waited for
+    stopRecording();
     var sub = e.submitter;
     var action = (sub && sub.getAttribute("formaction")) || form.getAttribute("action");
     var body = new URLSearchParams(new FormData(form));
@@ -149,8 +248,10 @@
     var score = field("score") ? field("score").value : "";
     var name = G().name || "";
     if (window.Nav.bar) window.Nav.bar(true);
-    fetch(action, {method: "POST", body: body, credentials: "same-origin",
-                   headers: {"Content-Type": "application/x-www-form-urlencoded"}})
+    Promise.resolve(voicePending).then(function () {
+      return fetch(action, {method: "POST", body: body, credentials: "same-origin",
+                            headers: {"Content-Type": "application/x-www-form-urlencoded"}});
+    })
       .then(function (r) {
         if (!r.ok) throw new Error("not saved");
         return r.text().then(function (html) { return {html: html, url: r.url}; });

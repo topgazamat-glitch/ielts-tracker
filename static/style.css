@@ -489,13 +489,48 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
   overflow: hidden; }
 .pickrow .fill { height: 100%; background: var(--brand); border-radius: 999px; opacity: .8; }
 .pickrow.on .fill { opacity: 1; }
-.pickrow .n { font-weight: 700; font-size: 18px; text-align: right;
+.pickrow .n { font-weight: 700; font-size: 16px; text-align: right;
   font-variant-numeric: tabular-nums; }
 .pickrow .btn { padding: var(--sp-1) var(--sp-3); font-size: 13px; }
 @media (max-width: 720px) {
   .pickrow { grid-template-columns: 1fr 40px auto; }
   .pickrow .pick-who { grid-column: 1 / -1; }
 }
+/* a voice note for the student: one button, a clock, then the player */
+.voice { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.voice-row { display: flex; align-items: center; gap: var(--sp-3); }
+.voice .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--warn); margin-right: var(--sp-2); vertical-align: middle; }
+.voice #rec.live { border-color: var(--warn); color: var(--warn); }
+.voice #rec.live .dot { animation: rec-blink 1s ease-in-out infinite; }
+@keyframes rec-blink { 50% { opacity: .25; } }
+.voice-have { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
+.voice-have[hidden] { display: none; }
+.voice-have audio { flex: 1; min-width: 0; height: 36px; }
+
+/* what the teacher said, on the student's page */
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px;
+  padding: 0 var(--sp-1); border-radius: 999px; background: var(--warn); color: var(--accent-ink);
+  font-size: 12px; font-weight: 700; font-style: normal; line-height: 1; }
+.tabs .tab .badge { margin-left: var(--sp-1); vertical-align: 1px; }
+.pnav a { position: relative; }
+.pnav a .badge { position: absolute; top: 2px; left: calc(50% + 6px); }
+.fbnudge { margin-bottom: var(--sp-4); }
+.fb { padding: var(--sp-4); }
+.fb.new { border-left: 4px solid var(--brand); }
+.fb-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--sp-3); }
+.fb-head .sub { margin: var(--sp-1) 0 0; }
+.fb-title { font-weight: 620; font-size: 16px; }
+.fb-head .pill { font-size: 16px; padding: var(--sp-1) var(--sp-3); }
+.fb-note { margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-4);
+  background: var(--accent-soft); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0; font-size: 16px; line-height: 1.5; }
+.fb-voice { margin-top: var(--sp-3); display: grid; gap: var(--sp-1); }
+.fb-voice .sub { margin: 0; font-size: 12px; }
+.fb-voice audio { width: 100%; height: 40px; }
+.fb-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-3); }
+
 /* the strip above the work: which set, how far, and the way out */
 .setbar { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;
   padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3);

@@ -475,6 +475,12 @@ def migrate(db):
         # work in progress: pages can still be added, the teacher cannot see it.
         # everything that already existed was already sent, so it stays 0.
         db.execute("ALTER TABLE submissions ADD COLUMN draft INTEGER NOT NULL DEFAULT 0")
+    if "voice" not in scols:
+        # the teacher's spoken feedback, a recording kept beside the mark
+        db.execute("ALTER TABLE submissions ADD COLUMN voice TEXT")
+    if "seen_at" not in scols:
+        # when the student opened the feedback; unseen ones are what gets a badge
+        db.execute("ALTER TABLE submissions ADD COLUMN seen_at TEXT")
     db.executescript("""
     CREATE TABLE IF NOT EXISTS materials (
         id INTEGER PRIMARY KEY,
@@ -4435,6 +4441,39 @@ def student_tag_counts(db, student_id, days=60):
         " WHERE s.student_id=? AND s.created_at >= ?"
         " GROUP BY t.id ORDER BY n DESC, t.label LIMIT 6",
         (student_id, since)).fetchall()
+
+
+def feedback_rows(db, student_id, limit=40):
+    """Everything the teacher has said about this student's work, newest
+    first: the mark, the tags, the note, the recording."""
+    out = []
+    for r in db.execute(
+            "SELECT s.id, s.score, s.note, s.voice, s.graded_at, s.seen_at, s.kind,"
+            " a.title FROM submissions s LEFT JOIN assignments a ON a.id=s.assignment_id"
+            " WHERE s.student_id=? AND s.status='graded' AND s.draft=0"
+            " ORDER BY s.graded_at DESC, s.id DESC LIMIT ?", (student_id, limit)).fetchall():
+        tags = [t["label"] for t in db.execute(
+            "SELECT label FROM tags JOIN submission_tags ON tags.id=tag_id"
+            " WHERE submission_id=? ORDER BY sort, tags.id", (r["id"],))]
+        out.append({"id": r["id"], "score": r["score"], "note": r["note"],
+                    "voice": r["voice"], "graded_at": r["graded_at"],
+                    "seen": bool(r["seen_at"]), "title": r["title"],
+                    "kind": r["kind"], "tags": tags})
+    return out
+
+
+def unseen_feedback(db, student_id):
+    """Marked pieces the student has not opened yet."""
+    return db.execute(
+        "SELECT COUNT(*) c FROM submissions WHERE student_id=? AND status='graded'"
+        " AND draft=0 AND graded_at IS NOT NULL AND seen_at IS NULL",
+        (student_id,)).fetchone()["c"]
+
+
+def mark_feedback_seen(db, student_id):
+    db.execute("UPDATE submissions SET seen_at=? WHERE student_id=? AND status='graded'"
+               " AND seen_at IS NULL", (iso(now()), student_id))
+    db.commit()
 
 
 def last_graded(db):

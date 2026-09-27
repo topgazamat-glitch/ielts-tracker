@@ -40,11 +40,11 @@ print("   Homework is lit on the home tab:", 'class="on" href="' in bar and bar.
 assert bar.index('class="on"') < bar.index("Learn")
 print("   its own strip: Send · Writing:", "psub" in pg and ">Send<" in pg and ">Writing<" in pg)
 assert ">Send<" in pg and ">Writing<" in pg
-print("   the old ten-tab strip is gone:", pg.count('class="tab') <= 3)
-assert pg.count('class="tab') <= 3
+print("   the old ten-tab strip is gone:", pg.count('class="tab') <= 4)
+assert pg.count('class="tab') <= 4          # the strip plus Send · Writing · Feedback
 
 print("\n2. EVERY OLD ADDRESS STILL LANDS IN THE RIGHT SECTION")
-where = {"write": "Homework", "materials": "Learn", "handouts": "Learn", "tests": "Learn",
+where = {"write": "Homework", "feedback": "Homework", "materials": "Learn", "handouts": "Learn", "tests": "Learn",
          "play": "Play", "battle": "Play", "progress": "Progress", "class": "Progress",
          "goal": "Progress", "profile": "Me"}
 for tab, section in where.items():
