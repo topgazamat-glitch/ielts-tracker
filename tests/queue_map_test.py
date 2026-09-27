@@ -69,7 +69,7 @@ assert 'class="card picker"' in q
 tabs = re.findall(r'<a class="tab[^"]*" href="([^"]+)">([^<]+)<span class="n">(\d+)</span>', q)
 print("   class tabs with counts:", [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs])
 assert ("/queue", "All classes", "7") in [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs]
-assert ("/queue?group=%d" % g1, "114", "4") in [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs]
+assert ("/queue?pick=%d" % g1, "114", "4") in [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs]
 rows = re.findall(r'<div class="pickrow[^"]*"><div class="pick-who"><a href="([^"]+)">([^<]+)</a>.*?<div class="n">(\d+)</div>', q, re.S)
 print("   one row per class:", [(l, n) for _h, l, n in rows])
 assert [(l, n) for _h, l, n in rows] == [("114", "4"), ("216", "3")]
@@ -79,17 +79,27 @@ print("   tiles: waiting 7:", "Waiting to be marked" in q and '<div class="v">7<
 assert '<div class="v">7</div>' in q
 print("   unfiltered, the oldest piece comes first:", 'value="%d"' % s1 in q)
 assert 'value="%d"' % s1 in q
+where, q2 = post("/grade", {"submission_id": s1, "score": "6", "all": "1"})
+print("   a save from 'everything' lands on the work, not the picker:", where == "/queue?all=1" and 'class="card picker"' not in q2)
+assert where == "/queue?all=1" and 'class="card picker"' not in q2
 
-_, q = get("/queue?group=%d" % g1)
+_, q = get("/queue?pick=%d" % g1)
 rows = re.findall(r'<div class="pickrow[^"]*"><div class="pick-who"><a href="([^"]+)">([^<]+)</a>.*?<div class="n">(\d+)</div>', q, re.S)
 print("   inside 114, one row per lesson, oldest first:", [(l, n) for _h, l, n in rows])
-assert [n for _h, _l, n in rows] == ["3", "1"] and rows[0][1].startswith("Due ")
+assert [n for _h, _l, n in rows] == ["2", "1"] and rows[0][1].startswith("Due ")   # one of Monday's three was marked above
 assert urllib.parse.unquote(rows[0][0]) == "/queue?group=%d&due=%s" % (g1, mon_day)
 print("   each row offers to mark that set:", q.count("Mark these") == 2)
 assert q.count("Mark these") == 2
 _, q = get("/queue?group=%d&due=%s" % (g1, mon_day))
-print("   the chosen lesson is marked as such:", 'class="pickrow on"' in q and "Marking now" in q)
-assert 'class="pickrow on"' in q and "Marking now" in q
+print("   a chosen set shows a strip, not the picker:", 'class="setbar"' in q and 'class="card picker"' not in q)
+assert 'class="setbar"' in q and 'class="card picker"' not in q
+print("   with the set's progress:", "1 of 3 marked" in q)
+assert "1 of 3 marked" in q
+print("   and a way back to the class's lessons:", "/queue?pick=%d" % g1 in q)
+assert "/queue?pick=%d" % g1 in q
+_, q = get("/queue?pick=%d&group=%d&due=%s" % (g1, g1, mon_day)) if False else get("/queue?pick=%d" % g1)
+print("   the picker names the set being marked when asked back:", "Mark all of 114" in q)
+assert "Mark all of 114" in q
 
 print("\n2. PICK A SET, MARK ONLY THAT")
 url = "/queue?group=%d&due=%s" % (g2, wed_day)
@@ -104,21 +114,23 @@ print("   the jump list is the set only:", q.count("/queue?group=") >= 2 and "Di
 where, q = post("/grade", {"submission_id": s5, "score": "8", "group": g2, "due": wed_day})
 print("   after saving, back in the same set:", where == url, "| 1 left:", "1 left in this set" in q)
 assert where == url and "1 left in this set" in q
+print("   progress moved:", "1 of 2 marked" in q, "| no picker in the way:", 'class="card picker"' not in q)
+assert "1 of 2 marked" in q and 'class="card picker"' not in q
 print("   Bek's is now up:", 'value="%d"' % s6 in q)
 assert 'value="%d"' % s6 in q
 where, q = get("/skip?submission_id=%d&group=%d&due=%s" % (s6, g2, wed_day))
 print("   a keyboard skip stays in the set:", where == url)
 assert where == url
 where, q = post("/grade", {"submission_id": s6, "score": "7", "group": g2, "due": wed_day})
-print("   set finished:", "This set is done" in q and "5 other pieces" in q)
-assert "This set is done" in q and "5 other pieces" in q
+print("   set finished:", "This set is done" in q and "4 other pieces" in q)
+assert "This set is done" in q and "4 other pieces" in q
 print("   and the picker is still there to choose the next:", 'class="card picker"' in q)
 assert 'class="card picker"' in q
 
 print("\n3. A WHOLE CLASS, OR A WHOLE DAY")
 _, q = get("/queue?group=%d" % g1)
-print("   class 114 alone: 4 left:", "4 left in this set" in q)
-assert "4 left in this set" in q
+print("   class 114 alone: 3 left (one was marked above):", "3 left in this set" in q)
+assert "3 left in this set" in q
 _, q = get("/queue?due=%s" % wed_day)
 print("   Wednesday's deadline alone: 1 left:", "1 left in this set" in q and "Marking due" in q)
 assert "1 left in this set" in q

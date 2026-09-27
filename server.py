@@ -583,13 +583,17 @@ def queue_filter(q):
 
 
 def queue_url(gid=None, due=None, **extra):
+    """The address of a set. With neither class nor deadline it is the pile
+    itself, and `all=1` keeps a save from landing back on the picker."""
     q = {}
     if gid:
         q["group"] = gid
     if due:
         q["due"] = due
     q.update({k: v for k, v in extra.items() if v})
-    return "/queue" + ("?" + urllib.parse.urlencode(q) if q else "")
+    if not q:
+        q["all"] = "1"
+    return "/queue?" + urllib.parse.urlencode(q)
 
 
 def in_set(rows, gid, due):
@@ -609,7 +613,7 @@ def day_words(day, cfg):
     return when.strftime("%a %-d %b"), rel
 
 
-def queue_picker(db, rows, gid, due):
+def queue_picker(db, rows, gid, due, pick=None):
     """What is waiting, as something to choose from rather than a chart to
     read. Four figures, then the classes as bars; press a class and its
     deadlines appear as bars; press a deadline and that is the set being
@@ -643,9 +647,9 @@ def queue_picker(db, rows, gid, due):
     def tab(href, label, n, on):
         return (f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}'
                 f'<span class="n">{n}</span></a>')
-    tabs = ('<div class="tabs">' + tab("/queue", "All classes", len(rows), gid is None)
-            + "".join(tab(queue_url(g), groups.get(g, "?"), len(by_class[g]), gid == g)
-                      for g in classes) + "</div>")
+    tabs = ('<div class="tabs">' + tab("/queue", "All classes", len(rows), pick is None)
+            + "".join(tab("/queue?pick=%d" % g, groups.get(g, "?"), len(by_class[g]),
+                          pick == g) for g in classes) + "</div>")
 
     def bar(label, note, n, top, href, on, button):
         pct = max(4, int(100 * n / top))
@@ -656,7 +660,7 @@ def queue_picker(db, rows, gid, due):
                 f'<div class="n">{n}</div>'
                 f'<a class="btn{" ghost" if on else ""}" href="{href}">{button}</a></div>')
 
-    if gid is None or gid not in by_class:
+    if pick is None or pick not in by_class:
         top = max(len(v) for v in by_class.values())
         body = ""
         for g in classes:
@@ -668,11 +672,11 @@ def queue_picker(db, rows, gid, due):
                     if first != "none" else "no deadline")
             body += bar(E(groups.get(g, "?")),
                         f'{len(days)} deadline{"" if len(days) == 1 else "s"} &middot; {E(when)}',
-                        len(mine), top, queue_url(g), False, "Choose")
-        lead = ("Choose a class, then the lesson. Or mark everything oldest first, "
-                "which is what the page is doing now.")
+                        len(mine), top, "/queue?pick=%d" % g, False, "Choose")
+        lead = ("Press a class to see its lessons, then choose one - or take "
+                "everything, oldest first.")
     else:
-        mine = by_class[gid]
+        mine = by_class[pick]
         by_day = {}
         for r in mine:
             by_day.setdefault(r["due"], []).append(r)
@@ -684,14 +688,74 @@ def queue_picker(db, rows, gid, due):
             titles = sorted({r["title"] or "no homework" for r in by_day[d]})
             shown = ", ".join(t[:28] for t in titles[:2]) + (
                 " and %d more" % (len(titles) - 2) if len(titles) > 2 else "")
+            here = gid == pick and due == d
             body += bar(("Due " + E(label)) if d != "none" else "No deadline",
                         (E(rel) + " &middot; " if rel else "") + E(shown),
-                        len(by_day[d]), top, queue_url(gid, d), due == d,
-                        "Marking now" if due == d else "Mark these")
-        lead = (f"{E(groups.get(gid, '?'))}'s homework, by the lesson it was for. "
-                "Oldest lesson first. Press one to mark just that set.")
+                        len(by_day[d]), top, queue_url(pick, d), here,
+                        "Marking now" if here else "Mark these")
+        lead = (f"{E(groups.get(pick, '?'))}'s homework, by the lesson it was for, "
+                "oldest first. Press one to mark just that set.")
+    everything = ""
+    if pick is None or pick not in by_class:
+        everything = (f'<p class="gap-3 flush"><a class="btn ghost" href="/queue?all=1">'
+                      f'Mark everything, oldest first &middot; {len(rows)}</a></p>')
+    else:
+        everything = (f'<p class="gap-3 flush"><a class="btn ghost" href="{queue_url(pick)}">'
+                      f'Mark all of {E(groups.get(pick, "?"))}, oldest first &middot; '
+                      f'{len(by_class[pick])}</a></p>')
     return (f'{tiles}<div class="card picker"><h3 class="flush">What to mark</h3>'
-            f'<p class="sub gap-1">{lead}</p>{tabs}<div class="pickrows">{body}</div></div>')
+            f'<p class="sub gap-1">{lead}</p>{tabs}<div class="pickrows">{body}</div>'
+            f'{everything}</div>')
+
+
+def set_progress_counts(db, gid, due, left):
+    """How far through a set the teacher is: what is marked against what is
+    left. A set is one class's work for one lesson, so everything ever marked
+    for it counts, not just today's."""
+    if gid is None and due is None:
+        return None
+    cfg = core.load_config()
+    marked = 0
+    for r in db.execute(
+            "SELECT s.id, st.group_id, a.due_at FROM submissions s"
+            " JOIN students st ON st.id=s.student_id"
+            " LEFT JOIN assignments a ON a.id=s.assignment_id"
+            " WHERE s.status='graded' AND s.draft=0"
+            + (" AND st.group_id=?" if gid else ""), (gid,) if gid else ()).fetchall():
+        day = (core.deadline_parts(r["due_at"], cfg)[0] if r["due_at"] else "") or "none"
+        if due is None or day == due:
+            marked += 1
+    return {"marked": marked, "total": marked + left}
+
+
+def set_bar(db, rows, inset, gid, due):
+    """One strip above the work: what is being marked, how far along, and the
+    two ways out - jump to a student, or go back and choose something else.
+    It replaces the whole picker on every page after the first, so the work
+    stays at the top of the screen."""
+    cfg = core.load_config()
+    if gid or due:
+        what = " &middot; ".join(
+            ([E(group_name(db, gid))] if gid else [])
+            + ([("due " + day_words(due, cfg)[0]) if due != "none" else "no deadline"]
+               if due else []))
+        rel = day_words(due, cfg)[1] if due and due != "none" else ""
+        title = f'<strong>Marking {what}</strong>'
+        note = (rel + " &middot; " if rel else "") + f'{len(inset)} left in this set'
+    else:
+        title = "<strong>Marking everything</strong>"
+        note = f"{len(inset)} waiting, oldest first"
+    prog = set_progress_counts(db, gid, due, len(inset))
+    bar = ""
+    if prog and prog["total"]:
+        pct = int(100 * prog["marked"] / prog["total"])
+        bar = (f'<div class="prog"><div class="track"><div class="fill" '
+               f'style="width:{pct}%"></div></div><div class="sub">'
+               f'{prog["marked"]} of {prog["total"]} marked</div></div>')
+    acts = ((f'<a href="/queue?pick={gid}">Other lessons of {E(group_name(db, gid))}</a>'
+             ' &middot; ' if gid else "") + '<a href="/queue">All classes</a>')
+    return (f'<div class="setbar"><div class="what">{title}<div class="sub">{note}</div></div>'
+            f'{bar}<div class="acts">{acts}</div></div>')
 
 
 def waiting_list(db, current_id, rows, gid=None, due=None):
@@ -726,7 +790,8 @@ def undo_strip(db):
             f'<a class="linky" href="/regrade/{last["id"]}">change it</a></div>')
 
 
-def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None):
+def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None, show_picker=False,
+               pick=None):
     student = db.execute("SELECT * FROM students WHERE id=?", (sub["student_id"],)).fetchone()
     assignment = (db.execute("SELECT * FROM assignments WHERE id=?",
                              (sub["assignment_id"],)).fetchone()
@@ -774,24 +839,15 @@ def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None):
             f'<span class="kbd">9</span> <span class="kbd">0</span>=10, hold '
             f'<span class="kbd">Shift</span> for a half, <span class="kbd">Enter</span> '
             f'to save, <span class="kbd">s</span> to skip.</p>')
-    setline = ""
+    # The first page shows the picker so a set can be chosen; every page after
+    # that shows only a strip saying which set, so the work stays at the top.
+    top = ""
     if not regrade:
-        cfg = core.load_config()
-        if gid or due:
-            what = " &middot; ".join(
-                ([E(group_name(db, gid))] if gid else [])
-                + ([("due " + day_words(due, cfg)[0]) if due != "none" else "no deadline"]
-                   if due else []))
-            setline = (f'<p class="setline"><strong>Marking {what}</strong> &middot; '
-                       f'{remaining} left in this set &middot; '
-                       f'<a class="linky" href="/queue">show everything</a></p>')
-        else:
-            setline = (f'<p class="setline"><strong>Marking everything</strong> &middot; '
-                       f'{remaining} waiting, oldest first</p>')
+        top = ((queue_picker(db, rows, gid, due, pick) if show_picker else "")
+               + set_bar(db, rows, inset, gid, due))
     body = f"""{head}
 {hint}
-{"" if regrade else queue_picker(db, rows, gid, due)}
-{setline}
+{top}
 {"" if regrade else undo_strip(db)}
 {"" if regrade else waiting_list(db, sub["id"], inset, gid, due)}
 <div class="queue">
@@ -948,6 +1004,10 @@ def view_queue(req, db):
     time when the teacher picks one."""
     core.seed_notes(db)
     gid, due = queue_filter(req["query"])
+    p = (req["query"].get("pick", [""])[0] or "").strip()
+    pick = int(p) if p.isdigit() else None
+    if pick is not None and gid is None and due is None:
+        gid = pick                      # the class's own work sits under its lessons
     rows = queue_rows(db)
     inset = in_set(rows, gid, due)
     want = (req["query"].get("id", [""])[0] or "").strip()
@@ -964,15 +1024,20 @@ def view_queue(req, db):
             note = ('<div class="card good"><p class="flush"><strong>This set is done.'
                     f'</strong> {len(rows)} other piece{"" if len(rows) == 1 else "s"} '
                     f'still waiting &mdash; pick the next set above, or '
-                    f'<a class="linky" href="/queue">mark everything</a>.</p></div>')
+                    f'<a class="linky" href="/queue?all=1">mark everything</a>.</p></div>')
         else:
             note = '<div class="card"><p class="flush">Queue is empty. Nothing to grade.</p></div>'
         body = f"""<h1>Grading queue</h1>
-{queue_picker(db, rows, gid, due)}
+{queue_picker(db, rows, gid, due, pick)}
 {undo_strip(db)}
 {note}"""
         return html_response(page("Grade", body, "Grade"))
-    return grade_page(db, sub, rows=rows, gid=gid, due=due)
+    # the bare address is where a set gets chosen; anything more specific -
+    # a set, or "everything" once chosen - is the workspace
+    bare = gid is None and due is None and not want.isdigit() \
+        and (req["query"].get("all", [""])[0] or "") != "1"
+    return grade_page(db, sub, rows=rows, gid=gid, due=due,
+                      show_picker=bare or pick is not None, pick=pick)
 
 
 def view_regrade(req, db, sid):

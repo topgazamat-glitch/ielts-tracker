@@ -496,7 +496,21 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
   .pickrow { grid-template-columns: 1fr 40px auto; }
   .pickrow .pick-who { grid-column: 1 / -1; }
 }
-.setline { margin: 0 0 var(--sp-3); font-size: 14px; color: var(--ink-2); }
+/* the strip above the work: which set, how far, and the way out */
+.setbar { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+  border-left: 4px solid var(--brand); }
+.setbar .what strong { font-size: 15px; }
+.setbar .what .sub { margin: 0; font-size: 13px; }
+.setbar .prog { flex: 1 1 180px; max-width: 320px; }
+.setbar .prog .track { height: 8px; background: var(--line-soft); border-radius: 999px;
+  overflow: hidden; }
+.setbar .prog .fill { height: 100%; background: var(--ok); border-radius: 999px; }
+.setbar .prog .sub { margin: var(--sp-1) 0 0; font-size: 12px; }
+.setbar .acts { margin-left: auto; font-size: 13px; }
+.setbar .acts a { font-weight: 600; }
+@media (max-width: 720px) { .setbar { gap: var(--sp-3); } .setbar .acts { margin-left: 0; } }
 
 .queue {
   display: grid; gap: var(--sp-4); align-items: start;
