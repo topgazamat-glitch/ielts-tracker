@@ -193,9 +193,20 @@ def iso(dt):
 
 
 def parse(ts):
+    """A stored timestamp back as a datetime, always aware.
+
+    Everything the site writes carries +00:00, but a timestamp without an
+    offset does turn up - and on Python 3.12 fromisoformat also reads
+    forms it used to refuse - and one naive value in a subtraction against
+    now() took the whole Insights page down. Anything without an offset is
+    taken as UTC, which is what the site has always meant by it.
+    """
     if not ts:
         return None
-    return datetime.fromisoformat(ts)
+    dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def local_day(dt, cfg):
@@ -481,6 +492,13 @@ def migrate(db):
     if "seen_at" not in scols:
         # when the student opened the feedback; unseen ones are what gets a badge
         db.execute("ALTER TABLE submissions ADD COLUMN seen_at TEXT")
+    # a leaver recorded with a bare date, before mark_left learned to add the
+    # time: one such row against now() took the Insights page down
+    try:
+        db.execute("UPDATE enrolments SET ended_at = ended_at || 'T12:00:00+00:00'"
+                   " WHERE ended_at IS NOT NULL AND length(ended_at) = 10")
+    except sqlite3.OperationalError:
+        pass
     db.executescript("""
     CREATE TABLE IF NOT EXISTS materials (
         id INTEGER PRIMARY KEY,
@@ -2634,6 +2652,10 @@ def mark_left(db, student_id, reason, when=None, note=""):
              iso(now()))).lastrowid
     else:
         e_id = e["id"]
+    # the form gives a day; the row wants an instant. Midday keeps the day
+    # the same whichever side of midnight the teacher's clock is on.
+    if when and len(when) == 10:
+        when = when + "T12:00:00+00:00"
     db.execute("UPDATE enrolments SET ended_at=?, reason=?, note=? WHERE id=?",
                (when or iso(now()), reason, (note or "").strip(), e_id))
     db.execute("UPDATE students SET active=0 WHERE id=?", (student_id,))
