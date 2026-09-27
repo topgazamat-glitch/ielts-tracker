@@ -10,6 +10,7 @@
     var pre = [];
     try { pre = JSON.parse(el.getAttribute("data-prefetch") || "[]"); } catch (e) {}
     return {skip: el.getAttribute("data-skip"),
+            back: el.getAttribute("data-back") || "",
             regrade: el.getAttribute("data-regrade") === "1",
             prefetch: pre};
   }
@@ -104,7 +105,11 @@
       return;
     }
     if (e.key === "s" && !G().regrade) {
-      window.location.href = "/skip?submission_id=" + G().skip;
+      // the set being marked travels in the address, so a skip stays in it
+      var back = G().back, tail = "";
+      var q = back.indexOf("?");
+      if (q >= 0) tail = "&" + back.slice(q + 1);
+      window.location.href = "/skip?submission_id=" + G().skip + tail;
     }
   });
 

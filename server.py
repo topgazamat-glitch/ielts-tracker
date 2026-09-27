@@ -456,7 +456,7 @@ def scorepad(name="score", value=None, small=False):
             f'<div class="{cls} halves">{half}</div>')
 
 
-def grade_form(db, sub, student, assignment, regrade=False):
+def grade_form(db, sub, student, assignment, regrade=False, gid=None, due=None):
     """The marking form, used for a fresh piece and for changing an old mark."""
     tags = db.execute("SELECT * FROM tags ORDER BY sort, id").fetchall()
     chosen = {r["tag_id"] for r in db.execute(
@@ -504,8 +504,10 @@ def grade_form(db, sub, student, assignment, regrade=False):
     save = "Save the change" if regrade else "Save &amp; next"
     skip = ("" if regrade else
             '<button class="ghost" formaction="/skip" name="skip" value="1">Skip</button>')
+    keep = ((f'<input type="hidden" name="group" value="{gid}">' if gid else "")
+            + (f'<input type="hidden" name="due" value="{E(due)}">' if due else ""))
     return f"""<form method="post" action="{action}" id="gform" class="card">
-      <input type="hidden" name="submission_id" value="{sub['id']}">
+      <input type="hidden" name="submission_id" value="{sub['id']}">{keep}
       {scoring}
       {recur}
       <div class="tags">{tagboxes}</div>
@@ -551,14 +553,193 @@ def previous_panel(db, sub, student):
     </div>"""
 
 
-def waiting_list(db, current_id):
-    """Everyone still in the queue, so a name can be found without hunting."""
-    rows = db.execute(
-        "SELECT s.id, s.created_at, s.kind, s.late, st.name, st.group_id,"
-        " a.title FROM submissions s JOIN students st ON st.id=s.student_id"
-        " LEFT JOIN assignments a ON a.id=s.assignment_id"
-        " WHERE s.status='pending' AND s.draft=0 ORDER BY s.created_at LIMIT 60"
-    ).fetchall()
+def queue_rows(db):
+    """Every piece waiting to be marked, with the two things the teacher sorts
+    by: whose class it is, and which lesson's deadline it belongs to."""
+    cfg = core.load_config()
+    out = []
+    for r in db.execute(
+            "SELECT s.id, s.student_id, s.created_at, s.kind, s.late, s.assignment_id,"
+            " st.name, st.group_id, a.title, a.due_at"
+            " FROM submissions s JOIN students st ON st.id=s.student_id"
+            " LEFT JOIN assignments a ON a.id=s.assignment_id"
+            " WHERE s.status='pending' AND s.draft=0 ORDER BY s.created_at").fetchall():
+        day = core.deadline_parts(r["due_at"], cfg)[0] if r["due_at"] else ""
+        out.append({"id": r["id"], "student_id": r["student_id"], "name": r["name"],
+                    "group_id": r["group_id"], "created_at": r["created_at"],
+                    "kind": r["kind"], "late": r["late"], "title": r["title"],
+                    "due": day or "none"})
+    return out
+
+
+DUE_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$|^none$")
+
+
+def queue_filter(q):
+    """The class and the deadline day a queue address asks for, if any."""
+    g = (q.get("group", [""])[0] or "").strip()
+    d = (q.get("due", [""])[0] or "").strip()
+    return (int(g) if g.isdigit() else None), (d if DUE_AT.match(d) else None)
+
+
+def queue_url(gid=None, due=None, **extra):
+    q = {}
+    if gid:
+        q["group"] = gid
+    if due:
+        q["due"] = due
+    q.update({k: v for k, v in extra.items() if v})
+    return "/queue" + ("?" + urllib.parse.urlencode(q) if q else "")
+
+
+def in_set(rows, gid, due):
+    return [r for r in rows if (gid is None or r["group_id"] == gid)
+            and (due is None or r["due"] == due)]
+
+
+def day_words(day, cfg):
+    """A deadline day as a short label and how far off it is."""
+    if day == "none":
+        return "No deadline", ""
+    when = datetime.strptime(day, "%Y-%m-%d").date()
+    today = datetime.strptime(core.local_day(core.now(), cfg), "%Y-%m-%d").date()
+    gap = (when - today).days
+    rel = ("today" if gap == 0 else "tomorrow" if gap == 1 else "yesterday" if gap == -1
+           else "in %d days" % gap if gap > 0 else "%d days ago" % -gap)
+    return when.strftime("%a %-d %b"), rel
+
+
+def queue_map(db, rows, gid, due):
+    """What is waiting, laid out by class and by deadline, so the teacher picks
+    a set rather than taking the pile in the order it arrived.
+
+    A cell is one class's work for one lesson: press it and the queue is only
+    that. The row and column totals do the same for a whole class or a whole
+    day. The shade of a cell is how much is in it, against the fullest cell."""
+    cfg = core.load_config()
+    if not rows:
+        return ""
+    groups = {g["id"]: g["name"] for g in db.execute("SELECT id, name FROM groups")}
+    days = sorted({r["due"] for r in rows}, key=lambda d: (d == "none", d))
+    classes = sorted({r["group_id"] for r in rows}, key=lambda g: groups.get(g, ""))
+    counts, row_tot, col_tot = {}, {}, {}
+    for r in rows:
+        k = (r["group_id"], r["due"])
+        counts[k] = counts.get(k, 0) + 1
+        row_tot[r["group_id"]] = row_tot.get(r["group_id"], 0) + 1
+        col_tot[r["due"]] = col_tot.get(r["due"], 0) + 1
+    top = max(counts.values())
+
+    head = "".join(
+        f'<th><a href="{queue_url(None, d)}" class="{"on" if due == d and gid is None else ""}">'
+        f'<span class="d">{E(day_words(d, cfg)[0])}</span>'
+        f'<span class="rel">{E(day_words(d, cfg)[1])}</span></a></th>' for d in days)
+    body = ""
+    for g in classes:
+        cells = ""
+        for d in days:
+            n = counts.get((g, d), 0)
+            if not n:
+                cells += '<td class="cell empty"></td>'
+                continue
+            level = max(1, min(4, -(-4 * n // top)))
+            on = " on" if (gid == g and due == d) else ""
+            titles = sorted({r["title"] or "no homework" for r in rows
+                             if r["group_id"] == g and r["due"] == d})
+            cells += (f'<td class="cell h{level}{on}"><a href="{queue_url(g, d)}" '
+                      f'title="{E("; ".join(titles))}">{n}</a></td>')
+        on = " on" if (gid == g and due is None) else ""
+        body += (f'<tr><th class="klass{on}"><a href="{queue_url(g)}">{E(groups.get(g, "?"))}'
+                 f'<span class="n">{row_tot[g]}</span></a></th>{cells}</tr>')
+    foot = "".join(f'<td class="tot">{col_tot[d]}</td>' for d in days)
+
+    oldest = min(r["created_at"] for r in rows)
+    waited = (core.now() - core.parse(oldest)).days
+    marked_today = db.execute(
+        "SELECT COUNT(*) c FROM submissions WHERE status='graded' AND graded_at IS NOT NULL"
+        " AND graded_at >= ?", (core.iso(core.now() - timedelta(hours=24)),)).fetchone()["c"]
+    marked_week = db.execute(
+        "SELECT COUNT(*) c FROM submissions WHERE status='graded' AND graded_at IS NOT NULL"
+        " AND graded_at >= ?", (core.iso(core.now() - timedelta(days=7)),)).fetchone()["c"]
+    tiles = ('<div class="qtiles">'
+             + stat("Waiting", len(rows), "%d class%s, %d deadline%s"
+                    % (len(classes), "" if len(classes) == 1 else "es",
+                       len(days), "" if len(days) == 1 else "s"), busy=len(rows) >= 20)
+             + stat("Oldest", "%dd" % waited if waited else "today",
+                    "in the queue" if waited else "all arrived today")
+             + stat("Marked", marked_today, "in the last 24 hours")
+             + stat("This week", marked_week, "marked in 7 days")
+             + "</div>")
+    corner_on = "on" if gid is None and due is None else ""
+    return (
+        '<div class="qtop">'
+        '<div class="card qmapcard"><h3 class="flush">What is waiting, by class and deadline</h3>'
+        '<p class="sub gap-1">Press a cell to mark just that set; a class or a day for all of it.</p>'
+        '<div class="tablewrap flat"><table class="qmap"><tr><th class="corner">'
+        f'<a href="/queue" class="{corner_on}">All</a></th>{head}</tr>'
+        f'{body}<tr class="totals"><td class="corner">{len(rows)}</td>{foot}</tr></table></div></div>'
+        '<div class="card qflow"><h3 class="flush">Arrived and marked, last two weeks</h3>'
+        f'{tiles}{flow_chart(db)}</div>'
+        '</div>')
+
+
+def flow_chart(db, days=14, width=560, height=170):
+    """Two bars a day: what came in, what was marked. The backlog is the
+    difference, and the eye reads it without a third series."""
+    cfg = core.load_config()
+    today = datetime.strptime(core.local_day(core.now(), cfg), "%Y-%m-%d").date()
+    span = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    since = core.iso(core.now() - timedelta(days=days + 1))
+    arrived = {d: 0 for d in span}
+    marked = {d: 0 for d in span}
+    for r in db.execute("SELECT created_at, graded_at, status FROM submissions"
+                        " WHERE draft=0 AND (created_at >= ? OR graded_at >= ?)",
+                        (since, since)).fetchall():
+        c = core.parse(r["created_at"])
+        if c:
+            d = core.local_day(c, cfg)
+            if d in arrived:
+                arrived[d] += 1
+        if r["status"] == "graded" and r["graded_at"]:
+            g = core.parse(r["graded_at"])
+            if g:
+                d = core.local_day(g, cfg)
+                if d in marked:
+                    marked[d] += 1
+    top = max([1] + list(arrived.values()) + list(marked.values()))
+    top = max(3, -(-top // 3) * 3)          # a multiple of three: whole-number ticks
+    pad_l, pad_b, pad_t, pad_r = 30, 26, 10, 8
+    w, h = width - pad_l - pad_r, height - pad_t - pad_b
+    slot = w / days
+    bw = slot * 0.36
+    out = ""
+    for i in range(4):
+        y = pad_t + h * i / 3.0
+        val = top - top * i / 3.0
+        out += (f'<line x1="{pad_l}" y1="{y:.1f}" x2="{pad_l + w}" y2="{y:.1f}" '
+                f'class="gridline"/><text x="{pad_l - 6}" y="{y + 4:.1f}" '
+                f'class="axis" text-anchor="end">{val:.0f}</text>')
+    for i, d in enumerate(span):
+        x = pad_l + i * slot + slot * 0.14
+        a, m = arrived[d], marked[d]
+        ha, hm = h * a / top, h * m / top
+        label = datetime.strptime(d, "%Y-%m-%d").strftime("%-d %b")
+        out += (f'<rect x="{x:.1f}" y="{pad_t + h - ha:.1f}" width="{bw:.1f}" '
+                f'height="{ha:.1f}" class="bar"><title>{label}: {a} arrived</title></rect>'
+                f'<rect x="{x + bw:.1f}" y="{pad_t + h - hm:.1f}" width="{bw:.1f}" '
+                f'height="{hm:.1f}" class="bar ok"><title>{label}: {m} marked</title></rect>')
+        if i % 2 == days % 2:
+            out += (f'<text x="{x + bw:.1f}" y="{height - 8}" class="axis" '
+                    f'text-anchor="middle">{label}</text>')
+    legend = ('<div class="legend"><span><i class="sw a"></i>arrived</span>'
+              '<span><i class="sw ok"></i>marked</span></div>')
+    return (f'{legend}<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+            f'aria-label="work arrived and marked per day">{out}</svg>')
+
+
+def waiting_list(db, current_id, rows, gid=None, due=None):
+    """Everyone still in the set, so a name can be found without hunting."""
+    rows = rows[:60]
     if len(rows) < 2:
         return ""
     out = ""
@@ -566,11 +747,12 @@ def waiting_list(db, current_id):
         here = ' class="on"' if r["id"] == current_id else ""
         kind = ' <span class="pill mute">speaking</span>' if r["kind"] == "voice" else ""
         late = ' <span class="pill risk">late</span>' if r["late"] else ""
-        out += (f'<li{here}><a href="/queue?id={r["id"]}">{E(r["name"])}</a>'
+        out += (f'<li{here}><a href="{queue_url(gid, due, id=r["id"])}">{E(r["name"])}</a>'
                 f'<span class="sub">{E(group_name(db, r["group_id"]))}'
                 f'{" &middot; " + E(r["title"]) if r["title"] else ""}</span>'
                 f'{kind}{late}</li>')
-    return (f'<details class="card queuelist"><summary>{len(rows)} waiting '
+    what = "in this set" if (gid or due) else "waiting"
+    return (f'<details class="card queuelist"><summary>{len(rows)} {what} '
             f'&mdash; jump to anyone</summary><ul>{out}</ul></details>')
 
 
@@ -587,7 +769,7 @@ def undo_strip(db):
             f'<a class="linky" href="/regrade/{last["id"]}">change it</a></div>')
 
 
-def grade_page(db, sub, regrade=False):
+def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None):
     student = db.execute("SELECT * FROM students WHERE id=?", (sub["student_id"],)).fetchone()
     assignment = (db.execute("SELECT * FROM assignments WHERE id=?",
                              (sub["assignment_id"],)).fetchone()
@@ -610,36 +792,51 @@ def grade_page(db, sub, regrade=False):
         shots = "".join(shot(f, i) for i, f in enumerate(files)) \
             or '<p class="sub">Nothing attached.</p>'
 
-    remaining = db.execute(
-        "SELECT COUNT(*) c FROM submissions WHERE status='pending' AND draft=0"
-    ).fetchone()["c"]
+    rows = rows if rows is not None else (queue_rows(db) if not regrade else [])
+    inset = in_set(rows, gid, due)
+    remaining = len(inset)
 
     # while this student is being scored, quietly pull the next one's pages, so
     # the queue never makes the teacher wait for a download again
     ahead = []
     if not regrade:
-        nxt = db.execute(
-            "SELECT * FROM submissions WHERE status='pending' AND draft=0 AND id<>?"
-            " ORDER BY created_at LIMIT 1", (sub["id"],)).fetchone()
+        nxt = next((r for r in inset if r["id"] != sub["id"]), None)
         if nxt:
             ahead = [screen_name(f) for f in db.execute(
                 "SELECT * FROM files WHERE submission_id=? ORDER BY ord, id LIMIT 4",
                 (nxt["id"],)).fetchall() if not is_audio(screen_name(f))]
     prefetch = json.dumps(["/media/" + n for n in ahead])
+    back = queue_url(gid, due)
 
     prev = (f'Average {fmt(st["average"])} &middot; last 3 {fmt(st["last3"])} &middot; '
             f'{st["graded_count"]} graded &middot; {st["missed"]} missed')
     head = ("<h1>Change a mark</h1>" if regrade else "<h1>Grading queue</h1>")
     hint = ("" if regrade else
             f'<p class="sub"><a href="/queue/grid">Grade a whole task at once</a> '
-            f'&middot; {remaining} waiting &middot; keys <span class="kbd">1</span>&ndash;'
+            f'&middot; keys <span class="kbd">1</span>&ndash;'
             f'<span class="kbd">9</span> <span class="kbd">0</span>=10, hold '
             f'<span class="kbd">Shift</span> for a half, <span class="kbd">Enter</span> '
             f'to save, <span class="kbd">s</span> to skip.</p>')
+    setline = ""
+    if not regrade:
+        cfg = core.load_config()
+        if gid or due:
+            what = " &middot; ".join(
+                ([E(group_name(db, gid))] if gid else [])
+                + ([("due " + day_words(due, cfg)[0]) if due != "none" else "no deadline"]
+                   if due else []))
+            setline = (f'<p class="setline"><strong>Marking {what}</strong> &middot; '
+                       f'{remaining} left in this set &middot; '
+                       f'<a class="linky" href="/queue">show everything</a></p>')
+        else:
+            setline = (f'<p class="setline"><strong>Marking everything</strong> &middot; '
+                       f'{remaining} waiting, oldest first</p>')
     body = f"""{head}
 {hint}
+{"" if regrade else queue_map(db, rows, gid, due)}
+{setline}
 {"" if regrade else undo_strip(db)}
-{"" if regrade else waiting_list(db, sub["id"])}
+{"" if regrade else waiting_list(db, sub["id"], inset, gid, due)}
 <div class="queue">
   <div class="shots">{shots}</div>
   <div>
@@ -652,11 +849,11 @@ def grade_page(db, sub, regrade=False):
         {'<span class="pill mute">resubmission</span>' if sub["improves"] else ''}</div>
       <div class="sub gap-2">{prev}</div>
     </div>
-    {grade_form(db, sub, student, assignment, regrade)}
+    {grade_form(db, sub, student, assignment, regrade, gid=gid, due=due)}
     {previous_panel(db, sub, student)}
   </div>
 </div>
-<div id="gradedata" hidden data-skip="{sub["id"]}"
+<div id="gradedata" hidden data-skip="{sub["id"]}" data-back="{E(back)}"
      data-regrade="{1 if regrade else 0}" data-prefetch="{E(prefetch)}"></div>"""
     return html_response(page("Change a mark" if regrade else "Grade", body, "Grade"))
 
@@ -790,23 +987,35 @@ def act_grade_many(req, db):
 
 
 def view_queue(req, db):
+    """The pile, sorted: by class and by deadline, and marked one set at a
+    time when the teacher picks one."""
     core.seed_notes(db)
+    gid, due = queue_filter(req["query"])
+    rows = queue_rows(db)
+    inset = in_set(rows, gid, due)
     want = (req["query"].get("id", [""])[0] or "").strip()
     sub = None
     if want.isdigit():
         sub = db.execute(
             "SELECT * FROM submissions WHERE id=? AND status='pending' AND draft=0",
             (int(want),)).fetchone()
+    if not sub and inset:
+        sub = db.execute("SELECT * FROM submissions WHERE id=?",
+                         (inset[0]["id"],)).fetchone()
     if not sub:
-        sub = db.execute(
-            "SELECT * FROM submissions WHERE status='pending' AND draft=0"
-            " ORDER BY created_at LIMIT 1").fetchone()
-    if not sub:
+        if rows and (gid or due):
+            note = ('<div class="card good"><p class="flush"><strong>This set is done.'
+                    f'</strong> {len(rows)} other piece{"" if len(rows) == 1 else "s"} '
+                    f'still waiting &mdash; pick the next set above, or '
+                    f'<a class="linky" href="/queue">mark everything</a>.</p></div>')
+        else:
+            note = '<div class="card"><p class="flush">Queue is empty. Nothing to grade.</p></div>'
         body = f"""<h1>Grading queue</h1>
+{queue_map(db, rows, gid, due)}
 {undo_strip(db)}
-<div class="card"><p>Queue is empty. Nothing to grade.</p></div>"""
+{note}"""
         return html_response(page("Grade", body, "Grade"))
-    return grade_page(db, sub)
+    return grade_page(db, sub, rows=rows, gid=gid, due=due)
 
 
 def view_regrade(req, db, sid):
@@ -7812,15 +8021,16 @@ def save_grade(db, sub, form):
 def act_grade(req, db):
     sid = int(req["form"].get("submission_id", [0])[0])
     sub = db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+    back = queue_url(*queue_filter(req["form"]))
     if not sub or save_grade(db, sub, req["form"]) is None:
-        return redirect("/queue")
+        return redirect(back)
     try:
         notify_graded(db, sid)
     except Exception:
         # the score is saved either way; telling the student is best effort and
         # must never put an error page in front of the person marking
         traceback.print_exc()
-    return redirect("/queue")
+    return redirect(back)
 
 
 def act_regrade(req, db):
@@ -7888,7 +8098,11 @@ def act_skip(req, db):
         # push to the back of the queue rather than dropping it
         db.execute("UPDATE submissions SET created_at=? WHERE id=?", (core.iso(core.now()), int(sid)))
         db.commit()
-    return redirect("/queue")
+    # the set being marked comes with the form, or with the keyboard's link
+    gid, due = queue_filter(req["form"])
+    if gid is None and due is None:
+        gid, due = queue_filter(req["query"])
+    return redirect(queue_url(gid, due))
 
 
 def act_new_group(req, db):

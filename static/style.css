@@ -467,6 +467,66 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
 
 /* ----------------------------------------------------------- grading queue */
 
+/* ------------------------------------------- the queue, sorted
+
+   Above the piece being marked: what is waiting, as a grid of classes
+   against deadlines. A cell is one class's work for one lesson; its shade
+   is how much is in it. Beside it, two weeks of arrived-against-marked. */
+.qtop { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr);
+  gap: var(--sp-4); margin-bottom: var(--sp-4); align-items: start; }
+.qtop .card { margin: 0; }
+.qtop h3 { font-size: 14px; }
+@media (max-width: 900px) { .qtop { grid-template-columns: 1fr; } }
+
+.tablewrap.flat { border: 0; box-shadow: none; background: none; border-radius: 0; }
+table.qmap { border-collapse: separate; border-spacing: var(--sp-1); width: auto; }
+table.qmap th, table.qmap td { padding: 0; border: 0; background: none;
+  text-align: center; font-size: 13px; text-transform: none; letter-spacing: 0; }
+table.qmap th a, table.qmap td.cell a { display: block; border-radius: var(--r-sm);
+  color: var(--ink-2); text-decoration: none; }
+table.qmap th a { padding: var(--sp-1) var(--sp-2); }
+table.qmap th a.on, table.qmap th.klass.on a { background: var(--accent-soft);
+  color: var(--accent); }
+table.qmap th .d { display: block; font-weight: 600; white-space: nowrap; }
+table.qmap th .rel { display: block; font-size: 12px; color: var(--ink-3);
+  font-weight: 400; }
+table.qmap th.klass { text-align: left; }
+table.qmap th.klass a { display: flex; gap: var(--sp-2); align-items: baseline;
+  font-weight: 600; color: var(--ink); white-space: nowrap; }
+table.qmap th.klass .n { font-size: 12px; color: var(--ink-3); font-weight: 500; }
+table.qmap th.corner a { color: var(--ink-3); font-size: 12px; }
+table.qmap td.cell { min-width: 52px; }
+table.qmap td.cell a { padding: var(--sp-2) 0; font-weight: 700; font-size: 15px;
+  font-variant-numeric: tabular-nums; color: var(--ink); }
+table.qmap td.cell.empty { background: var(--line-soft); border-radius: var(--r-sm);
+  min-height: 34px; opacity: .5; }
+table.qmap td.cell.h1 a { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); }
+table.qmap td.cell.h2 a { background: color-mix(in srgb, var(--brand) 26%, var(--surface)); }
+table.qmap td.cell.h3 a { background: color-mix(in srgb, var(--brand) 44%, var(--surface));
+  color: var(--accent-ink); }
+table.qmap td.cell.h4 a { background: var(--brand); color: var(--accent-ink); }
+table.qmap td.cell a:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+table.qmap td.cell.on a { outline: 2px solid var(--ink); outline-offset: 1px; }
+table.qmap tr.totals td { font-size: 12px; color: var(--ink-3); padding-top: var(--sp-1);
+  font-variant-numeric: tabular-nums; }
+table.qmap tr.totals td.corner { text-align: left; padding-left: var(--sp-2);
+  font-weight: 600; color: var(--ink-2); }
+
+.qtiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2);
+  margin: var(--sp-3) 0; }
+.qtiles .stat { padding: var(--sp-2) var(--sp-3); box-shadow: none; }
+.qtiles .stat .v { font-size: 22px; }
+.qtiles .stat .note { font-size: 12px; }
+@media (max-width: 720px) { .qtiles { grid-template-columns: repeat(2, 1fr); } }
+.qflow .legend { display: flex; gap: var(--sp-4); font-size: 12px; color: var(--ink-3);
+  margin-bottom: var(--sp-1); }
+.qflow .legend span { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.qflow .sw { width: 10px; height: 10px; border-radius: 2px; background: var(--brand);
+  opacity: .75; }
+.qflow .sw.ok { background: var(--ok); }
+.chart .bar.ok { fill: var(--ok); fill-opacity: .8; }
+.setline { margin: 0 0 var(--sp-3); font-size: 14px; color: var(--ink-2); }
+
 .queue {
   display: grid; gap: var(--sp-4); align-items: start;
   grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
