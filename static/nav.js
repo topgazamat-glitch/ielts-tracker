@@ -51,25 +51,35 @@
       })
       .then(function (html) {
         if (mine !== busy) return;                 // a newer click won
-        var doc = new DOMParser().parseFromString(html, "text/html");
-        var fresh = doc.querySelector("main");
-        if (!fresh) throw new Error("no main");
-        // the one thing this must never do: run someone else's script twice
-        if (fresh.querySelector("script")) throw new Error("page has its own script");
-
-        var here = document.querySelector("main");
-        here.parentNode.replaceChild(fresh, here);
-
-        swapHeader(doc);
-        if (doc.title) { document.title = doc.title; }
-
-        if (push) { window.history.pushState({nav: 1}, "", href); }
-        window.scrollTo(0, 0);
+        swapDocument(html, href, push);
         bar(false);
-        document.dispatchEvent(new CustomEvent("pageswap"));
       })
       .catch(function () { if (mine === busy) { full(href); } });
   }
+
+  // Put a fetched page in place of this one: its <main>, its header rows,
+  // its title, its address. Throws if the page carries a script of its own,
+  // and the caller then falls back to a real navigation.
+  function swapDocument(html, href, push) {
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    var fresh = doc.querySelector("main");
+    if (!fresh) throw new Error("no main");
+    // the one thing this must never do: run someone else's script twice
+    if (fresh.querySelector("script")) throw new Error("page has its own script");
+
+    var here = document.querySelector("main");
+    here.parentNode.replaceChild(fresh, here);
+
+    swapHeader(doc);
+    if (doc.title) { document.title = doc.title; }
+
+    if (push) { window.history.pushState({nav: 1}, "", href); }
+    window.scrollTo(0, 0);
+    document.dispatchEvent(new CustomEvent("pageswap"));
+  }
+
+  // other scripts - the marking form - swap pages the same way
+  window.Nav = {go: go, swap: swapDocument, bar: bar};
 
   // The teacher's header is two rows: the sections, and the pages of the
   // current section. Both change from page to page, and the second row may

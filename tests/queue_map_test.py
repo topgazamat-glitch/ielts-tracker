@@ -97,6 +97,16 @@ print("   with the set's progress:", "1 of 3 marked" in q)
 assert "1 of 3 marked" in q
 print("   and a way back to the class's lessons:", "/queue?pick=%d" % g1 in q)
 assert "/queue?pick=%d" % g1 in q
+print("   papers on the left, a handle, the marking on the right:",
+      'class="shots"' in q and 'class="splitter"' in q and 'class="panel"' in q)
+assert 'class="shots"' in q and 'class="splitter"' in q and 'class="panel"' in q
+js = open(os.path.join(ROOT, "static", "grade.js")).read()
+nav = open(os.path.join(ROOT, "static", "nav.js")).read()
+print("   saving swaps the page in place, with a real submit to fall back on:",
+      "Nav.swap" in js and "form.submit()" in js and "window.Nav = " in nav)
+assert "Nav.swap" in js and "form.submit()" in js and "window.Nav = " in nav
+print("   the split is remembered:", "queue.split" in js and "localStorage" in js)
+assert "queue.split" in js
 _, q = get("/queue?pick=%d&group=%d&due=%s" % (g1, g1, mon_day)) if False else get("/queue?pick=%d" % g1)
 print("   the picker names the set being marked when asked back:", "Mark all of 114" in q)
 assert "Mark all of 114" in q

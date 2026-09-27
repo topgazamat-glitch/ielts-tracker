@@ -10,6 +10,7 @@
     var pre = [];
     try { pre = JSON.parse(el.getAttribute("data-prefetch") || "[]"); } catch (e) {}
     return {skip: el.getAttribute("data-skip"),
+            name: el.getAttribute("data-name") || "",
             back: el.getAttribute("data-back") || "",
             regrade: el.getAttribute("data-regrade") === "1",
             prefetch: pre};
@@ -89,7 +90,7 @@
     var typing = e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT";
     if (e.key === "Enter" && ready() && !e.shiftKey) {
       e.preventDefault();
-      form.submit();
+      if (form.requestSubmit) form.requestSubmit(); else form.submit();
       return;
     }
     if (typing) return;
@@ -109,8 +110,100 @@
       var back = G().back, tail = "";
       var q = back.indexOf("?");
       if (q >= 0) tail = "&" + back.slice(q + 1);
-      window.location.href = "/skip?submission_id=" + G().skip + tail;
+      var url = "/skip?submission_id=" + G().skip + tail;
+      if (window.Nav) window.Nav.go(url, true); else window.location.href = url;
     }
+  });
+
+  // ---- saving without a page load
+  //
+  // The form is posted in the background and the next piece put in place
+  // of this one, the same way the links swap pages. Anything unexpected
+  // falls back to the ordinary submit, so the worst case is the old
+  // behaviour: a full reload.
+  function toast(text) {
+    var el = document.getElementById("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add("on");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(function () { el.classList.remove("on"); }, 1800);
+  }
+
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form || form.id !== "gform" || !window.Nav || !window.fetch) return;
+    if (form.dataset.native === "1") return;        // the fallback resubmitting
+    e.preventDefault();
+    var sub = e.submitter;
+    var action = (sub && sub.getAttribute("formaction")) || form.getAttribute("action");
+    var body = new URLSearchParams(new FormData(form));
+    if (sub && sub.name) body.append(sub.name, sub.value);
+    var save = document.getElementById("save");
+    if (save) save.disabled = true;
+    var skipping = /\/skip$/.test(action);
+    var score = field("score") ? field("score").value : "";
+    var name = G().name || "";
+    if (window.Nav.bar) window.Nav.bar(true);
+    fetch(action, {method: "POST", body: body, credentials: "same-origin",
+                   headers: {"Content-Type": "application/x-www-form-urlencoded"}})
+      .then(function (r) {
+        if (!r.ok) throw new Error("not saved");
+        return r.text().then(function (html) { return {html: html, url: r.url}; });
+      })
+      .then(function (got) {
+        try {
+          window.Nav.swap(got.html, got.url, true);
+        } catch (err) {
+          window.location.href = got.url;          // saved; the page just cannot be swapped
+          return;
+        }
+        if (window.Nav.bar) window.Nav.bar(false);
+        if (skipping) toast("Skipped " + name);
+        else if (name) toast("Saved \u00b7 " + name + (score ? " \u00b7 " + score + "/10" : ""));
+      })
+      .catch(function () {
+        if (window.Nav.bar) window.Nav.bar(false);
+        form.dataset.native = "1";
+        if (sub && sub.click) sub.click(); else form.submit();
+      });
+  });
+
+  // ---- the split between the papers and the marking, dragged by hand
+  var SPLIT = "queue.split";
+  function applySplit() {
+    var q = document.querySelector(".queue");
+    if (!q) return;
+    var saved = null;
+    try { saved = localStorage.getItem(SPLIT); } catch (err) {}
+    if (saved) q.style.setProperty("--split", saved);
+  }
+  document.addEventListener("pointerdown", function (e) {
+    var bar = e.target.closest && e.target.closest(".splitter");
+    if (!bar) return;
+    var q = bar.parentNode;
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    document.body.classList.add("dragging");
+    function move(ev) {
+      var box = q.getBoundingClientRect();
+      var pct = Math.max(35, Math.min(80, 100 * (ev.clientX - box.left) / box.width));
+      q.style.setProperty("--split", pct.toFixed(1) + "%");
+    }
+    function stop() {
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", stop);
+      bar.removeEventListener("pointercancel", stop);
+      document.body.classList.remove("dragging");
+      try { localStorage.setItem(SPLIT, q.style.getPropertyValue("--split")); } catch (err) {}
+    }
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", stop);
+    bar.addEventListener("pointercancel", stop);
   });
 
   // with criteria on, successive digits fill Task, Coherence, Vocabulary, Grammar
@@ -138,6 +231,7 @@
   function boot() {
     recalc();
     gridCount();
+    applySplit();
     var save = document.getElementById("save");
     if (save && ready()) save.disabled = false;
     (G().prefetch || []).forEach(function (u) { new Image().src = u; });

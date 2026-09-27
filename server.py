@@ -852,7 +852,9 @@ def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None, show_picke
 {"" if regrade else waiting_list(db, sub["id"], inset, gid, due)}
 <div class="queue">
   <div class="shots">{shots}</div>
-  <div>
+  <div class="splitter" role="separator" aria-orientation="vertical"
+       title="Drag to make the papers wider or narrower"></div>
+  <div class="panel">
     <div class="card">
       <div style="font-weight:600">{E(student["name"])}</div>
       <div class="sub gap-1">{E(group_name(db, student["group_id"]))} &middot;
@@ -867,6 +869,7 @@ def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None, show_picke
   </div>
 </div>
 <div id="gradedata" hidden data-skip="{sub["id"]}" data-back="{E(back)}"
+     data-name="{E(student["name"])}"
      data-regrade="{1 if regrade else 0}" data-prefetch="{E(prefetch)}"></div>"""
     return html_response(page("Change a mark" if regrade else "Grade", body, "Grade"))
 
