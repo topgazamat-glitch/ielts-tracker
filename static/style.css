@@ -52,6 +52,24 @@
 
   --ease: cubic-bezier(.2,.8,.2,1);
   color-scheme: light dark;
+
+  /* The climb's own world: a night sky over the mountain, with the summit
+     catching the first light. One palette in light and dark mode alike,
+     so it is never redefined below. */
+  --dream-top:     #0d0220;
+  --dream-sky:     #2a0a4a;
+  --dream-horizon: #6d1d7e;
+  --dream-far:     #4d1b69;
+  --dream-mid:     #36114f;
+  --dream-near:    #22083a;
+  --dream-deep:    #14041f;
+  --dream-gold:    #ffd36e;
+  --dream-dawn:    #ffc38a;
+  --dream-rose:    #ff8fb8;
+  --dream-snow:    #fdebff;
+  --dream-star:    #fff8e6;
+  --font-dream: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype",
+                Palatino, Georgia, serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1319,60 +1337,196 @@ label.check input { width: 17px; height: 17px; accent-color: var(--brand); }
 .pf-set .f { margin: 0; }
 .pf-set .sub { flex: 1; min-width: 150px; font-size: 13px; }
 
-/* The climb: a mountain at night, the figures on it, and the route beneath.
-   The hero is one deliberate dark world - deep brand to brand, white and gold
-   on it - and reads the same in light and dark mode. */
-.cl-card { padding: 0; overflow: hidden; }
-.cl-hero { position: relative; background: var(--brand-deep); color: #fff; }
-.cl-title { position: absolute; top: var(--sp-4); left: var(--sp-5); z-index: 1;
-  font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+/* ------------------------------------------------------------ the climb
+
+   A dream, drawn: a night sky with the summit catching the first light.
+   One card, one world - the sky and its faint stars behind the headline,
+   the mountain, and the night below it where the figures and the route
+   float like glass. Everything moves slowly or not at all; the global
+   reduced-motion rule stills it completely, and every animation starts
+   from its finished state, so a still page is a complete page. */
+.cl-card { padding: 0; overflow: hidden; border: 0; color: #fff;
+  background: linear-gradient(180deg, var(--dream-near) 0%, var(--dream-deep) 100%);
+  box-shadow: 0 20px 60px rgba(20, 4, 31, .35), 0 2px 6px rgba(20, 4, 31, .2); }
+.cl-hero { position: relative; isolation: isolate;
+  background:
+    /* the ground's own colour along the very bottom, so no hairline of sky
+       shows where the picture meets the card on any screen width */
+    linear-gradient(0deg, var(--dream-near) 0 4px, transparent 4px),
+    radial-gradient(90% 60% at 18% 0%, rgba(120, 60, 200, .35), transparent 70%),
+    linear-gradient(180deg, var(--dream-top) 0%, var(--dream-sky) 55%, var(--dream-horizon) 100%); }
+/* two layers of faint stars, tiled at different sizes so no pattern shows */
+.cl-hero::before, .cl-hero::after { content: ""; position: absolute; inset: 0;
+  z-index: -1; pointer-events: none;
+  /* quieter behind the headline, so no star sits on a full stop */
+  -webkit-mask-image: radial-gradient(ellipse 85% 42% at 30% 22%, transparent 40%, #000 85%);
+  mask-image: radial-gradient(ellipse 85% 42% at 30% 22%, transparent 40%, #000 85%); }
+.cl-hero::before {
+  background-image:
+    radial-gradient(circle 1px at 8% 14%, rgba(255,255,255,.95), transparent),
+    radial-gradient(circle 1px at 31% 42%, rgba(255,255,255,.8), transparent),
+    radial-gradient(circle 1px at 57% 9%, rgba(255,255,255,.9), transparent),
+    radial-gradient(circle 1px at 76% 33%, rgba(255,255,255,.75), transparent),
+    radial-gradient(circle 2px at 92% 61%, rgba(255,248,230,.9), transparent),
+    radial-gradient(circle 1px at 44% 71%, rgba(255,255,255,.7), transparent),
+    radial-gradient(circle 1px at 18% 83%, rgba(255,255,255,.6), transparent);
+  background-size: 240px 170px;
+  animation: cl-twinkle 3.6s ease-in-out infinite alternate; }
+.cl-hero::after {
+  background-image:
+    radial-gradient(circle 1px at 14% 36%, rgba(255,255,255,.85), transparent),
+    radial-gradient(circle 2px at 49% 22%, rgba(255,248,230,.85), transparent),
+    radial-gradient(circle 1px at 67% 58%, rgba(255,255,255,.7), transparent),
+    radial-gradient(circle 1px at 86% 12%, rgba(255,255,255,.9), transparent),
+    radial-gradient(circle 1px at 37% 88%, rgba(255,255,255,.6), transparent);
+  background-size: 330px 220px;
+  animation: cl-twinkle 5.4s ease-in-out -2s infinite alternate-reverse; }
+@keyframes cl-twinkle { from { opacity: .45; } to { opacity: 1; } }
+
+/* now and then, a shooting star */
+.cl-shoot { position: absolute; z-index: -1; top: 12%; left: 6%; width: 120px; height: 2px;
+  border-radius: 999px; pointer-events: none; opacity: 0;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,248,230,.95));
+  transform: rotate(16deg);
+  animation: cl-shoot 9s linear 2.5s infinite; }
+.cl-shoot.two { top: 6%; left: 48%; width: 90px; animation-duration: 13s; animation-delay: 7s; }
+@keyframes cl-shoot {
+  0% { opacity: 0; transform: translate(0, 0) rotate(16deg); }
+  1.5% { opacity: 1; }
+  7% { opacity: 0; transform: translate(240px, 69px) rotate(16deg); }
+  100% { opacity: 0; transform: translate(240px, 69px) rotate(16deg); }
+}
+
+.cl-top { position: relative; padding: var(--sp-6) var(--sp-6) 0; }
+.cl-eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: rgba(255,255,255,.6); }
+.cl-headline { margin: var(--sp-2) 0 0; max-width: 21ch;
+  font-family: var(--font-dream); font-size: 30px; font-weight: 500; line-height: 1.2;
+  letter-spacing: -.01em; color: #fff; text-wrap: balance;
+  text-shadow: 0 2px 24px rgba(255, 143, 184, .25); }
+.cl-headline em { font-style: italic; color: var(--dream-gold); }
+.cl-lead { margin: var(--sp-2) 0 0; max-width: 42ch; font-size: 15px; line-height: 1.5;
   color: rgba(255,255,255,.75); }
-.climb { display: block; width: 100%; height: auto; max-height: 300px; }
-.climb .pulse { transform-origin: center; transform-box: fill-box;
-  animation: climb-pulse 2.4s var(--ease) infinite; }
-@keyframes climb-pulse {
-  0% { transform: scale(.7); opacity: .7; }
-  70% { transform: scale(1.6); opacity: 0; }
-  100% { transform: scale(1.6); opacity: 0; }
-}
-.cl-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5) var(--sp-5);
-  background: linear-gradient(180deg, var(--brand), var(--brand-deep)); }
-.cl-stat .k { font-size: 12px; font-weight: 600; letter-spacing: .1em;
-  text-transform: uppercase; color: rgba(255,255,255,.7); }
-.cl-stat .v { font-size: 20px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15;
-  margin-top: var(--sp-1); color: #fff; font-variant-numeric: tabular-nums; }
-.cl-stat .sub { margin: var(--sp-1) 0 0; font-size: 12px; color: rgba(255,255,255,.7); }
+.cl-lead em { font-style: normal; font-weight: 600; color: var(--dream-gold); }
 @media (max-width: 720px) {
-  .cl-stats { grid-template-columns: 1fr 1fr; }
-  .cl-stats .cl-stat:last-child { grid-column: 1 / -1; }
-  .cl-stat .v { font-size: 16px; }
+  .cl-top { padding: var(--sp-5) var(--sp-4) 0; }
+  .cl-headline { font-size: 26px; }
+  .cl-lead { font-size: 14px; }
 }
-.cl-body { padding: var(--sp-4) var(--sp-5) var(--sp-5); }
-.cl-h { margin: 0 0 var(--sp-3); font-size: 12px; font-weight: 600; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--ink-3); }
-.route { list-style: none; margin: 0; padding: 0; position: relative; }
-.route::before { content: ""; position: absolute; left: 11px; top: 12px; bottom: 12px;
-  width: 2px; background: var(--line-soft); }
+
+/* the picture itself */
+.climb { position: relative; display: block; width: 100%; height: auto; }
+.climb .walked { animation: cl-draw 1.8s var(--ease) .4s both; }
+@keyframes cl-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.climb .me { transform-box: fill-box; transform-origin: center;
+  animation: cl-pop .7s var(--ease) 1.7s both; }
+@keyframes cl-pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+.climb .tag { animation: cl-bob 3.2s ease-in-out 2.4s infinite alternate; }
+@keyframes cl-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+.climb .pulse { transform-box: fill-box; transform-origin: center;
+  animation: cl-pulse 2.6s var(--ease) 2.4s infinite; }
+@keyframes cl-pulse {
+  0% { transform: scale(.8); opacity: .8; }
+  70% { transform: scale(1.7); opacity: 0; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+.climb .ring { animation: cl-twinkle 1.6s ease-in-out infinite alternate; }
+.climb .breathe { animation: cl-breathe 5s ease-in-out infinite alternate; }
+@keyframes cl-breathe { from { opacity: .6; } to { opacity: 1; } }
+.climb .mist { animation: cl-drift 22s ease-in-out infinite alternate; }
+.climb .mist.two { animation-duration: 29s; animation-direction: alternate-reverse; }
+@keyframes cl-drift { from { transform: translateX(-20px); } to { transform: translateX(20px); } }
+.climb .tw1 { animation: cl-twinkle 2.6s ease-in-out infinite alternate; }
+.climb .tw2 { animation: cl-twinkle 3.8s ease-in-out -1s infinite alternate; }
+.climb .tw3 { animation: cl-twinkle 4.7s ease-in-out -2s infinite alternate; }
+.climb .spark { animation: cl-twinkle 1.9s ease-in-out infinite alternate; }
+.climb .spark.s1 { animation-delay: -.6s; }
+.climb .spark.s2 { animation-delay: -1.2s; }
+@media (max-width: 480px) { .climb .lbl.mid { display: none; } }
+
+/* the night below: three figures floating like glass */
+.cl-body { padding: var(--sp-5) var(--sp-6) var(--sp-6);
+  background: linear-gradient(180deg, var(--dream-near) 0%, var(--dream-deep) 70%); }
+/* with no route yet, the choice comes first and the quote closes */
+.cl-body > :first-child { margin-top: 0; }
+.cl-body > .cl-set:first-child { padding-top: 0; border-top: 0; }
+.cl-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3);
+  margin-bottom: var(--sp-6); }
+.cl-stat { padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
+.cl-stat.lead { background: linear-gradient(135deg, rgba(255,211,110,.18), rgba(255,143,184,.08));
+  border-color: rgba(255,211,110,.38); box-shadow: 0 0 30px rgba(255,211,110,.12); }
+.cl-stat .k { font-size: 12px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: rgba(255,255,255,.6); }
+.cl-stat .v { margin-top: var(--sp-1); font-family: var(--font-dream); font-size: 20px;
+  font-weight: 600; line-height: 1.2; color: #fff; font-variant-numeric: tabular-nums; }
+.cl-stat.lead .v { color: var(--dream-gold); }
+.cl-stat .sub { margin: var(--sp-1) 0 0; font-size: 12px; color: rgba(255,255,255,.6); }
+@media (max-width: 720px) {
+  .cl-body { padding: var(--sp-4) var(--sp-4) var(--sp-5); }
+  .cl-stats { grid-template-columns: 1fr 1fr; }
+  .cl-stats .cl-stat.lead { grid-column: 1 / -1; }
+}
+
+/* the route, as a constellation: lit where walked, faint where not */
+.cl-h { margin: 0 0 var(--sp-3); font-size: 12px; font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: rgba(255,255,255,.55); }
+.route { list-style: none; margin: 0; padding: 0; }
 .route li { position: relative; display: flex; gap: var(--sp-3); align-items: flex-start;
   padding: var(--sp-2) 0; }
+.route li:not(:last-child)::after { content: ""; position: absolute; left: 11px;
+  top: 32px; bottom: -8px; width: 2px; background: rgba(255,255,255,.14); }
+.route li.done::after { background: var(--dream-gold); box-shadow: 0 0 8px rgba(255,211,110,.55); }
 .route .dot { position: relative; z-index: 1; flex: none; width: 24px; height: 24px;
   border-radius: 50%; display: grid; place-items: center; font-size: 12px;
-  background: var(--surface); border: 2px solid var(--line); color: var(--accent-ink); }
-.route li.done .dot { background: var(--brand); border-color: var(--brand); }
-.route li.here .dot { border-color: var(--gold); background: var(--gold); box-shadow: 0 0 0 4px var(--gold-soft); }
-.route li.ahead .dot { border-style: dashed; }
-.route .name { font-weight: 600; font-size: 15px; line-height: 24px; }
-.route li.ahead .name { color: var(--ink-2); font-weight: 500; }
-.route li.done .name { color: var(--ink-3); }
-.route li .sub { margin: 0; font-size: 12px; display: flex; align-items: center; gap: var(--sp-2); }
-.cl-mini { width: 120px; height: 6px; border-radius: 999px; background: var(--line-soft);
-  overflow: hidden; }
-.cl-mini i { display: block; height: 100%; border-radius: 999px; background: var(--gold); }
-.cl-earned { margin: var(--sp-4) 0 0; font-size: 13px; }
-.cl-set { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
-.cl-set summary { cursor: pointer; font-weight: 600; color: var(--brand); font-size: 14px; }
+  border: 2px dashed rgba(255,255,255,.35); color: var(--dream-deep); }
+.route li.done .dot { background: var(--dream-gold); border: 2px solid var(--dream-gold);
+  box-shadow: 0 0 12px rgba(255,211,110,.55); }
+.route li.here .dot { background: var(--dream-gold); border: 2px solid #fff;
+  box-shadow: 0 0 0 4px rgba(255,211,110,.22), 0 0 18px rgba(255,211,110,.7);
+  animation: cl-here 2.4s ease-in-out infinite alternate; }
+@keyframes cl-here {
+  from { box-shadow: 0 0 0 3px rgba(255,211,110,.2), 0 0 10px rgba(255,211,110,.45); }
+  to { box-shadow: 0 0 0 7px rgba(255,211,110,.12), 0 0 24px rgba(255,211,110,.85); }
+}
+.route li.dream .dot { border: 2px solid var(--dream-rose); color: var(--dream-rose);
+  background: rgba(255,143,184,.12); box-shadow: 0 0 14px rgba(255,143,184,.35); }
+.route li.dream.done .dot { color: var(--dream-deep); background: var(--dream-gold);
+  border-color: var(--dream-gold); }
+.route .name { font-weight: 600; font-size: 15px; line-height: 24px; color: #fff; }
+.route li.done .name { color: rgba(255,255,255,.6); }
+.route li.ahead .name { font-weight: 500; color: rgba(255,255,255,.8); }
+.route li.dream .name { font-family: var(--font-dream); font-style: italic; font-size: 16px;
+  font-weight: 600; color: var(--dream-rose); }
+.route li .sub { margin: 0; font-size: 12px; color: rgba(255,255,255,.55);
+  display: flex; align-items: center; gap: var(--sp-2); }
+.cl-mini { width: 120px; height: 6px; border-radius: 999px; overflow: hidden;
+  background: rgba(255,255,255,.14); }
+.cl-mini i { display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--dream-gold), var(--dream-rose)); }
+.cl-earned { margin: var(--sp-4) 0 0; font-size: 13px; line-height: 1.55;
+  color: rgba(255,255,255,.6); }
+.cl-earned strong { color: #fff; }
+
+/* a line for today, in the same night */
+.cl-quote { margin-top: var(--sp-6); padding: var(--sp-5) var(--sp-4); text-align: center;
+  border-radius: var(--r-lg); border: 1px solid rgba(255,255,255,.08);
+  background: radial-gradient(90% 120% at 50% 0%, rgba(255,211,110,.12), transparent 70%); }
+.cl-star { display: block; font-size: 16px; color: var(--dream-gold);
+  text-shadow: 0 0 12px rgba(255,211,110,.8); }
+.cl-quote p { margin: var(--sp-2) auto 0; max-width: 32ch; font-family: var(--font-dream);
+  font-style: italic; font-size: 20px; line-height: 1.4; color: #fff; text-wrap: balance; }
+.cl-quote .who { display: block; margin-top: var(--sp-3); font-size: 12px;
+  letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.5); }
+
+/* choosing the route, folded away once there is one */
+.cl-set { margin-top: var(--sp-5); padding-top: var(--sp-4);
+  border-top: 1px solid rgba(255,255,255,.1); }
+.cl-set summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--dream-gold); }
 .cl-set .pf-set { margin-top: var(--sp-3); padding-top: 0; border-top: 0; }
+.cl-card label.f { color: rgba(255,255,255,.72); }
+.cl-card .pf-set button { background: var(--dream-gold); color: var(--dream-deep); }
+.cl-card .pf-set button:hover { filter: brightness(1.05); }
 
 /* ------------------------------------------------------- championship */
 

@@ -109,6 +109,8 @@ MEASURE = """(() => {
     });
   document.querySelectorAll('body *').forEach(el => {
     if (el.children.length) return;
+    // an inline <svg> clips its own drawing; a shape past its edge is not seen
+    if (el.tagName.toLowerCase() !== 'svg' && el.closest('svg')) return;
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.right > innerWidth + 1 && !reachable(el))
       out.past.push(name(el) + ' ends at ' + Math.round(r.right) + 'px');

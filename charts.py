@@ -314,8 +314,10 @@ _RIDGE_FAR = ("M 0 300 L 0 200 L 50 176 L 110 196 L 160 170 L 220 188 L 270 156 
               "L 320 174 L 370 146 L 420 164 L 460 136 L 500 150 L 550 118 L 600 146 "
               "L 640 126 L 640 300 Z")
 _SNOW = "M 522 64 L 548 44 L 566 60 L 578 76 L 560 70 L 548 80 L 534 72 Z"
-_STARS = [(38, 30), (90, 52), (140, 22), (210, 44), (260, 18), (330, 38), (392, 24),
-          (446, 40), (500, 16), (598, 32), (622, 58), (176, 70), (300, 66), (476, 56)]
+# A few bright stars in the mountain's own sky; the faint ones are a CSS
+# layer over the whole hero, so the sky runs on above the picture.
+_BRIGHT = [(318, 34, 5, "tw1"), (404, 70, 4, "tw2"), (468, 26, 6, "tw3"),
+           (612, 22, 4, "tw1"), (250, 88, 3, "tw2"), (150, 60, 4, "tw3")]
 
 
 def _along(fraction):
@@ -328,103 +330,140 @@ def _along(fraction):
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
 
 
-def mountain(c, w=640, h=300):
-    """Their climb, drawn as a mountain at night with a camp for every stage.
+def _sparkle(x, y, r, cls):
+    """A four-pointed twinkle: curves pulled into the centre."""
+    return ('<path class="%s" d="M %.1f %.1f Q %.1f %.1f %.1f %.1f Q %.1f %.1f %.1f %.1f '
+            'Q %.1f %.1f %.1f %.1f Q %.1f %.1f %.1f %.1f Z" fill="var(--dream-star)"/>'
+            % (cls, x, y - r, x, y, x + r, y, x, y, x, y + r, x, y, x - r, y, x, y, x, y - r))
 
-    The climber sits where their marked work has actually carried them, so the
-    picture moves a little every time a piece of homework is graded. Passed
-    camps are lit; the one ahead is ringed; the summit carries the flag. Only
-    the camps that mean something are named on the picture - the route list
-    under it names them all.
+
+def mountain(c, w=640, h=300, avatar="", photo=""):
+    """Their climb, drawn as a mountain at night with the summit catching
+    the first light - the dream, lit, and the route to it.
+
+    The sky is transparent: the hero behind the picture carries the night
+    and the faint stars, so it runs on unbroken above it. The climber is the
+    student's own face or animal, standing where their marked work has
+    actually carried them; the stretch they have walked glows gold.
     """
     if c is None:
         n, climbed, labels = 4, 0.0, []
     else:
         n, climbed, labels = c["camps"], c["climbed"], c["labels"]
     reached = int(climbed)
+    f = (climbed / float(n)) if (c and n) else 0.0
+    cx, cy = _along(f)
+    label = ("Climb from %s to %s, %d%% of the way" % (labels[0], labels[-1], c["percent"])
+             if c else "A mountain at night, waiting for a route")
     out = ['<svg class="climb" viewBox="0 0 %d %d" width="100%%" '
-           'preserveAspectRatio="xMidYMid slice" role="img" aria-label="%s">'
-           % (w, h, ("Climb from %s to %s, %d%% of the way"
-                     % (labels[0], labels[-1], c["percent"])) if c else "The mountain")]
+           'preserveAspectRatio="xMidYMid meet" role="img" aria-label="%s">' % (w, h, label)]
     out.append(
-        '<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0%" stop-color="var(--brand-deep)"/>'
-        '<stop offset="100%" stop-color="var(--brand)"/></linearGradient>'
-        '<radialGradient id="glow" cx="50%" cy="50%" r="50%">'
-        '<stop offset="0%" stop-color="#fff" stop-opacity=".9"/>'
-        '<stop offset="100%" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>')
-    out.append('<rect width="%d" height="%d" fill="url(#sky)"/>' % (w, h))
-    for x, y in _STARS:
-        out.append('<circle cx="%d" cy="%d" r="%s" fill="#fff" opacity="%s"/>'
-                   % (x, y, "1.3" if (x + y) % 3 else "1.8", ".55" if (x + y) % 2 else ".35"))
-    out.append('<path d="%s" fill="#fff" opacity=".08"/>' % _RIDGE_FAR)
-    out.append('<path d="%s" fill="#fff" opacity=".13"/>' % _RIDGE_MID)
-    out.append('<path d="%s" fill="#fff" opacity=".22"/>' % _RIDGE_NEAR)
-    out.append('<path d="%s" fill="#fff" opacity=".85"/>' % _SNOW)
-    # the route: the stretch already walked is solid, the rest is dashed
-    pts = " ".join("%d,%d" % p for p in _ROUTE)
+        '<defs>'
+        '<radialGradient id="cl-dawn"><stop offset="0%" stop-color="var(--dream-dawn)" stop-opacity=".75"/>'
+        '<stop offset="45%" stop-color="var(--dream-rose)" stop-opacity=".28"/>'
+        '<stop offset="100%" stop-color="var(--dream-rose)" stop-opacity="0"/></radialGradient>'
+        '<radialGradient id="cl-halo"><stop offset="0%" stop-color="var(--dream-gold)" stop-opacity=".75"/>'
+        '<stop offset="100%" stop-color="var(--dream-gold)" stop-opacity="0"/></radialGradient>'
+        '<linearGradient id="cl-walk" gradientUnits="userSpaceOnUse" x1="46" y1="236" x2="548" y2="48">'
+        '<stop offset="0%" stop-color="var(--dream-gold)"/>'
+        '<stop offset="100%" stop-color="var(--dream-rose)"/></linearGradient>'
+        '<filter id="cl-glow" x="-20%" y="-20%" width="140%" height="140%">'
+        '<feGaussianBlur stdDeviation="3" result="b"/>'
+        '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+        '<filter id="cl-mist" x="-30%" y="-200%" width="160%" height="500%">'
+        '<feGaussianBlur stdDeviation="9"/></filter>'
+        + '<clipPath id="cl-face"><circle cx="%.1f" cy="%.1f" r="13"/></clipPath>' % (cx, cy)
+        + '</defs>')
+    # the first light, behind the summit: the dream, glowing
+    out.append('<ellipse class="breathe" cx="560" cy="112" rx="260" ry="112" fill="url(#cl-dawn)"/>')
+    for x, y, r, cls in _BRIGHT:
+        out.append(_sparkle(x, y, r, cls))
+    out.append('<path d="%s" fill="var(--dream-far)"/>' % _RIDGE_FAR)
+    out.append('<path d="%s" fill="var(--dream-mid)"/>' % _RIDGE_MID)
+    out.append('<ellipse class="mist" cx="210" cy="226" rx="170" ry="16" fill="#fff" '
+               'opacity=".13" filter="url(#cl-mist)"/>')
+    out.append('<ellipse class="mist two" cx="440" cy="192" rx="180" ry="15" fill="#fff" '
+               'opacity=".10" filter="url(#cl-mist)"/>')
+    out.append('<path d="%s" fill="var(--dream-near)"/>' % _RIDGE_NEAR)
+    out.append('<path d="%s" fill="var(--dream-snow)" opacity=".92"/>' % _SNOW)
+    # the whole route, faint; then the part already walked, drawn in gold
     out.append('<polyline points="%s" fill="none" stroke="#fff" stroke-width="2" '
-               'stroke-dasharray="3 6" stroke-linecap="round" opacity=".55"/>' % pts)
+               'stroke-dasharray="2 7" stroke-linecap="round" opacity=".45"/>'
+               % " ".join("%d,%d" % p for p in _ROUTE))
     if c and climbed > 0:
-        walked = [_along(k / 40.0 * climbed / n) for k in range(41)]
-        out.append('<polyline points="%s" fill="none" stroke="#fff" stroke-width="3" '
-                   'stroke-linecap="round" stroke-linejoin="round" opacity=".95"/>'
-                   % " ".join("%.1f,%.1f" % p for p in walked))
-    # the summit flag
+        walked = [_along(k / 48.0 * f) for k in range(49)]
+        out.append('<path class="walked" d="M %s" pathLength="1" stroke-dasharray="1 1" '
+                   'stroke-dashoffset="0" fill="none" stroke="url(#cl-walk)" stroke-width="3.5" '
+                   'stroke-linecap="round" stroke-linejoin="round" filter="url(#cl-glow)"/>'
+                   % " L ".join("%.1f %.1f" % p for p in walked))
+        for k, frac in enumerate((0.3, 0.62, 0.86)):
+            if f * frac * (len(_ROUTE) - 1) < 0.6:
+                continue                        # too close to the start to show
+            sx, sy = _along(f * frac)
+            out.append(_sparkle(sx + 6, sy - 12, 3.5, "spark s%d" % k))
+    # the summit: a halo, a pole and a gold flag
     fx, fy = _along(1.0)
-    out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#fff" '
-               'stroke-width="2" stroke-linecap="round"/>' % (fx, fy, fx, fy - 30))
-    out.append('<path d="M %.1f %.1f L %.1f %.1f L %.1f %.1f Z" fill="var(--gold)"/>'
-               % (fx + 1, fy - 30, fx + 24, fy - 23, fx + 1, fy - 15))
+    out.append('<circle class="breathe" cx="%.1f" cy="%.1f" r="38" fill="url(#cl-halo)"/>' % (fx, fy - 14))
+    out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#fff" stroke-width="2" '
+               'stroke-linecap="round"/>' % (fx, fy, fx, fy - 30))
+    out.append('<path d="M %.1f %.1f Q %.1f %.1f %.1f %.1f Q %.1f %.1f %.1f %.1f Z" '
+               'fill="var(--dream-gold)"/>'
+               % (fx + 1, fy - 30, fx + 12, fy - 29, fx + 25, fy - 23, fx + 12, fy - 19, fx + 1, fy - 16))
     if not c:
         out.append("</svg>")
         return "".join(out)
-    # the camps
+    # the camps: passed ones lit gold, the next one ringed, the rest faint
     named = {0, n, reached, min(reached + 1, n)} if n > 5 else set(range(n + 1))
-    for i, label in enumerate(labels):
+    for i, name in enumerate(labels):
         x, y = _along(i / float(n))
         passed = i <= reached
         nxt = i == min(reached + 1, n) and i != reached
         if passed:
-            out.append('<circle cx="%.1f" cy="%.1f" r="5.5" fill="#fff"/>' % (x, y))
+            out.append('<circle cx="%.1f" cy="%.1f" r="5" fill="var(--dream-gold)" '
+                       'filter="url(#cl-glow)"/>' % (x, y))
         elif nxt:
-            out.append('<circle cx="%.1f" cy="%.1f" r="6" fill="var(--brand)" '
-                       'stroke="var(--gold)" stroke-width="2.5"/>' % (x, y))
+            out.append('<circle class="ring" cx="%.1f" cy="%.1f" r="6.5" fill="var(--dream-near)" '
+                       'stroke="var(--dream-gold)" stroke-width="2.5"/>' % (x, y))
         else:
-            out.append('<circle cx="%.1f" cy="%.1f" r="4" fill="var(--brand)" '
-                       'stroke="#fff" stroke-width="1.5" opacity=".8"/>' % (x, y))
+            out.append('<circle cx="%.1f" cy="%.1f" r="4" fill="var(--dream-near)" '
+                       'stroke="#fff" stroke-width="1.5" opacity=".7"/>' % (x, y))
         if i not in named or i == reached:
-            continue           # the reached camp is named by the climber's tag
-        anchor = "start" if i == 0 else "end" if i == n else "middle"
-        dy, dx = (24 if i % 2 == 0 else -14), (6 if i == 0 else 0)
+            continue           # the climber stands on the camp reached
         if i == n:
-            dy, dx, anchor = 4, -12, "end"       # left of the summit, on the sky
-        out.append('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="12" '
+            out.append('<text class="lbl dream" x="%.1f" y="%.1f" text-anchor="end" font-size="15" '
+                       'font-weight="700" fill="var(--dream-gold)">%s</text>' % (x - 14, y + 5, name))
+            continue
+        if nxt:
+            # beside the ring, away from the climber who stands just below it
+            anchor, dx, dy = "start", 12, 22
+        else:
+            anchor, dx, dy = ("start" if i == 0 else "middle"), (6 if i == 0 else 0), \
+                (28 if i % 2 == 0 else -16)
+        out.append('<text class="lbl%s" x="%.1f" y="%.1f" text-anchor="%s" font-size="14" '
                    'font-weight="%s" fill="#fff" fill-opacity="%s">%s</text>'
-                   % (x + dx, y + dy, anchor,
-                      "700" if (passed or nxt) else "500", ".95" if (passed or nxt) else ".7",
-                      label))
-    # the climber: a lit marker where their work has carried them, with a tag
-    cx, cy = _along(climbed / float(n))
-    out.append('<circle cx="%.1f" cy="%.1f" r="26" fill="url(#glow)" opacity=".45"/>' % (cx, cy))
-    out.append('<circle class="pulse" cx="%.1f" cy="%.1f" r="12" fill="none" '
-               'stroke="#fff" stroke-width="1.5" opacity=".6"/>' % (cx, cy))
-    out.append('<circle cx="%.1f" cy="%.1f" r="8" fill="var(--gold)" stroke="#fff" '
-               'stroke-width="2.5"/>' % (cx, cy))
-    tag = "You"
-    tw = 8 * len(tag) + 18
-    tx = cx - tw / 2.0
-    ty = cy - 44
-    if tx < 8:
-        tx = 8
-    if tx + tw > w - 8:
-        tx = w - 8 - tw
-    out.append('<rect x="%.1f" y="%.1f" width="%d" height="22" rx="11" fill="#fff"/>'
-               % (tx, ty, tw))
-    out.append('<text x="%.1f" y="%.1f" text-anchor="middle" font-size="12" '
-               'font-weight="700" fill="var(--brand-deep)">%s</text>'
-               % (tx + tw / 2.0, ty + 15, tag))
-    out.append('<path d="M %.1f %.1f L %.1f %.1f L %.1f %.1f Z" fill="#fff"/>'
-               % (cx - 5, ty + 22, cx + 5, ty + 22, cx, ty + 29))
+                   % ("" if nxt else " mid", x + dx, y + dy, anchor,
+                      "700" if nxt else "500", ".95" if nxt else ".7", name))
+    # the climber: their own face, lit, with a tag
+    out.append('<circle class="breathe" cx="%.1f" cy="%.1f" r="36" fill="url(#cl-halo)"/>' % (cx, cy))
+    out.append('<circle class="pulse" cx="%.1f" cy="%.1f" r="18" fill="none" '
+               'stroke="var(--dream-gold)" stroke-width="2"/>' % (cx, cy))
+    face = ('<image href="%s" x="%.1f" y="%.1f" width="26" height="26" '
+            'preserveAspectRatio="xMidYMid slice" clip-path="url(#cl-face)"/>'
+            % (photo, cx - 13, cy - 13)) if photo else \
+           ('<text x="%.1f" y="%.1f" font-size="17" text-anchor="middle" '
+            'dominant-baseline="central">%s</text>' % (cx, cy + 1, avatar or "★"))
+    out.append('<g class="me"><circle cx="%.1f" cy="%.1f" r="16" fill="var(--dream-deep)" '
+               'stroke="var(--dream-gold)" stroke-width="3"/>%s</g>' % (cx, cy, face))
+    tw, th = 52, 26
+    tx = max(6.0, min(w - 6.0 - tw, cx - tw / 2.0))
+    below = cy < 76
+    ty = cy + 26 if below else cy - 26 - th
+    tip = ('M %.1f %.1f L %.1f %.1f L %.1f %.1f Z' % (cx - 6, ty, cx + 6, ty, cx, ty - 7)) if below \
+        else ('M %.1f %.1f L %.1f %.1f L %.1f %.1f Z' % (cx - 6, ty + th, cx + 6, ty + th, cx, ty + th + 7))
+    out.append('<g class="tag"><rect x="%.1f" y="%.1f" width="%d" height="%d" rx="13" fill="#fff"/>'
+               '<path d="%s" fill="#fff"/>'
+               '<text x="%.1f" y="%.1f" text-anchor="middle" font-size="15" font-weight="700" '
+               'fill="var(--dream-deep)">You</text></g>'
+               % (tx, ty, tw, th, tip, tx + tw / 2.0, ty + 18))
     out.append("</svg>")
     return "".join(out)
