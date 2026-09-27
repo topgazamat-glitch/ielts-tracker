@@ -531,6 +531,54 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
 .fb-voice audio { width: 100%; height: 40px; }
 .fb-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-3); }
 
+/* rating a lesson: six rows of five stars, tapped, anonymous */
+.rate-row { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-3);
+  align-items: center; padding: var(--sp-3) 0; border-bottom: 1px solid var(--line-soft); }
+.rate-row:last-of-type { border-bottom: 0; }
+.rate-row .what { font-weight: 600; }
+.rate-row .sub { margin: 0; font-size: 12px; }
+.stars { display: inline-flex; flex-direction: row-reverse; gap: var(--sp-1); }
+.stars input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.stars label { width: 34px; height: 34px; display: grid; place-items: center;
+  border-radius: var(--r-sm); color: var(--line); font-size: 26px; cursor: pointer;
+  transition: color .1s var(--ease), transform .08s var(--ease); }
+.stars label:active { transform: scale(.9); }
+.stars input:checked ~ label, .stars label:hover, .stars label:hover ~ label {
+  color: var(--gold); }
+.stars input:focus-visible + label { outline: 2px solid var(--focus); }
+@media (max-width: 720px) {
+  .rate-row { grid-template-columns: 1fr; gap: var(--sp-1); }
+}
+.anon { display: flex; gap: var(--sp-3); align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
+  background: var(--accent-soft); border: 1px solid var(--accent-line); font-size: 14px; }
+.anon .lock { font-size: 20px; line-height: 1; }
+
+/* what the students said, for the teacher */
+.aspects { display: grid; gap: var(--sp-2); }
+.aspect { display: grid; grid-template-columns: minmax(150px, 220px) 1fr 52px;
+  gap: var(--sp-3); align-items: center; }
+.aspect .what { font-weight: 600; font-size: 14px; }
+.aspect .what .sub { margin: 0; font-size: 12px; }
+.aspect .track { height: 12px; background: var(--line-soft); border-radius: 999px;
+  overflow: hidden; }
+.aspect .fill { height: 100%; border-radius: 999px; background: var(--ok);
+  transition: width .5s var(--ease); }
+.aspect.watch .fill { background: var(--amber); }
+.aspect.risk .fill { background: var(--warn); }
+.aspect .n { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { .aspect { grid-template-columns: 1fr 44px; }
+  .aspect .what { grid-column: 1 / -1; } }
+.said { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
+.said .card { margin: 0; }
+.said h3 { margin: 0 0 var(--sp-2); font-size: 14px; }
+.said ul { list-style: none; margin: 0; padding: 0; }
+.said li { padding: var(--sp-2) 0; border-bottom: 1px solid var(--line-soft); font-size: 15px;
+  line-height: 1.45; }
+.said li:last-child { border-bottom: 0; }
+.said li .sub { margin: 0; font-size: 12px; }
+@media (max-width: 720px) { .said { grid-template-columns: 1fr; } }
+
 /* the strip above the work: which set, how far, and the way out */
 .setbar { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;
   padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3);

@@ -519,6 +519,24 @@ def migrate(db):
         target_date TEXT,
         updated_at TEXT NOT NULL
     );
+    -- how the lesson went, in the students' words. No student column, on
+    -- purpose: a rating is anonymous, and the only way to keep a promise
+    -- like that is to have nothing to break it with. The ticket table says
+    -- who has rated which day, and nothing else.
+    CREATE TABLE IF NOT EXISTS lesson_ratings (
+        id INTEGER PRIMARY KEY,
+        group_id INTEGER NOT NULL REFERENCES groups(id),
+        day TEXT NOT NULL,                 -- the lesson's day, never the moment
+        week TEXT NOT NULL,                -- YYYY-Www
+        atmosphere INTEGER, clarity INTEGER, learning INTEGER,
+        pace INTEGER, involvement INTEGER, feedback INTEGER,
+        keep TEXT, change TEXT
+    );
+    CREATE TABLE IF NOT EXISTS rating_tickets (
+        student_id INTEGER NOT NULL REFERENCES students(id),
+        day TEXT NOT NULL,
+        PRIMARY KEY (student_id, day)
+    );
     CREATE TABLE IF NOT EXISTS lesson_marks (
         id INTEGER PRIMARY KEY,
         student_id INTEGER NOT NULL REFERENCES students(id),
@@ -4465,6 +4483,121 @@ def student_tag_counts(db, student_id, days=60):
         (student_id, since)).fetchall()
 
 
+# ------------------------------------------------------- rating the lesson
+
+RATING_ASPECTS = [
+    ("atmosphere", "Atmosphere", "the lesson felt good to be in"),
+    ("clarity", "Clear explanations", "I understood what was explained"),
+    ("learning", "Learned something", "I can do something I could not before"),
+    ("pace", "Right pace", "not too fast, not too slow"),
+    ("involvement", "Taking part", "I got to speak and practise"),
+    ("feedback", "Useful feedback", "I know what to improve"),
+]
+MIN_RATERS = 3            # below this a class-week is not shown to anyone
+
+
+def week_key(day):
+    y, w, _ = datetime.strptime(day, "%Y-%m-%d").isocalendar()
+    return "%d-W%02d" % (y, w)
+
+
+def has_rated(db, student_id, day):
+    return bool(db.execute("SELECT 1 FROM rating_tickets WHERE student_id=? AND day=?",
+                           (student_id, day)).fetchone())
+
+
+def rate_lesson(db, student, day, scores, keep="", change=""):
+    """Keep a student's rating of a lesson without keeping who gave it.
+
+    The ticket row (student, day) is written first, so a second attempt for
+    the same day is refused; the rating row carries the class and the day
+    and nothing that leads back to a person. Returns 'done', 'already' or
+    'bad'.
+    """
+    cfg = load_config()
+    today = local_day(now(), cfg)
+    try:
+        when = datetime.strptime(day, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return "bad"
+    if when > datetime.strptime(today, "%Y-%m-%d").date() or \
+            (datetime.strptime(today, "%Y-%m-%d").date() - when).days > 7:
+        return "bad"
+    vals = {}
+    for key, _l, _h in RATING_ASPECTS:
+        v = scores.get(key)
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            return "bad"
+        if not 1 <= v <= 5:
+            return "bad"
+        vals[key] = v
+    if has_rated(db, student["id"], day):
+        return "already"
+    db.execute("INSERT INTO rating_tickets (student_id, day) VALUES (?,?)",
+               (student["id"], day))
+    db.execute(
+        "INSERT INTO lesson_ratings (group_id, day, week, atmosphere, clarity, learning,"
+        " pace, involvement, feedback, keep, change) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (student["group_id"], day, week_key(day), vals["atmosphere"], vals["clarity"],
+         vals["learning"], vals["pace"], vals["involvement"], vals["feedback"],
+         (keep or "").strip()[:300] or None, (change or "").strip()[:300] or None))
+    db.commit()
+    return "done"
+
+
+def lesson_ratings(db, group_id=None, weeks=4):
+    """What the students said, for the teacher - only where enough of them
+    said it. A class-week with fewer than MIN_RATERS ratings is left out of
+    everything, comments included, so a lone voice cannot be picked out."""
+    cfg = load_config()
+    since = week_key((now() - timedelta(days=7 * weeks)).strftime("%Y-%m-%d")) if weeks else ""
+    rows = db.execute(
+        "SELECT r.*, g.name gname FROM lesson_ratings r JOIN groups g ON g.id=r.group_id"
+        " WHERE (? = '' OR r.week >= ?)" + (" AND r.group_id=?" if group_id else "")
+        + " ORDER BY r.week, r.day, r.id",
+        (since, since) + ((group_id,) if group_id else ())).fetchall()
+    by_cw = {}
+    for r in rows:
+        by_cw.setdefault((r["group_id"], r["week"]), []).append(r)
+    shown = [r for (g, w), rs in by_cw.items() if len(rs) >= MIN_RATERS for r in rs]
+    hidden = sum(len(rs) for rs in by_cw.values() if len(rs) < MIN_RATERS)
+
+    def avg(rs, key):
+        xs = [r[key] for r in rs if r[key] is not None]
+        return round(sum(xs) / len(xs), 2) if xs else None
+    aspects = [{"key": k, "label": l, "hint": h, "avg": avg(shown, k)}
+               for k, l, h in RATING_ASPECTS]
+    overall = avg(shown, "atmosphere") and round(sum(
+        a["avg"] for a in aspects if a["avg"] is not None) / max(1, sum(
+            1 for a in aspects if a["avg"] is not None)), 2)
+    by_week = []
+    for w in sorted({r["week"] for r in shown}):
+        rs = [r for r in shown if r["week"] == w]
+        vals = [avg(rs, k) for k, _l, _h in RATING_ASPECTS]
+        vals = [v for v in vals if v is not None]
+        by_week.append({"week": w, "n": len(rs),
+                        "overall": round(sum(vals) / len(vals), 2) if vals else None,
+                        "lessons": len({r["day"] for r in rs}),
+                        "classes": sorted({r["gname"] for r in rs})})
+    # comments in a fixed shuffle per class-week, so their order says nothing
+    comments = []
+    for (g, w), rs in sorted(by_cw.items(), key=lambda kw: kw[0][1]):
+        if len(rs) < MIN_RATERS:
+            continue
+        rnd = random.Random(hash((g, w)) & 0xffff)
+        pool = list(rs)
+        rnd.shuffle(pool)
+        for r in pool:
+            if r["keep"] or r["change"]:
+                comments.append({"week": w, "gname": r["gname"], "keep": r["keep"],
+                                 "change": r["change"]})
+    return {"n": len(shown), "hidden": hidden, "aspects": aspects, "overall": overall,
+            "by_week": by_week, "comments": comments,
+            "lessons": len({(r["group_id"], r["day"]) for r in shown})}
+
+
 def feedback_rows(db, student_id, limit=40):
     """Everything the teacher has said about this student's work, newest
     first: the mark, the tags, the note, the recording."""
@@ -5679,7 +5812,7 @@ def remove_student(db, student_id):
                " (SELECT id FROM solo_runs WHERE student_id=?)", (student_id,))
     for table in ("submissions", "word_progress", "quiz_sessions", "questions",
                   "parents", "lesson_marks", "goals", "game_players", "dattempts",
-                  "solo_runs", "students"):
+                  "solo_runs", "rating_tickets", "students"):
         db.execute(f"DELETE FROM {table} WHERE student_id=?"
                    if table != "students" else "DELETE FROM students WHERE id=?",
                    (student_id,))

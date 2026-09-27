@@ -72,7 +72,8 @@ SECTIONS = [
     ("Materials", "/materials", [("/materials", "Materials"), ("/vocab", "Vocabulary"),
                                  ("/tests", "Tests"), ("/play", "Play"),
                                  ("/music", "Music")]),
-    ("Insights", "/insights", [("/insights", "Insights"), ("/kpi", "KPI")]),
+    ("Insights", "/insights", [("/insights", "Insights"), ("/lessons", "Lessons"),
+                               ("/kpi", "KPI")]),
 ]
 SECTION_OF = {label: name for name, _home, pages in SECTIONS for _href, label in pages}
 
@@ -2266,7 +2267,7 @@ PORTAL = [
                         ("tests", "Tests")]),
     ("play", "Play", [("play", "Play"), ("battle", "Battle")]),
     ("progress", "Progress", [("progress", "Scores"), ("class", "Class"),
-                              ("goal", "My goal")]),
+                              ("goal", "My goal"), ("rate", "Rate")]),
     ("profile", "Me", [("profile", "Profile")]),
 ]
 
@@ -2382,6 +2383,18 @@ def portal_home(db, s, token, flash):
                  f'<div class="todo-head">New feedback from your teacher</div>'
                  f'<div class="sub gap-1">{unseen} piece{"" if unseen == 1 else "s"} of '
                  f'homework marked &mdash; see what they said &rarr;</div></a>')
+    # a lesson happened today (the teacher marked the room) and this student
+    # has not said how it was: ask, once
+    cfg = core.load_config()
+    today = core.local_day(core.now(), cfg)
+    had_lesson = db.execute(
+        "SELECT 1 FROM lesson_marks m JOIN students st ON st.id=m.student_id"
+        " WHERE st.group_id=? AND m.day=? LIMIT 1", (s["group_id"], today)).fetchone()
+    if had_lesson and not core.has_rated(db, s["id"], today):
+        nudge += (f'<a class="todo fbnudge" href="/s/{E(token)}?tab=rate">'
+                  f'<div class="todo-head">How was today\'s lesson?</div>'
+                  f'<div class="sub gap-1">Six stars and thirty seconds. Anonymous '
+                  f'&mdash; your teacher never sees who said what &rarr;</div></a>')
     return f"""{flash}{nudge}
 <h2>Send your homework</h2>
 <div class="card">
@@ -2402,6 +2415,89 @@ def portal_home(db, s, token, flash):
 {drafts}
 <h2>What is left</h2>
 {lists}"""
+
+
+def stars(name):
+    """Five stars for one aspect. Reversed in the markup so a plain CSS
+    sibling rule can light the ones to the left of the chosen star."""
+    out = ""
+    for v in (5, 4, 3, 2, 1):
+        out += (f'<input type="radio" name="{name}" id="{name}{v}" value="{v}" required>'
+                f'<label for="{name}{v}" title="{v} of 5">&#9733;</label>')
+    return f'<span class="stars">{out}</span>'
+
+
+def portal_rate(db, s, token, query):
+    """Rate the lesson, anonymously. The form never carries the student's
+    name and the rating row never gets it; the page says so, because the
+    promise is the point."""
+    cfg = core.load_config()
+    today = datetime.strptime(core.local_day(core.now(), cfg), "%Y-%m-%d").date()
+    flash = ""
+    got = (query.get("rated", [""])[0] or "")
+    if got == "done":
+        flash = ('<div class="card good"><p class="flush"><strong>Thank you.</strong> '
+                 'Your rating is in, and nobody - not even your teacher - can see it '
+                 'was yours.</p></div>')
+    elif got == "already":
+        flash = ('<div class="card"><p class="flush">You have already rated that '
+                 'lesson. Thank you!</p></div>')
+    elif got == "bad":
+        flash = ('<div class="card"><p class="flush">Please give every line a star, '
+                 'and pick a lesson from the last week.</p></div>')
+    days = ""
+    for back in range(0, 7):
+        d = today - timedelta(days=back)
+        key = d.isoformat()
+        label = ("Today" if back == 0 else "Yesterday" if back == 1
+                 else d.strftime("%A %-d %b"))
+        done = core.has_rated(db, s["id"], key)
+        days += (f'<option value="{key}"{" disabled" if done else ""}>'
+                 f'{label}{" - rated" if done else ""}</option>')
+    rows = "".join(
+        f'<div class="rate-row"><div><div class="what">{E(label)}</div>'
+        f'<div class="sub">{E(hint)}</div></div>{stars(key)}</div>'
+        for key, label, hint in core.RATING_ASPECTS)
+    summary = ""
+    agg = core.lesson_ratings(db, s["group_id"], weeks=4)
+    if agg["n"]:
+        bars = "".join(
+            f'<div class="aspect{" watch" if a["avg"] < 4 else ""}{" risk" if a["avg"] < 3 else ""}">'
+            f'<div class="what">{E(a["label"])}</div>'
+            f'<div class="track"><div class="fill" style="width:{a["avg"] / 5 * 100:.0f}%"></div></div>'
+            f'<div class="n">{a["avg"]:.1f}</div></div>'
+            for a in agg["aspects"] if a["avg"] is not None)
+        summary = (f'<h2>How your class rated the last few weeks</h2><div class="card">'
+                   f'<div class="aspects">{bars}</div><p class="sub gap-3 flush">'
+                   f'{agg["n"]} ratings from your class in the last 4 weeks.</p></div>')
+    return f"""<h2>Rate the lesson</h2>
+{flash}
+<div class="anon"><span class="lock">&#128274;</span><div><strong>Anonymous.</strong>
+Your name is not saved with your answers, and your teacher only sees a class's
+ratings once at least {core.MIN_RATERS} classmates have rated that week - never who
+wrote what. Say what you really think; that is what makes lessons better.</div></div>
+<div class="card gap-3"><form method="post" action="/s/{E(token)}/rate">
+<label class="f">Which lesson?<select name="day">{days}</select></label>
+<p class="sub gap-3">Five stars is "yes, completely"; one star is "not at all".</p>
+{rows}
+<label class="f gap-3">What was good? Keep doing it. (optional)
+<textarea name="keep" rows="2" maxlength="300" placeholder="e.g. the group work, the examples on the board"></textarea></label>
+<label class="f gap-2">What would you change? (optional)
+<textarea name="change" rows="2" maxlength="300" placeholder="e.g. more time to speak, slower on the grammar"></textarea></label>
+<div class="gap-3"><button>Send anonymously</button></div>
+</form></div>
+{summary}"""
+
+
+def act_rate_lesson(req, db, token):
+    s = core.student_by_token(db, token)
+    if not s:
+        return redirect(f"/s/{token}")
+    f = req["form"]
+    scores = {k: (f.get(k, [""])[0] or "") for k, _l, _h in core.RATING_ASPECTS}
+    out = core.rate_lesson(db, s, (f.get("day", [""])[0] or "").strip(), scores,
+                           keep=f.get("keep", [""])[0], change=f.get("change", [""])[0])
+    return redirect(f"/s/{token}?tab=rate&rated={out}")
 
 
 def portal_feedback(db, s, token):
@@ -4506,6 +4602,8 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_handouts(db, s, token, query)
     elif tab == "feedback":
         body = portal_feedback(db, s, token)
+    elif tab == "rate":
+        body = portal_rate(db, s, token, query)
     elif tab == "class":
         sc = (query.get("scope", ["class"])[0] or "class")
         body = portal_class(db, s, token, "school" if sc == "school" else "class")
@@ -5439,6 +5537,93 @@ def driver_rows(drivers):
                 f'<div class="axis">{bar}</div>'
                 f'<span class="verdict sub">{E(word)}</span></div>')
     return f'<div class="drivers">{out}</div>'
+
+
+def view_lessons(req, db):
+    """What the students said about the lessons, in aggregate only.
+
+    The page is the teacher's mirror: six aspects as bars, the weeks as a
+    table, and the comments - but nothing from a class-week with fewer than
+    MIN_RATERS ratings, so an honest student can stay an anonymous one."""
+    q = req["query"]
+    gid = (q.get("group", [""])[0] or "").strip()
+    gid = int(gid) if gid.isdigit() else None
+    weeks = (q.get("weeks", ["4"])[0] or "4")
+    weeks = int(weeks) if weeks in ("4", "12", "0") else 4
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    agg = core.lesson_ratings(db, gid, weeks)
+
+    def tab(href, label, on):
+        return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
+    def url(g=gid, w=weeks):
+        return "/lessons?" + urllib.parse.urlencode(
+            {k: v for k, v in (("group", g or ""), ("weeks", w)) if v != ""})
+    classes = ('<div class="tabs">' + tab(url(g=None), "All classes", gid is None)
+               + "".join(tab(url(g=g["id"]), g["name"], gid == g["id"]) for g in groups)
+               + "</div>")
+    spans = ('<div class="tabs">' + tab(url(w=4), "Last 4 weeks", weeks == 4)
+             + tab(url(w=12), "Last 12 weeks", weeks == 12)
+             + tab(url(w=0), "Everything", weeks == 0) + "</div>")
+
+    if not agg["n"]:
+        note = ("Nothing to show yet. " + (
+            f"{agg['hidden']} rating{'' if agg['hidden'] == 1 else 's'} are waiting for "
+            f"classmates: a class's week appears once {core.MIN_RATERS} of them have rated it."
+            if agg["hidden"] else
+            "Students rate a lesson from their page: Progress &rarr; Rate. Once "
+            f"{core.MIN_RATERS} classmates have rated a week, it appears here."))
+        body = f"""<h1>Lessons</h1>
+<p class="sub">How the lessons feel from the other side of the desk, in the students'
+own words. Anonymous, and shown only in numbers big enough to stay so.</p>
+<div class="toolbar">{classes}{spans}</div>
+<div class="card"><p class="flush">{note}</p></div>"""
+        return html_response(page("Lessons", body, "Lessons"))
+
+    ranked = sorted([a for a in agg["aspects"] if a["avg"] is not None],
+                    key=lambda a: -a["avg"])
+    best, worst = ranked[0], ranked[-1]
+    verdict = (f'<p class="sub">Strongest: <strong>{E(best["label"])}</strong> '
+               f'({best["avg"]:.1f} of 5). To work on: <strong>{E(worst["label"])}</strong> '
+               f'({worst["avg"]:.1f} of 5).</p>' if len(ranked) > 1 else "")
+    bars = "".join(
+        f'<div class="aspect{" watch" if a["avg"] < 4 else ""}{" risk" if a["avg"] < 3 else ""}">'
+        f'<div class="what">{E(a["label"])}<div class="sub">{E(a["hint"])}</div></div>'
+        f'<div class="track"><div class="fill" style="width:{a["avg"] / 5 * 100:.0f}%"></div></div>'
+        f'<div class="n">{a["avg"]:.1f}</div></div>' for a in agg["aspects"] if a["avg"] is not None)
+    tiles = ('<div class="grid">'
+             + stat("Ratings", agg["n"], "from students, anonymous")
+             + stat("Lessons rated", agg["lessons"], "class-days with a rating")
+             + stat("Overall", f'{agg["overall"]:.1f}' if agg["overall"] else "—", "out of 5")
+             + "</div>")
+    wk = "".join(
+        f'<tr><td>{E(w["week"])}</td><td class="sub">{", ".join(E(c) for c in w["classes"])}</td>'
+        f'<td>{w["lessons"]}</td><td>{w["n"]}</td>'
+        f'<td><span class="pill {band_class(w["overall"], 3, 4)}">{w["overall"]:.1f}</span></td></tr>'
+        for w in reversed(agg["by_week"]))
+    keep = "".join(f'<li>{E(c["keep"])}<div class="sub">{E(c["gname"])} &middot; {E(c["week"])}</div></li>'
+                   for c in agg["comments"] if c["keep"])
+    change = "".join(f'<li>{E(c["change"])}<div class="sub">{E(c["gname"])} &middot; {E(c["week"])}</div></li>'
+                     for c in agg["comments"] if c["change"])
+    hidden = (f'<p class="sub gap-3">{agg["hidden"]} more rating{"" if agg["hidden"] == 1 else "s"} '
+              f'are not shown: their class-week has fewer than {core.MIN_RATERS} raters.</p>'
+              if agg["hidden"] else "")
+    body = f"""<h1>Lessons</h1>
+<p class="sub">How the lessons feel from the other side of the desk. Anonymous, and shown
+only in numbers big enough to stay so: a class's week appears once {core.MIN_RATERS}
+students have rated it.</p>
+<div class="toolbar">{classes}{spans}</div>
+{tiles}
+<h2>By aspect</h2>
+<div class="card">{verdict}<div class="aspects">{bars}</div></div>
+<h2>By week</h2>
+<div class="tablewrap"><table><tr><th>Week</th><th>Classes</th><th>Lessons</th>
+<th>Ratings</th><th>Overall</th></tr>{wk}</table></div>
+<h2>What they said</h2>
+<div class="said">
+<div class="card"><h3>Keep doing</h3><ul>{keep or '<li class="sub">Nothing written yet.</li>'}</ul></div>
+<div class="card"><h3>Change</h3><ul>{change or '<li class="sub">Nothing written yet.</li>'}</ul></div>
+</div>{hidden}"""
+    return html_response(page("Lessons", body, "Lessons"))
 
 
 def view_insights(req, db):
@@ -8765,6 +8950,7 @@ ROUTES = [
     ("POST", r"^/play/(\d+)/next$", act_game_next),
     ("GET",  r"^/homework/set$", view_homework_set),
     ("GET",  r"^/insights$", view_insights),
+    ("GET",  r"^/lessons$", view_lessons),
     ("POST", r"^/assignments/list$", act_new_list),
     ("POST", r"^/assignments/batch/close$", act_batch_close),
     ("POST", r"^/assignments/close-past$", act_close_past),
@@ -9277,6 +9463,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*act_student_goal(
                     {"query": {}, "form": {}, "files": (fields, files)},
                     db, path.split("/")[2]))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/rate$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_rate_lesson({"query": {}, "form": form}, db,
+                                                   m.group(1)))
             finally:
                 db.close()
 

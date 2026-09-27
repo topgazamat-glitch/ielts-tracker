@@ -54,6 +54,9 @@ db.execute("INSERT INTO parents (student_id, token, created_at) VALUES (?,?,?)",
 db.execute("INSERT INTO lesson_marks (student_id, day, punctuality, behaviour,"
            " participation, created_at) VALUES (?,?,4,4,4,?)",
            (sid, core.local_day(core.now(), cfg), core.iso(core.now())))
+# they rated a lesson: the ticket points at them, the rating itself never does
+db.execute("INSERT INTO rating_tickets (student_id, day) VALUES (?,?)",
+           (sid, core.local_day(core.now(), cfg)))
 db.execute("INSERT INTO goals (student_id, listening, updated_at) VALUES (?,6.5,?)",
            (sid, core.iso(core.now())))
 db.execute("INSERT INTO bot_state (telegram_id, step) VALUES (999,'x')")
