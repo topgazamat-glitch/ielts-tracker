@@ -2224,8 +2224,9 @@ def student_page(title, body, music=True):
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
 <link rel="stylesheet" href="/static/style.css"></head>
-<body><header class="top"><span class="brand"><span class="mark">O</span>OlimovAzamat</span>
-{bar}</header>
+<body><header class="top"><div class="bar">
+<span class="brand"><span class="mark">O</span>OlimovAzamat</span>
+{bar}</div></header>
 <main class="portal">{body}</main>
 {tune}{player}
 <script src="/static/nav.js" defer></script>
@@ -2234,17 +2235,46 @@ def student_page(title, body, music=True):
 <script src="/static/shrink.js" defer></script></body></html>"""
 
 
+# The student's page in five sections, the way an app on their phone would
+# be: a bar of icons along the bottom, and inside a section a small strip of
+# its pages. Ten tabs in three rows was a menu; this is a place.
+ICONS = {
+    "home": '<svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/>'
+            '<path d="M10 20v-6h4v6"/></svg>',
+    "learn": '<svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/>'
+             '<path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20"/><path d="M8 7h8M8 10.5h6"/></svg>',
+    "play": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/></svg>',
+    "progress": '<svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>',
+    "profile": '<svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/>'
+               '<path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+}
+PORTAL = [
+    ("home", "Homework", [("home", "Send"), ("write", "Writing")]),
+    ("learn", "Learn", [("materials", "Materials"), ("handouts", "Handouts"),
+                        ("tests", "Tests")]),
+    ("play", "Play", [("play", "Play"), ("battle", "Battle")]),
+    ("progress", "Progress", [("progress", "Scores"), ("class", "Class"),
+                              ("goal", "My goal")]),
+    ("profile", "Me", [("profile", "Profile")]),
+]
+
+
 def student_shell(s, db, token, tab, body):
-    """One page, four tabs, everything the bot can do."""
+    """One page, five sections, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
-    tabs = [("home", "Homework"), ("write", "Writing"),
-            ("materials", "Materials"), ("handouts", "Handouts"),
-            ("tests", "Tests"), ("play", "Play"),
-            ("progress", "Progress"), ("class", "Class"), ("goal", "My goal"),
-            ("profile", "Profile")]
+    section = next((key for key, _l, pages in PORTAL
+                    if any(p == tab for p, _ in pages)), "home")
+    base = f"/s/{E(token)}?tab="
     nav = "".join(
-        f'<a class="tab{" on" if tab == key else ""}" '
-        f'href="/s/{E(token)}?tab={key}">{label}</a>' for key, label in tabs)
+        f'<a class="{"on" if key == section else ""}" href="{base}{pages[0][0]}">'
+        f'{ICONS[key]}<span>{label}</span></a>'
+        for key, label, pages in PORTAL)
+    pages = next(pages for key, _l, pages in PORTAL if key == section)
+    sub = ""
+    if len(pages) > 1:
+        sub = ('<div class="tabs stretch psub">'
+               + "".join(f'<a class="tab{" on" if p == tab else ""}" href="{base}{p}">'
+                         f'{label}</a>' for p, label in pages) + "</div>")
     head = f"""<div class="whoami">
   <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
   <div>
@@ -2253,7 +2283,8 @@ def student_shell(s, db, token, tab, body):
       {"· " + E(level) if level else ""}</div>
   </div>
 </div>
-<div class="tabs stretch">{nav}</div>"""
+<nav class="pnav" aria-label="Sections">{nav}</nav>
+{sub}"""
     return html_response(student_page(s["name"], head + body))
 
 
