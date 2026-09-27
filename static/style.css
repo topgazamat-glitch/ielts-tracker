@@ -476,6 +476,7 @@ button.ghost:hover { background: var(--surface-2); filter: none; }
   gap: var(--sp-4); margin-bottom: var(--sp-4); align-items: start; }
 .qtop .card { margin: 0; }
 .qtop h3 { font-size: 14px; }
+.qtop.wide { grid-template-columns: 1fr; }
 @media (max-width: 900px) { .qtop { grid-template-columns: 1fr; } }
 
 .tablewrap.flat { border: 0; box-shadow: none; background: none; border-radius: 0; }

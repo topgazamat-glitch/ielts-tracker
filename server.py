@@ -671,8 +671,10 @@ def queue_map(db, rows, gid, due):
              + stat("This week", marked_week, "marked in 7 days")
              + "</div>")
     corner_on = "on" if gid is None and due is None else ""
+    # a term's worth of deadlines needs the whole width; the chart goes under
+    wide = " wide" if len(days) > 7 else ""
     return (
-        '<div class="qtop">'
+        f'<div class="qtop{wide}">'
         '<div class="card qmapcard"><h3 class="flush">What is waiting, by class and deadline</h3>'
         '<p class="sub gap-1">Press a cell to mark just that set; a class or a day for all of it.</p>'
         '<div class="tablewrap flat"><table class="qmap"><tr><th class="corner">'
