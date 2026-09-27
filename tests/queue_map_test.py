@@ -62,25 +62,34 @@ cfg = core.load_config()
 mon_day = core.deadline_parts(mon, cfg)[0]
 wed_day = core.deadline_parts(wed, cfg)[0]
 
-print("1. THE MAP: CLASSES AGAINST DEADLINES")
+print("1. WHAT TO MARK: CLASSES, THEN LESSONS")
 _, q = get("/queue")
-print("   a map is drawn:", 'class="qmap"' in q)
-assert 'class="qmap"' in q
-cells = re.findall(r'<td class="cell h\d[^"]*"><a href="([^"]+)"[^>]*>(\d+)</a>', q)
-print("   cells:", [(urllib.parse.unquote(h), n) for h, n in cells])
-want = {("/queue?group=%d&due=%s" % (g1, mon_day), "3"),
-        ("/queue?group=%d&due=%s" % (g1, wed_day), "1"),
-        ("/queue?group=%d&due=%s" % (g2, wed_day), "2"),
-        ("/queue?group=%d&due=none" % g2, "1")}
-assert {(urllib.parse.unquote(h), n) for h, n in cells} == want, cells
-print("   the fullest cell is darkest:", 'class="cell h4"' in q and 'class="cell h2"' in q)
-assert 'class="cell h4"' in q
-print("   totals: 7 waiting:", "<td class=\"corner\">7</td>" in q)
-assert '<td class="corner">7</td>' in q
-print("   the flow chart and its legend:", 'class="bar ok"' in q and "arrived</span>" in q)
-assert 'class="bar ok"' in q
+print("   the picker is there:", 'class="card picker"' in q)
+assert 'class="card picker"' in q
+tabs = re.findall(r'<a class="tab[^"]*" href="([^"]+)">([^<]+)<span class="n">(\d+)</span>', q)
+print("   class tabs with counts:", [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs])
+assert ("/queue", "All classes", "7") in [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs]
+assert ("/queue?group=%d" % g1, "114", "4") in [(urllib.parse.unquote(h), l.strip(), n) for h, l, n in tabs]
+rows = re.findall(r'<div class="pickrow[^"]*"><div class="pick-who"><a href="([^"]+)">([^<]+)</a>.*?<div class="n">(\d+)</div>', q, re.S)
+print("   one row per class:", [(l, n) for _h, l, n in rows])
+assert [(l, n) for _h, l, n in rows] == [("114", "4"), ("216", "3")]
+print("   the fullest bar is the longest:", 'style="width:100%"' in q and 'style="width:75%"' in q)
+assert 'style="width:100%"' in q
+print("   tiles: waiting 7:", "Waiting to be marked" in q and '<div class="v">7</div>' in q)
+assert '<div class="v">7</div>' in q
 print("   unfiltered, the oldest piece comes first:", 'value="%d"' % s1 in q)
 assert 'value="%d"' % s1 in q
+
+_, q = get("/queue?group=%d" % g1)
+rows = re.findall(r'<div class="pickrow[^"]*"><div class="pick-who"><a href="([^"]+)">([^<]+)</a>.*?<div class="n">(\d+)</div>', q, re.S)
+print("   inside 114, one row per lesson, oldest first:", [(l, n) for _h, l, n in rows])
+assert [n for _h, _l, n in rows] == ["3", "1"] and rows[0][1].startswith("Due ")
+assert urllib.parse.unquote(rows[0][0]) == "/queue?group=%d&due=%s" % (g1, mon_day)
+print("   each row offers to mark that set:", q.count("Mark these") == 2)
+assert q.count("Mark these") == 2
+_, q = get("/queue?group=%d&due=%s" % (g1, mon_day))
+print("   the chosen lesson is marked as such:", 'class="pickrow on"' in q and "Marking now" in q)
+assert 'class="pickrow on"' in q and "Marking now" in q
 
 print("\n2. PICK A SET, MARK ONLY THAT")
 url = "/queue?group=%d&due=%s" % (g2, wed_day)
@@ -103,8 +112,8 @@ assert where == url
 where, q = post("/grade", {"submission_id": s6, "score": "7", "group": g2, "due": wed_day})
 print("   set finished:", "This set is done" in q and "5 other pieces" in q)
 assert "This set is done" in q and "5 other pieces" in q
-print("   and the map is still there to pick the next:", 'class="qmap"' in q)
-assert 'class="qmap"' in q
+print("   and the picker is still there to choose the next:", 'class="card picker"' in q)
+assert 'class="card picker"' in q
 
 print("\n3. A WHOLE CLASS, OR A WHOLE DAY")
 _, q = get("/queue?group=%d" % g1)

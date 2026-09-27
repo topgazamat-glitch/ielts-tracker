@@ -609,50 +609,15 @@ def day_words(day, cfg):
     return when.strftime("%a %-d %b"), rel
 
 
-def queue_map(db, rows, gid, due):
-    """What is waiting, laid out by class and by deadline, so the teacher picks
-    a set rather than taking the pile in the order it arrived.
-
-    A cell is one class's work for one lesson: press it and the queue is only
-    that. The row and column totals do the same for a whole class or a whole
-    day. The shade of a cell is how much is in it, against the fullest cell."""
+def queue_picker(db, rows, gid, due):
+    """What is waiting, as something to choose from rather than a chart to
+    read. Four figures, then the classes as bars; press a class and its
+    deadlines appear as bars; press a deadline and that is the set being
+    marked. Every row is a label, one number and a button."""
     cfg = core.load_config()
     if not rows:
         return ""
     groups = {g["id"]: g["name"] for g in db.execute("SELECT id, name FROM groups")}
-    days = sorted({r["due"] for r in rows}, key=lambda d: (d == "none", d))
-    classes = sorted({r["group_id"] for r in rows}, key=lambda g: groups.get(g, ""))
-    counts, row_tot, col_tot = {}, {}, {}
-    for r in rows:
-        k = (r["group_id"], r["due"])
-        counts[k] = counts.get(k, 0) + 1
-        row_tot[r["group_id"]] = row_tot.get(r["group_id"], 0) + 1
-        col_tot[r["due"]] = col_tot.get(r["due"], 0) + 1
-    top = max(counts.values())
-
-    head = "".join(
-        f'<th><a href="{queue_url(None, d)}" class="{"on" if due == d and gid is None else ""}">'
-        f'<span class="d">{E(day_words(d, cfg)[0])}</span>'
-        f'<span class="rel">{E(day_words(d, cfg)[1])}</span></a></th>' for d in days)
-    body = ""
-    for g in classes:
-        cells = ""
-        for d in days:
-            n = counts.get((g, d), 0)
-            if not n:
-                cells += '<td class="cell empty"></td>'
-                continue
-            level = max(1, min(4, -(-4 * n // top)))
-            on = " on" if (gid == g and due == d) else ""
-            titles = sorted({r["title"] or "no homework" for r in rows
-                             if r["group_id"] == g and r["due"] == d})
-            cells += (f'<td class="cell h{level}{on}"><a href="{queue_url(g, d)}" '
-                      f'title="{E("; ".join(titles))}">{n}</a></td>')
-        on = " on" if (gid == g and due is None) else ""
-        body += (f'<tr><th class="klass{on}"><a href="{queue_url(g)}">{E(groups.get(g, "?"))}'
-                 f'<span class="n">{row_tot[g]}</span></a></th>{cells}</tr>')
-    foot = "".join(f'<td class="tot">{col_tot[d]}</td>' for d in days)
-
     oldest = min(r["created_at"] for r in rows)
     waited = (core.now() - core.parse(oldest)).days
     marked_today = db.execute(
@@ -661,82 +626,72 @@ def queue_map(db, rows, gid, due):
     marked_week = db.execute(
         "SELECT COUNT(*) c FROM submissions WHERE status='graded' AND graded_at IS NOT NULL"
         " AND graded_at >= ?", (core.iso(core.now() - timedelta(days=7)),)).fetchone()["c"]
-    tiles = ('<div class="qtiles">'
-             + stat("Waiting", len(rows), "%d class%s, %d deadline%s"
-                    % (len(classes), "" if len(classes) == 1 else "es",
-                       len(days), "" if len(days) == 1 else "s"), busy=len(rows) >= 20)
-             + stat("Oldest", "%dd" % waited if waited else "today",
-                    "in the queue" if waited else "all arrived today")
-             + stat("Marked", marked_today, "in the last 24 hours")
-             + stat("This week", marked_week, "marked in 7 days")
+    tiles = ('<div class="grid qtiles">'
+             + stat("Waiting to be marked", len(rows), "pieces of homework",
+                    busy=len(rows) >= 20)
+             + stat("Longest wait", "%d day%s" % (waited, "" if waited == 1 else "s")
+                    if waited else "today", "the oldest piece arrived")
+             + stat("Marked today", marked_today, "in the last 24 hours")
+             + stat("Marked this week", marked_week, "in the last 7 days")
              + "</div>")
-    corner_on = "on" if gid is None and due is None else ""
-    # a term's worth of deadlines needs the whole width; the chart goes under
-    wide = " wide" if len(days) > 7 else ""
-    return (
-        f'<div class="qtop{wide}">'
-        '<div class="card qmapcard"><h3 class="flush">What is waiting, by class and deadline</h3>'
-        '<p class="sub gap-1">Press a cell to mark just that set; a class or a day for all of it.</p>'
-        '<div class="tablewrap flat"><table class="qmap"><tr><th class="corner">'
-        f'<a href="/queue" class="{corner_on}">All</a></th>{head}</tr>'
-        f'{body}<tr class="totals"><td class="corner">{len(rows)}</td>{foot}</tr></table></div></div>'
-        '<div class="card qflow"><h3 class="flush">Arrived and marked, last two weeks</h3>'
-        f'{tiles}{flow_chart(db)}</div>'
-        '</div>')
 
+    by_class = {}
+    for r in rows:
+        by_class.setdefault(r["group_id"], []).append(r)
+    classes = sorted(by_class, key=lambda g: groups.get(g, ""))
 
-def flow_chart(db, days=14, width=560, height=170):
-    """Two bars a day: what came in, what was marked. The backlog is the
-    difference, and the eye reads it without a third series."""
-    cfg = core.load_config()
-    today = datetime.strptime(core.local_day(core.now(), cfg), "%Y-%m-%d").date()
-    span = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
-    since = core.iso(core.now() - timedelta(days=days + 1))
-    arrived = {d: 0 for d in span}
-    marked = {d: 0 for d in span}
-    for r in db.execute("SELECT created_at, graded_at, status FROM submissions"
-                        " WHERE draft=0 AND (created_at >= ? OR graded_at >= ?)",
-                        (since, since)).fetchall():
-        c = core.parse(r["created_at"])
-        if c:
-            d = core.local_day(c, cfg)
-            if d in arrived:
-                arrived[d] += 1
-        if r["status"] == "graded" and r["graded_at"]:
-            g = core.parse(r["graded_at"])
-            if g:
-                d = core.local_day(g, cfg)
-                if d in marked:
-                    marked[d] += 1
-    top = max([1] + list(arrived.values()) + list(marked.values()))
-    top = max(3, -(-top // 3) * 3)          # a multiple of three: whole-number ticks
-    pad_l, pad_b, pad_t, pad_r = 30, 26, 10, 8
-    w, h = width - pad_l - pad_r, height - pad_t - pad_b
-    slot = w / days
-    bw = slot * 0.36
-    out = ""
-    for i in range(4):
-        y = pad_t + h * i / 3.0
-        val = top - top * i / 3.0
-        out += (f'<line x1="{pad_l}" y1="{y:.1f}" x2="{pad_l + w}" y2="{y:.1f}" '
-                f'class="gridline"/><text x="{pad_l - 6}" y="{y + 4:.1f}" '
-                f'class="axis" text-anchor="end">{val:.0f}</text>')
-    for i, d in enumerate(span):
-        x = pad_l + i * slot + slot * 0.14
-        a, m = arrived[d], marked[d]
-        ha, hm = h * a / top, h * m / top
-        label = datetime.strptime(d, "%Y-%m-%d").strftime("%-d %b")
-        out += (f'<rect x="{x:.1f}" y="{pad_t + h - ha:.1f}" width="{bw:.1f}" '
-                f'height="{ha:.1f}" class="bar"><title>{label}: {a} arrived</title></rect>'
-                f'<rect x="{x + bw:.1f}" y="{pad_t + h - hm:.1f}" width="{bw:.1f}" '
-                f'height="{hm:.1f}" class="bar ok"><title>{label}: {m} marked</title></rect>')
-        if i % 2 == days % 2:
-            out += (f'<text x="{x + bw:.1f}" y="{height - 8}" class="axis" '
-                    f'text-anchor="middle">{label}</text>')
-    legend = ('<div class="legend"><span><i class="sw a"></i>arrived</span>'
-              '<span><i class="sw ok"></i>marked</span></div>')
-    return (f'{legend}<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
-            f'aria-label="work arrived and marked per day">{out}</svg>')
+    def tab(href, label, n, on):
+        return (f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}'
+                f'<span class="n">{n}</span></a>')
+    tabs = ('<div class="tabs">' + tab("/queue", "All classes", len(rows), gid is None)
+            + "".join(tab(queue_url(g), groups.get(g, "?"), len(by_class[g]), gid == g)
+                      for g in classes) + "</div>")
+
+    def bar(label, note, n, top, href, on, button):
+        pct = max(4, int(100 * n / top))
+        return (f'<div class="pickrow{" on" if on else ""}">'
+                f'<div class="pick-who"><a href="{href}">{label}</a>'
+                f'{f"<div class=sub>{note}</div>" if note else ""}</div>'
+                f'<div class="track"><div class="fill" style="width:{pct}%"></div></div>'
+                f'<div class="n">{n}</div>'
+                f'<a class="btn{" ghost" if on else ""}" href="{href}">{button}</a></div>')
+
+    if gid is None or gid not in by_class:
+        top = max(len(v) for v in by_class.values())
+        body = ""
+        for g in classes:
+            mine = by_class[g]
+            days = sorted({r["due"] for r in mine}, key=lambda d: (d == "none", d))
+            first = days[0]
+            when = (("oldest due " + day_words(first, cfg)[0]
+                     + (" · " + day_words(first, cfg)[1] if day_words(first, cfg)[1] else ""))
+                    if first != "none" else "no deadline")
+            body += bar(E(groups.get(g, "?")),
+                        f'{len(days)} deadline{"" if len(days) == 1 else "s"} &middot; {E(when)}',
+                        len(mine), top, queue_url(g), False, "Choose")
+        lead = ("Choose a class, then the lesson. Or mark everything oldest first, "
+                "which is what the page is doing now.")
+    else:
+        mine = by_class[gid]
+        by_day = {}
+        for r in mine:
+            by_day.setdefault(r["due"], []).append(r)
+        days = sorted(by_day, key=lambda d: (d == "none", d))
+        top = max(len(v) for v in by_day.values())
+        body = ""
+        for d in days:
+            label, rel = day_words(d, cfg)
+            titles = sorted({r["title"] or "no homework" for r in by_day[d]})
+            shown = ", ".join(t[:28] for t in titles[:2]) + (
+                " and %d more" % (len(titles) - 2) if len(titles) > 2 else "")
+            body += bar(("Due " + E(label)) if d != "none" else "No deadline",
+                        (E(rel) + " &middot; " if rel else "") + E(shown),
+                        len(by_day[d]), top, queue_url(gid, d), due == d,
+                        "Marking now" if due == d else "Mark these")
+        lead = (f"{E(groups.get(gid, '?'))}'s homework, by the lesson it was for. "
+                "Oldest lesson first. Press one to mark just that set.")
+    return (f'{tiles}<div class="card picker"><h3 class="flush">What to mark</h3>'
+            f'<p class="sub gap-1">{lead}</p>{tabs}<div class="pickrows">{body}</div></div>')
 
 
 def waiting_list(db, current_id, rows, gid=None, due=None):
@@ -835,7 +790,7 @@ def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None):
                        f'{remaining} waiting, oldest first</p>')
     body = f"""{head}
 {hint}
-{"" if regrade else queue_map(db, rows, gid, due)}
+{"" if regrade else queue_picker(db, rows, gid, due)}
 {setline}
 {"" if regrade else undo_strip(db)}
 {"" if regrade else waiting_list(db, sub["id"], inset, gid, due)}
@@ -1013,7 +968,7 @@ def view_queue(req, db):
         else:
             note = '<div class="card"><p class="flush">Queue is empty. Nothing to grade.</p></div>'
         body = f"""<h1>Grading queue</h1>
-{queue_map(db, rows, gid, due)}
+{queue_picker(db, rows, gid, due)}
 {undo_strip(db)}
 {note}"""
         return html_response(page("Grade", body, "Grade"))
@@ -5459,26 +5414,29 @@ see with their own eyes, weeks before a student stops coming.</p></div>
 marked "a real gap" is one too large to be chance for this many students; the
 rest may still be true, but the numbers cannot yet say so.</p></div>
 
-<h2>What moves with the exam</h2>
-<div class="card">{driver_rows(drivers)}
+<details class="card stats"><summary>The statistics behind this &mdash; for the curious</summary>
+<p class="sub gap-2">Everything above is already drawn from these. They are here for
+anyone who wants to see the dots and the numbers themselves.</p>
+
+<h3>What moves with the exam</h3>
+{driver_rows(drivers)}
 {top_chart}
-<p class="sub gap-3 flush">Strongest first. A bar to the right means the two rise
+<p class="sub gap-3">Strongest first. A bar to the right means the two rise
 together; to the left, one rises as the other falls. A faint bar could be chance.
-Whatever is at the top is your earliest warning of the exam result, weeks before it.</p></div>
+Whatever is at the top is your earliest warning of the exam result, weeks before it.</p>
 
-<h2>Homework and the classroom</h2>
-<div class="card">{scatter(hb_pairs, "homework done, %", "in the classroom, /5")}
+<h3>Homework and the classroom</h3>
+{scatter(hb_pairs, "homework done, %", "in the classroom, /5")}
 {finding(hb)}
-<p class="sub gap-2 flush">Whether the ones who do the homework are also the ones
-who are present in the room - or whether those are two different students.</p></div>
+<p class="sub gap-2">Whether the ones who do the homework are also the ones
+who are present in the room - or whether those are two different students.</p>
 
-<h2>Going quiet, then leaving</h2>
-<div class="card">{scatter(quiet_pairs, "days since their last homework",
-                          "left (100) or still here (0)")}
-{finding(qc)}{quiet_line}</div>
-
-<p class="sub gap-3">{len(pts)} students in all. A dot outlined in red is somebody
-who has left. Hover or tap a dot for the name.</p>"""
+<h3>Going quiet, then leaving</h3>
+{scatter(quiet_pairs, "days since their last homework",
+         "left (100) or still here (0)")}
+{finding(qc)}{quiet_line}
+<p class="sub gap-3 flush">{len(pts)} students in all. A dot outlined in red is somebody
+who has left. Hover or tap a dot for the name.</p></details>"""
     return html_response(page("Insights", body, "Insights"))
 
 
