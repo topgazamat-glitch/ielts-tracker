@@ -9464,9 +9464,19 @@ class Handler(BaseHTTPRequestHandler):
                     import traceback
                     traceback.print_exc()
                     core.report_breakage(path, exc)
+                    # the teacher is signed in, so the error itself can be shown:
+                    # a page that only says "look in the log" helps nobody who
+                    # cannot open the log
+                    frames = traceback.extract_tb(exc.__traceback__)
+                    where = ("%s, line %d, in %s" % (os.path.basename(frames[-1].filename),
+                                                     frames[-1].lineno, frames[-1].name)
+                             if frames else "")
+                    detail = E("%s: %s" % (type(exc).__name__, exc))
                     return self._send(*html_response(
                         page("Error", "<h1>Something broke</h1><div class='card'>"
-                             "<p style='margin:0'>The details are in the server log."
+                             f"<p class='flush'><code>{detail}</code></p>"
+                             f"<p class='sub gap-2 flush'>{E(where)}. The full trace is in "
+                             "the server log, and a message has gone to you in Telegram."
                              "</p></div><p><a href='/'>Back to overview</a></p>"), 500))
                 finally:
                     db.close()
