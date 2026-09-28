@@ -51,6 +51,7 @@
   --shadow-2: 0 2px 6px rgba(28,15,34,.06), 0 16px 40px rgba(28,15,34,.10);
 
   --ease: cubic-bezier(.2,.8,.2,1);
+  --pnav-h: 64px;                 /* the student's section bar on a phone */
   color-scheme: light dark;
 
   /* The climb's own world: a night sky over the mountain, with the summit
@@ -843,7 +844,7 @@ form.cleanup .sub { flex: 1 1 320px; }
     padding: var(--sp-1) var(--sp-2) calc(var(--sp-1) + env(safe-area-inset-bottom));
   }
   .pnav a.on { box-shadow: none; background: var(--accent-soft); }
-  main.portal { padding-bottom: calc(var(--sp-7) + 64px + env(safe-area-inset-bottom)); }
+  main.portal { padding-bottom: calc(var(--sp-7) + var(--pnav-h) + env(safe-area-inset-bottom)); }
 }
 
 .rowline { display: flex; align-items: center; justify-content: space-between;
@@ -2026,7 +2027,7 @@ main.portal:has(.booksheet) { max-width: 940px; }
   .booklet p { margin-bottom: 8px; }
 }
 @media (pointer: coarse) {
-  .booklet .bk-blank {
+  .booksheet:not(.handout) .booklet .bk-blank {
     font-size: 16px;
     min-height: 44px;
     width: 100% !important;
@@ -2037,8 +2038,8 @@ main.portal:has(.booksheet) { max-width: 940px; }
     border-radius: 6px;
     padding: 0 10px;
   }
-  .booklet .bk-blank.right { border-color: #2E9E5B; }
-  .booklet .bk-blank.wrong { border-color: #D35; }
+  .booksheet:not(.handout) .booklet .bk-blank.right { border-color: #2E9E5B; }
+  .booksheet:not(.handout) .booklet .bk-blank.wrong { border-color: #D35; }
 }
 
 /* The figures on Overview were four saturated colours assigned by position,
@@ -2194,25 +2195,88 @@ main.portal:has(.booksheet) { max-width: 940px; }
 
 /* ------------------------------------------------- handouts
 
-   The same booklet on a laptop and on a phone. The paper design is kept -
-   he asked for nothing to change - so the work here is making a page laid
-   out for A4 usable on a 390px screen: the two-column exercise tables
-   become one column, the boxes grow to a thumb's width, and the page never
-   scrolls sideways. */
+   The same booklet on a laptop and on a phone. The paper design is kept;
+   what changes is how each box is answered. A gap in a sentence stays in
+   the sentence, sized to what goes in it. A sentence of the student's own
+   is a box that grows as it is written. A choice is a row of chips, a tick
+   is a tick. On a narrow screen the two-column exercises stack in reading
+   order and the indents drawn for A4 give their width back. */
 
 main.portal:has(.booksheet.handout) { max-width: 980px; }
+.booksheet.handout { padding-bottom: var(--sp-7); }
+.booksheet.handout .booklet { line-height: 1.9; }
+.booksheet.handout [id^="ex-"], .booksheet.handout [id^="sec-"] { scroll-margin-top: 80px; }
 
-.booksheet.handout { padding-bottom: 72px; }
-.booksheet.handout .booklet { line-height: 1.55; }
+/* a gap in a sentence: inline, sized by the paper, never wider than the line */
+.booksheet.handout .booklet input.bk-blank {
+  display: inline-block; max-width: 100%; min-width: 4ch; height: 34px;
+  vertical-align: middle; margin: 2px 0; padding: 0 var(--sp-2);
+  font-size: 16px; line-height: 1.2;           /* 16px stops iOS zooming on focus */
+  border: 1px solid #9CC; border-radius: 6px; background: #F2F8F8; color: #0B5456; }
+.booksheet.handout .booklet .bk-blank:focus {
+  outline: 2px solid var(--brand); outline-offset: 1px; background: #fff; }
 
-/* a box is typed into, so it is sized for a finger, not for a pointer */
-.booksheet.handout .bk-blank {
-  min-height: 30px; font-size: 16px;      /* 16px stops iOS zooming on focus */
-  padding: 2px 6px;
-}
-.booksheet.handout .bk-blank:focus {
-  outline: 2px solid var(--brand); outline-offset: 1px;
-}
+/* a sentence of their own: a box that grows as they write */
+.booksheet.handout .booklet textarea.bk-long {
+  display: block; width: 100% !important; min-height: 44px; resize: none;
+  overflow: hidden; margin: var(--sp-1) 0 var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  font: inherit; font-size: 16px; line-height: 1.45; color: #0B5456;
+  border: 1px solid #9CC; border-radius: 8px; background: #F2F8F8; }
+
+/* a choice: chips to tap, the chosen one filled with the booklet's teal */
+.booksheet.handout .bk-chips { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1);
+  vertical-align: middle; margin: 2px 0; padding: 2px; border-radius: 999px; }
+.booksheet.handout .bk-chip { position: relative; display: inline-flex; margin: 0; cursor: pointer; }
+.booksheet.handout .bk-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.booksheet.handout .bk-chip span {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 36px; height: 34px; padding: 0 var(--sp-3); border-radius: 999px;
+  border: 1.5px solid #9CC; background: #fff; color: #0B5456;
+  font-size: 15px; font-weight: 600; line-height: 1; white-space: nowrap;
+  transition: background .12s var(--ease), border-color .12s var(--ease), transform .08s var(--ease); }
+.booksheet.handout .bk-chip:active span { transform: scale(.95); }
+.booksheet.handout .bk-chip input:checked + span {
+  background: #127D80; border-color: #127D80; color: #fff; }
+.booksheet.handout .bk-chip input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
+.booksheet.handout .bk-chips.right { box-shadow: 0 0 0 2px #2E9E5B; }
+.booksheet.handout .bk-chips.right input:checked + span { background: #2E9E5B; border-color: #2E9E5B; }
+.booksheet.handout .bk-chips.wrong { box-shadow: 0 0 0 2px var(--warn); }
+.booksheet.handout .bk-chips.wrong input:checked + span { background: var(--warn); border-color: var(--warn); }
+.booksheet.handout .bk-chips.teacher { box-shadow: 0 0 0 2px #d8ae4a; }
+
+/* a tick: a square to tap */
+.booksheet.handout .bk-tick { display: inline-grid; place-items: center; width: 34px; height: 34px;
+  padding: 0; margin: 2px 0; vertical-align: middle; border-radius: 8px;
+  border: 1.5px solid #9CC; background: #fff; color: transparent;
+  font-size: 18px; font-weight: 700; line-height: 1; filter: none; }
+.booksheet.handout .bk-tick.on { background: #127D80; border-color: #127D80; color: #fff; }
+.booksheet.handout .bk-tick.right { box-shadow: 0 0 0 2px #2E9E5B; }
+.booksheet.handout .bk-tick.wrong { box-shadow: 0 0 0 2px var(--warn); }
+/* a piece of writing: room for a paragraph, and how many words so far */
+.booksheet.handout .booklet textarea.bk-essay { min-height: 9.5em; }
+.booksheet.handout .bk-words { display: block; margin: calc(-1 * var(--sp-1)) 0 var(--sp-2);
+  text-align: right; font-size: 12px; line-height: 1.4; color: #0B5456;
+  font-variant-numeric: tabular-nums; }
+.booksheet.handout .bk-tickfill { margin: 0 0 var(--sp-2); padding: var(--sp-1) var(--sp-3);
+  border-radius: 999px; border: 1px solid #9CC; background: #fff; color: #0B5456;
+  font-size: 13px; font-weight: 600; filter: none; }
+
+.booksheet.handout .bk-blank.right, .booksheet.handout textarea.bk-long.right {
+  background: #e4f8ee; border-color: #2E9E5B; color: #06713f; }
+.booksheet.handout .bk-blank.wrong, .booksheet.handout textarea.bk-long.wrong {
+  background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+/* not wrong - nobody can mark a sentence of your own */
+.booksheet.handout .bk-blank.teacher, .booksheet.handout textarea.bk-long.teacher {
+  background: var(--gold-soft); border-color: #d8ae4a; }
+
+/* the answer is one tap away, not given for free */
+.bk-answer {
+  margin-left: var(--sp-1); padding: 1px var(--sp-2); border-radius: var(--r-full);
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink-2); font-size: 12px; line-height: 1.6; cursor: pointer; }
+.bk-answer:disabled {
+  background: #e4f8ee; border-color: #a8e6c6; color: #06713f;
+  cursor: default; font-weight: 600; }
 
 @media (max-width: 720px) {
   /* Word's side-by-side exercise columns stack, rather than squeezing two
@@ -2224,51 +2288,61 @@ main.portal:has(.booksheet.handout) { max-width: 980px; }
     display: block; width: auto !important;
   }
   .booksheet.handout .booklet table.bk td { padding: 2px 0; }
+  /* ...but a coloured or ruled box keeps a margin inside it, or its words
+     run into its edge */
+  .booksheet.handout .booklet table.bk td[style*="background"],
+  .booksheet.handout .booklet table.bk td[style*="solid"] { padding: var(--sp-2) var(--sp-3); }
   .booksheet.handout .booklet table.bk td:empty { display: none; }
-  .booksheet.handout .bk-blank { width: 100% !important; max-width: 320px; }
-  .booksheet.handout { overflow-x: hidden; }
+  /* a section's number stays beside its name, as a bar, not a slab above it */
+  .booksheet.handout .booklet table.bk-sec tr { display: flex; align-items: stretch; }
+  .booksheet.handout .booklet table.bk-sec td:first-child { flex: none; min-width: 44px;
+    display: flex; align-items: center; justify-content: center; }
+  .booksheet.handout .booklet table.bk-sec td + td { flex: 1; min-width: 0; }
+  /* ... and in the order they are numbered: down the first column, then the next */
+  .booksheet.handout .booklet table.bk-colgrid tbody { display: flex; flex-direction: column; }
+  .booksheet.handout .booklet table.bk-colgrid tr { display: contents; }
+  .booksheet.handout .booklet table.bk-colgrid td:nth-child(2) { order: 2; }
+  .booksheet.handout .booklet table.bk-colgrid td:nth-child(3) { order: 3; }
+  /* a box of words to choose from wraps like a sentence */
+  .booksheet.handout .booklet table.bk-wordbox tbody { display: flex; flex-wrap: wrap;
+    padding: var(--sp-1) var(--sp-2); }
+  .booksheet.handout .booklet table.bk-wordbox tr { display: contents; }
+  .booksheet.handout .booklet table.bk-wordbox td { padding: var(--sp-1) var(--sp-2); }
+  .booksheet.handout .booklet table.bk-wordbox td p { margin: 0; }
+  /* indents drawn for A4 give their width back */
+  .booksheet.handout .booklet p[style*="padding-left"] { padding-left: var(--sp-2) !important; }
+  .booksheet.handout { overflow-x: hidden; padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .booksheet.handout .bk-chip span { height: 38px; min-width: 40px; }
+  .booksheet.handout .bk-tick { width: 38px; height: 38px; }
+  .booksheet.handout .booklet input.bk-blank { height: 38px; }
 }
 
-/* what the student needs to know without looking for it: that it is saved */
+/* the bar that stays in reach: how much is done, where to go, and Check */
 .savebar {
   position: sticky; bottom: 0; z-index: 5;
-  margin: calc(-1 * var(--sp-5)) 0 0; padding: var(--sp-2) var(--sp-4);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "prog prog prog" "jump next check" "notes notes notes";
+  gap: var(--sp-2) var(--sp-2); align-items: center;
+  margin: calc(-1 * var(--sp-6)) 0 0; padding: 0 var(--sp-3) var(--sp-2);
   background: var(--surface); border: 1px solid var(--line);
-  border-top-color: var(--line-soft); border-radius: 0 0 var(--r-sm) var(--r-sm);
-  font-size: 13px; color: var(--ink-2); text-align: right;
-}
-
-/* the handout marks itself, so the marks have to read at a glance */
-
-.savebar { display: flex; align-items: center; gap: var(--sp-3); }
-.savebar #savenote { flex: 0 0 auto; }
-.marknote { flex: 1 1 auto; text-align: right; color: var(--ink-2);
-  font-variant-numeric: tabular-nums; }
-.checkbtn { flex: 0 0 auto; min-height: 36px; padding: 0 var(--sp-4);
-  font-size: 14px; }
-
-.booksheet.handout .bk-blank.right {
-  background: #e4f8ee; border-bottom-color: #2E9E5B; color: #06713f; }
-.booksheet.handout .bk-blank.wrong {
-  background: var(--warn-soft); border-bottom-color: var(--warn);
-  color: var(--warn); }
-/* not wrong - nobody can mark a sentence of your own */
-.booksheet.handout .bk-blank.teacher {
-  background: var(--gold-soft); border-bottom-color: #d8ae4a; }
-
-/* the answer is one tap away, not given for free */
-.bk-answer {
-  margin-left: 6px; padding: 1px 8px; border-radius: var(--r-full);
-  border: 1px solid var(--line); background: var(--surface);
-  color: var(--ink-2); font-size: 12px; line-height: 1.6; cursor: pointer; }
-.bk-answer:disabled {
-  background: #e4f8ee; border-color: #a8e6c6; color: #06713f;
-  cursor: default; font-weight: 600; }
-
+  border-radius: 0 0 var(--r-md) var(--r-md); box-shadow: 0 -6px 20px rgba(28, 15, 34, .08);
+  font-size: 13px; color: var(--ink-2); overflow: hidden; }
+.sb-prog { grid-area: prog; height: 4px; margin: 0 calc(-1 * var(--sp-3));
+  background: var(--line-soft); }
+.sb-prog i { display: block; height: 100%; width: 0; background: #127D80;
+  transition: width .4s var(--ease); }
+.bk-jump { grid-area: jump; min-width: 0; height: 38px; font-size: 14px; }
+.sb-next { grid-area: next; height: 38px; padding: 0 var(--sp-3); font-size: 14px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.checkbtn { grid-area: check; height: 38px; padding: 0 var(--sp-4); font-size: 14px; }
+.sb-notes { grid-area: notes; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3);
+  font-size: 12px; color: var(--ink-3); }
+.marknote { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 @media (max-width: 720px) {
-  .savebar { flex-wrap: wrap; gap: var(--sp-2); }
-  .marknote { order: 3; flex: 1 0 100%; text-align: left; }
-  .checkbtn { flex: 1 0 auto; }
+  /* above the section bar at the bottom of the screen, not under it */
+  .savebar { bottom: calc(var(--pnav-h) + env(safe-area-inset-bottom)); border-radius: var(--r-md);
+    margin-left: calc(-1 * var(--sp-1)); margin-right: calc(-1 * var(--sp-1)); }
+  .bk-jump { font-size: 16px; }
 }
 
 /* ------------------------------------------------- records

@@ -2244,7 +2244,8 @@ def student_page(title, body, music=True):
 <script src="/static/nav.js" defer></script>
 <script src="/static/write.js" defer></script>
 <script src="/static/book.js" defer></script>
-<script src="/static/shrink.js" defer></script></body></html>"""
+<script src="/static/shrink.js" defer></script>
+<script src="/static/handout.js" defer></script></body></html>"""
 
 
 # The student's page in five sections, the way an app on their phone would
@@ -2755,6 +2756,171 @@ def fill_choices(layout, qs, given=None, marks=None):
     return LONG_AT.sub(long_box, MCQ_AT.sub(choices, layout))
 
 
+# ------------------------------------------------------- handouts on a phone
+#
+# A handout is drawn for A4 and done on a phone. The layer below keeps the
+# paper's design and changes only how each box is answered: a gap in a
+# sentence stays in the sentence, a sentence of the student's own is a box
+# that grows as they write, a choice is a row of chips to tap, a tick is a
+# tick. Two-column exercises get their reading order back on a narrow
+# screen, and every exercise gets an anchor so the page can be navigated.
+
+BOOKLET_TEAL = "127D80"          # the booklets' own colour: section bars, exercise numbers
+SECTION_AT = re.compile(
+    r'<table class="bk">(<tr><td style="[^"]*background:#' + BOOKLET_TEAL + r'[^"]*">'
+    r'<p[^>]*><span[^>]*>(\d+)</span></p></td><td[^>]*><p[^>]*>'
+    r'<span[^>]*>([^<]+)</span>)')
+EXERCISE_AT = re.compile(
+    r'<p((?: [a-z-]+="[^"]*")*)>(<span style="font-weight:700;color:#' + BOOKLET_TEAL
+    + r';[^"]*">(\d+\.\d+)\s*</span>)')
+INNER_TABLE_AT = re.compile(r'<table class="bk">((?:(?!<table).)*?)</table>', re.S)
+ITEM_NO_AT = re.compile(r'data-item="[^":]+:(\d+)"')
+CONTROL_AT = re.compile(r'<input class="bk-blank" data-q="(\d+)"([^>]*)>')
+BOX_WIDTH_AT = re.compile(r'width:\s*([\d.]+)(px|%)')
+PLACEHOLDER_AT = re.compile(r'placeholder="[^"]*"')
+
+
+def _plain(fragment):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment))).strip()
+
+
+def _word_box(inner):
+    """A box of words to choose from - "Complete with a word from the box" -
+    is a row of short coloured cells. Stacked one to a line on a phone it
+    becomes a tall column of single words; marked, it wraps like a sentence."""
+    cells = re.findall(r"<td([^>]*)>(.*?)</td>", inner, re.S)
+    words = [_plain(c) for _a, c in cells]
+    if (len(cells) < 3 or not all(words) or max(map(len, words)) > 32
+            or "bk-blank" in inner or "data-item" in inner):
+        return None
+    ground = [re.search(r"background:(#[0-9A-Fa-f]{6})", a) for a, _c in cells]
+    if not all(ground) or len({g.group(1) for g in ground}) != 1:
+        return None
+    return '<table class="bk bk-wordbox" style="background:%s">%s</table>' % (ground[0].group(1), inner)
+
+
+def _column_order(m):
+    """Mark a two-column exercise whose items run down the columns, so a
+    phone can stack them 1, 2, 3, 4 rather than 1, 3, 2, 4."""
+    inner = m.group(1)
+    box = _word_box(inner)
+    if box:
+        return box
+    rows = [re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)
+            for r in re.findall(r"<tr>(.*?)</tr>", inner, re.S)]
+    if len(rows) < 2 or len(rows[0]) < 2 or any(len(r) != len(rows[0]) for r in rows):
+        return m.group(0)
+    grid = []
+    for row in rows:
+        line = []
+        for cell in row:
+            if not _plain(cell):
+                line.append(None)
+                continue
+            n = ITEM_NO_AT.search(cell)
+            if not n:
+                return m.group(0)            # a table of text, not of items
+            line.append(int(n.group(1)))
+        grid.append(line)
+    down = [row[c] for c in range(len(grid[0])) for row in grid if row[c] is not None]
+    across = [n for row in grid for n in row if n is not None]
+    if down != sorted(down) or len(set(down)) != len(down) or down == across:
+        return m.group(0)
+    return '<table class="bk bk-colgrid">%s</table>' % inner
+
+
+def handout_controls(layout, qs, given=None, marks=None):
+    """The handout's boxes as the controls a phone can use, plus the
+    sections and exercises the page can jump to."""
+    by_num = {q["num"]: (q, o) for q, o in qs}
+    sections, exercises, seen = [], [], set()
+
+    def section(m):
+        sections.append((m.group(2), html.unescape(m.group(3)).strip()))
+        return '<table class="bk bk-sec" id="sec-%s">%s' % (m.group(2), m.group(1))
+
+    def exercise(m):
+        label = m.group(3)
+        if label in seen:
+            return m.group(0)
+        seen.add(label)
+        end = m.string.find("</p>", m.end())
+        what = _plain(m.string[m.end():end])[:60]
+        exercises.append((label, what))
+        return '<p id="ex-%s"%s>%s' % (label.replace(".", "-"), m.group(1) or "", m.group(2))
+
+    def control(m):
+        got = by_num.get(int(m.group(1)))
+        if not got:
+            return m.group(0)
+        q, opts = got
+        num, rest = m.group(1), m.group(2)
+        mine = (given or {}).get(q["id"]) or ""
+        mark = marks.get(q["id"]) if marks is not None else None
+        lock = marks is not None
+        kind = q["control"] if "control" in q.keys() else None
+        if opts:
+            chips = ""
+            for o in opts:
+                value, label = o["letter"], (o["text"] or o["letter"])
+                on = mine == value
+                state = (" right" if mark == 1 else " wrong") if (on and mark is not None) else ""
+                chips += (f'<label class="bk-chip{state}"><input type="radio" '
+                          f'name="q{q["id"]}" value="{E(value)}"{" checked" if on else ""}'
+                          f'{" disabled" if lock else ""}><span>{E(label)}</span></label>')
+            return f'<span class="bk-chips" data-q="{num}" role="radiogroup">{chips}</span>'
+        if kind == "tick":
+            on = bool(mine.strip())
+            return (f'<button type="button" class="bk-tick{" on" if on else ""}" '
+                    f'data-q="{num}" aria-pressed="{"true" if on else "false"}" '
+                    f'aria-label="Tick"{" disabled" if lock else ""}>&#10003;</button>'
+                    f'<input type="hidden" name="q{q["id"]}" value="{E(mine)}" data-q="{num}">')
+        w = BOX_WIDTH_AT.search(rest)
+        wide = w and (w.group(2) == "%" or float(w.group(1)) >= 180)
+        if kind in ("long", "tickfill", "essay", "note") or (wide and kind != "number"):
+            state = " right" if mark == 1 else " wrong" if mark == 0 else ""
+            hint = PLACEHOLDER_AT.search(rest)
+            fill = (f'<button type="button" class="bk-tickfill" data-q="{num}">'
+                    f'&#10003; It is correct</button>'
+                    if kind == "tickfill" and not lock else "")
+            if kind == "essay":          # a piece of writing: room to write, and a word count
+                fill = f'<span class="bk-words" data-q="{num}" aria-live="polite"></span>'
+            return (f'<textarea class="bk-blank bk-long{" bk-essay" if kind == "essay" else ""}{state}" '
+                    f'name="q{q["id"]}" data-q="{num}" rows="{4 if kind == "essay" else 1}" spellcheck="true"'
+                    f'{" data-optional" if kind == "note" else ""}'
+                    f'{" " + hint.group(0) if hint else ""}'
+                    f'{" readonly" if lock else ""}>{E(mine)}</textarea>{fill}')
+        if kind == "number":
+            rest += ' inputmode="numeric" pattern="[0-9]*"'
+        # a gap in a sentence stays in the sentence; fill_layout names it
+        return f'<input class="bk-blank" data-q="{num}"{rest} enterkeyhint="next">'
+
+    layout = SECTION_AT.sub(section, layout)
+    layout = EXERCISE_AT.sub(exercise, layout)
+    layout = INNER_TABLE_AT.sub(_column_order, layout)
+    layout = CONTROL_AT.sub(control, layout)
+    return layout, sections, exercises
+
+
+def jump_menu(sections, exercises):
+    """Every exercise, under its section, for the Go to… menu."""
+    names = dict(sections)
+    groups, order = {}, []
+    for label, what in exercises:
+        sec = label.split(".")[0]
+        if sec not in groups:
+            groups[sec] = []
+            order.append(sec)
+        groups[sec].append(f'<option value="ex-{label.replace(".", "-")}">'
+                           f'{E(label)} &middot; {E(what)}</option>')
+    out = ""
+    for sec in order:
+        title = names.get(sec, "")
+        out += (f'<optgroup label="{E(sec + " " + title if title else "Section " + sec)}">'
+                + "".join(groups[sec]) + "</optgroup>")
+    return f'<select class="bk-jump" id="bkjump" aria-label="Go to an exercise"><option value="">Go to&hellip;</option>{out}</select>'
+
+
 def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
     """Put the student's own boxes into the booklet's blanks.
 
@@ -2836,96 +3002,26 @@ def portal_handouts(db, s, token, query):
     layout = t["layout"] if "layout" in t.keys() else None
     if not layout:
         return '<h2>Handouts</h2><p class="sub">That booklet has no pages.</p>'
+    layout, sections, exercises = handout_controls(layout, qs, given)
     filled = fill_layout(layout, qs, given,
                          level=core.level_name(db, t["level_id"]), who=token)
+    # ticks and "correct it if it is false" may rightly stay empty
+    total = sum(1 for q, _o in qs
+                if (q["control"] if "control" in q.keys() else None) not in ("tick", "note"))
     return f"""<p class="sub"><a class="crumb" href="{base}">Handouts</a> ›
 {E(t["title"])}</p>
 <div class="booksheet handout">{filled}</div>
 <div class="savebar" id="savebar">
-  <span id="savenote">Saved as you type</span>
-  <span id="marknote" class="marknote"></span>
-  <button type="button" class="checkbtn" id="checkbtn">Check my answers</button>
+  <div class="sb-prog" aria-hidden="true"><i id="sbfill"></i></div>
+  {jump_menu(sections, exercises)}
+  <button type="button" class="ghost sb-next" id="sbnext"
+          title="Go to the next empty box"><span id="sbcount">0 of {total}</span> &rsaquo;</button>
+  <button type="button" class="checkbtn" id="checkbtn">Check</button>
+  <div class="sb-notes"><span id="savenote">Saved as you type</span>
+    <span id="marknote" class="marknote"></span></div>
 </div>
-<script>
-const SAVE = '/s/{E(token)}/handout/{hid}/save';
-let timer = null, dirty = false;
-function note(t) {{ document.getElementById('savenote').textContent = t; }}
-async function push() {{
-  if (!dirty) return;
-  dirty = false;
-  const body = new URLSearchParams();
-  document.querySelectorAll('.booksheet [name^="q"]').forEach(el => {{
-    if (el.type === 'radio' || el.type === 'checkbox') {{
-      if (el.checked) body.append(el.name, el.value);
-    }} else body.append(el.name, el.value);
-  }});
-  note('Saving…');
-  try {{
-    await fetch(SAVE, {{method: 'POST', body: body,
-      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}}});
-    note('Saved');
-  }} catch (e) {{ note('Not saved — you are offline'); dirty = true; }}
-}}
-document.addEventListener('input', e => {{
-  if (!e.target.closest('.booksheet')) return;
-  dirty = true; note('Saving…');
-  clearTimeout(timer); timer = setTimeout(push, 900);
-}});
-window.addEventListener('beforeunload', push);
-document.addEventListener('visibilitychange', () => {{
-  if (document.visibilityState === 'hidden') push();
-}});
-
-// ---- marking, straight away, without waiting for the teacher
-const CHECK = '/s/{E(token)}/handout/{hid}/check';
-function boxes() {{
-  return Array.from(document.querySelectorAll('.booksheet [name^="q"]'));
-}}
-function clearMark(el) {{
-  el.classList.remove('right', 'wrong', 'teacher');
-  const tag = el.parentNode.querySelector('.bk-answer');
-  if (tag) tag.remove();
-}}
-document.addEventListener('input', e => {{
-  if (e.target.closest('.booksheet')) clearMark(e.target);
-}});
-document.getElementById('checkbtn').addEventListener('click', async () => {{
-  const body = new URLSearchParams();
-  boxes().forEach(el => {{
-    if (el.type === 'radio' || el.type === 'checkbox') {{
-      if (el.checked) body.append(el.name, el.value);
-    }} else body.append(el.name, el.value);
-  }});
-  document.getElementById('marknote').textContent = 'Checking…';
-  const r = await fetch(CHECK, {{method: 'POST', body: body,
-    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}}});
-  const out = await r.json();
-  if (!out.ok) {{ document.getElementById('marknote').textContent =
-      'Could not check just now.'; return; }}
-  let first = null;
-  boxes().forEach(el => {{
-    clearMark(el);
-    const m = out.marks[el.name.slice(1)];
-    if (!m) return;
-    el.classList.add(m.state);
-    if (m.state === 'wrong') {{
-      if (!first) first = el;
-      const tag = document.createElement('button');
-      tag.type = 'button';
-      tag.className = 'bk-answer';
-      tag.textContent = 'answer';
-      tag.onclick = () => {{ tag.textContent = m.answer; tag.disabled = true; }};
-      el.insertAdjacentElement('afterend', tag);
-    }}
-  }});
-  const bits = [out.right + ' right'];
-  if (out.wrong) bits.push(out.wrong + ' to look at again');
-  if (out.blank) bits.push(out.blank + ' still empty');
-  if (out.teacher) bits.push(out.teacher + ' for your teacher');
-  document.getElementById('marknote').textContent = bits.join(' · ');
-  if (first) first.scrollIntoView({{block: 'center', behavior: 'smooth'}});
-}});
-</script>"""
+<div id="handoutdata" hidden data-save="/s/{E(token)}/handout/{hid}/save"
+     data-check="/s/{E(token)}/handout/{hid}/check"></div>"""
 
 
 def act_handout_save(req, db, token, hid):

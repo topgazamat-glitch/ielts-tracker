@@ -1,0 +1,274 @@
+"""One of Azamat's Word booklets, as a handout that is done on a phone.
+
+The design is his and is rendered as it is by booklet_html. What a handout
+script adds is everything the paper leaves to a pen:
+
+  - a box where the paper has only a dotted line, or nothing at all
+    ("find and correct the mistake", "answer the questions");
+  - how each box is answered on a phone: tap chips for a choice, a tick,
+    a number pad, a growing box for a sentence of the student's own;
+  - the answer each box wants, from his key, or None for the student's own
+    words - saved and shown to him, never scored.
+
+Every box on the page must be given a decision, or the build stops and
+lists the ones left - a handout that marks a right answer wrong is worse
+than one that does not mark at all.
+
+    h = Handout(docx)
+    h.item_box("1.3", 1, where="options")
+    data = h.build(KEY, "Pre-Intermediate", 4, "Unit 4B & 4D - Celebrations")
+"""
+import html
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+import booklet_html as bh        # noqa: E402
+
+TAB = "<span class='tab'></span>"
+ITEM_P = re.compile(r'(<p data-item="([0-9.]+):(\d+)"[^>]*>)(.*?)</p>', re.S)
+LEADER_P = re.compile(r"<p[^>]*>" + re.escape(TAB) + r"</p>")
+BLANK_TAG = re.compile(r'<input class="bk-blank" data-blank="(\d+)"[^>]*>')
+SPOT = re.compile(r'<input class="bk-blank" data-blank="(\d+)"([^>]*)>'
+                  r'|\{\{box:([0-9.]+):(\d+):([^:}]*):?([^}]*)\}\}')
+
+
+def plain(fragment):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment))).strip()
+
+
+class Q:
+    """What one box wants. answer=None is the student's own words."""
+
+    def __init__(self, answer=None, options=None, control=None, labels=None):
+        self.answer = answer
+        self.options = options or []
+        self.labels = labels or {}
+        self.control = control
+
+
+def choose(options, answer=None, labels=None):
+    return Q(answer, options=options, labels=labels)
+
+
+def tick(answer=None):
+    return Q(answer, control="tick")
+
+
+def own(control="long"):
+    return Q(None, control=control)
+
+
+def write(answer, control="long"):
+    return Q(answer, control=control)
+
+
+def note():
+    """A box that may rightly stay empty - "correct the false ones" - so it
+    is not counted as work left to do."""
+    return Q(None, control="note")
+
+
+def number(answer):
+    return Q(answer, control="number")
+
+
+def fix(answer):
+    """A sentence to correct - or, if it is already right, a tick."""
+    return Q(answer, control="tickfill")
+
+
+class Handout:
+    def __init__(self, docx):
+        self.html, self.blanks = bh.render(os.path.expanduser(docx), fillable=True)
+        self.removed = set()
+        self.hints = {}                     # blank index -> placeholder text
+        self.texts = {}                     # (label, num) -> the item's words
+
+    # ------------------------------------------------------------- placing
+    def _token(self, label, num, width, placeholder=""):
+        return "{{box:%s:%d:%s:%s}}" % (label, num, width, placeholder)
+
+    def item_box(self, label, num, width="95%", where="first", placeholder=""):
+        """A box at the end of one item: its first paragraph, the paragraph
+        holding its A/B/C options, or where its dotted leader is."""
+        paras = [m for m in ITEM_P.finditer(self.html)
+                 if m.group(2) == label and int(m.group(3)) == num]
+        if not paras:
+            raise SystemExit("no item %s %d on the page" % (label, num))
+        self.texts.setdefault((label, num), plain(paras[0].group(4)))
+        if where == "first":
+            m = paras[0]
+        elif where == "options":
+            m = next((p for p in paras if re.match(r"^A\s", plain(p.group(4)))), None)
+            if m is None:
+                raise SystemExit("no A/B options under %s %d" % (label, num))
+        elif where == "leader":
+            m = next((p for p in paras if p.group(4).rstrip().endswith(TAB)), paras[0])
+        else:
+            raise ValueError(where)
+        guts = m.group(4)
+        if guts.rstrip().endswith(TAB):
+            guts = guts.rstrip()[:-len(TAB)]
+        new = "%s%s %s</p>" % (m.group(1), guts, self._token(label, num, width, placeholder))
+        self.html = self.html[:m.start()] + new + self.html[m.end():]
+
+    def _instruction_end(self, label):
+        i = self.html.find("%s  </span>" % label)
+        if i < 0:
+            raise SystemExit("no exercise %s" % label)
+        return self.html.index("</p>", i) + 4
+
+    def after_instruction(self, label, boxes):
+        """Boxes on lines of their own under an exercise the paper leaves blank.
+        boxes: [(num, lead_text, width, placeholder)]"""
+        at = self._instruction_end(label)
+        add = ""
+        for num, lead, width, placeholder in boxes:
+            self.texts[(label, num)] = lead or placeholder
+            add += ('<p style="margin-bottom:6px">%s%s</p>'
+                    % (("<b>%s</b> " % html.escape(lead)) if lead else "",
+                       self._token(label, num, width, placeholder)))
+        self.html = self.html[:at] + add + self.html[at:]
+
+    def leaders(self, label, until, boxes):
+        """The ruled lines under a writing task become `boxes`; the rest go.
+        boxes: [(num, width, placeholder)]"""
+        head = self.html.index("%s  </span>" % label)
+        tail = self.html.index(until, head)
+        part = self.html[head:tail]
+        left = list(boxes)
+
+        def line(m):
+            if not left:
+                return ""
+            num, width, placeholder = left.pop(0)
+            self.texts[(label, num)] = placeholder
+            return '<p style="margin-bottom:8px">%s</p>' % self._token(label, num, width, placeholder)
+        part = LEADER_P.sub(line, part)
+        if left:
+            raise SystemExit("not enough ruled lines under %s" % label)
+        self.html = self.html[:head] + part + self.html[tail:]
+
+    def one_per_line(self, start, until, at="box"):
+        """Paper packs several short items into one line; a phone reads them
+        better one to a line. at="box": each item starts with its box
+        ("[ ] Invitation...  [ ] Would you like..."), so a new line goes before
+        every box but the first. at="text": each item ends with its box
+        ("A is from [ ]  B is from [ ]"), so a new line goes after each box."""
+        a = self.html.rfind("<p", 0, self.html.index(start))
+        b = self.html.index(until, a) if until else len(self.html)
+
+        def para(m):
+            body = m.group(2)
+            tags = list(BLANK_TAG.finditer(body))
+            cuts = []
+            for k, t in enumerate(tags):
+                before = plain(body[(tags[k - 1].end() if k else 0):t.start()])
+                after = plain(body[t.end():(tags[k + 1].start() if k + 1 < len(tags) else len(body))])
+                if at == "box" and k and before and after:
+                    cuts.append(t.start())
+                elif at == "text" and k + 1 < len(tags) and after:
+                    cuts.append(t.end())
+            for c in reversed(cuts):
+                body = body[:c] + "<br>" + body[c:]
+            return m.group(1) + body + "</p>"
+        part = re.sub(r"(<p[^>]*>)(.*?)</p>", para, self.html[a:b], flags=re.S)
+        self.html = self.html[:a] + part + self.html[b:]
+
+    def can_do_grid(self, label):
+        """The "I can... ☺ 😐 ☹" self-check: on paper three boxes a row, one to
+        tick; on a phone one row of faces to tap. Returns (faces, [num per row])
+        for the key; the second and third box of each row are gone."""
+        head = self.html.index("%s  </span>" % label)
+        a = self.html.index('<table class="bk">', head)
+        b = self.html.index("</table>", a) + len("</table>")
+        rows = re.findall(r"<tr>(.*?)</tr>", self.html[a:b], re.S)
+        cells = [re.findall(r"(<td[^>]*>)(.*?)</td>", r, re.S) for r in rows]
+        faces = [plain(c) for _o, c in cells[0][1:]]
+        top_open, top = cells[0][0]
+        out = ['<tr>%s%s</td></tr>' % (top_open.replace("<td", '<td colspan="2"', 1), top)]
+        nums = []
+        for k, row in enumerate(cells[1:], 1):
+            (t_open, text), (b_open, box) = row[0], row[1]
+            i = int(BLANK_TAG.search(box).group(1))
+            self.blanks[i]["text"] = plain(text)
+            nums.append(self.blanks[i]["num"])
+            # one line between one can-do and the next, not between a can-do
+            # and its own faces when a phone stacks them
+            if k < len(cells) - 1:           # the last row keeps its closing rule
+                t_open = re.sub(r"border-bottom:[^;\"]*", "border-bottom:0", t_open)
+            b_open = re.sub(r"border-top:[^;\"]*", "border-top:0", b_open)
+            out.append("<tr>%s%s</td>%s%s</td></tr>" % (t_open, text, b_open, box))
+        self.html = self.html[:a] + '<table class="bk">' + "".join(out) + "</table>" + self.html[b:]
+        return faces, nums
+
+    def drop_blanks(self, indices):
+        self.removed.update(indices)
+
+    def replace(self, start, end, new):
+        """Swap the markup from `start` up to and including `end` for `new`."""
+        a = self.html.index(start)
+        b = self.html.index(end, a) + len(end)
+        self.html = self.html[:a] + new + self.html[b:]
+
+    # --------------------------------------------------------------- build
+    def build(self, key, level, number, title):
+        questions, missing, seen = [], [], {}
+
+        def spot(m):
+            if m.group(1) is not None:
+                i = int(m.group(1))
+                if i in self.removed:
+                    return ""
+                b = self.blanks[i]
+                label, num, rest, placeholder = b["label"], b["num"], m.group(2), self.hints.get(i, "")
+                text = b["text"]
+            else:
+                label, num = m.group(3), int(m.group(4))
+                rest = (' style="width:%s" autocomplete="off" autocapitalize="off"'
+                        ' spellcheck="false"' % m.group(5))
+                placeholder = m.group(6)
+                text = self.texts.get((label, num), "")
+            nth = seen[(label, num)] = seen.get((label, num), 0) + 1
+            q = key.get((label, num, nth), "MISSING")
+            if q == "MISSING":
+                missing.append("%s item %s box %d  (%s)" % (label, num, nth, text[:50]))
+                return m.group(0)
+            if not isinstance(q, Q):
+                q = Q(q) if q is not None else own(control=None)
+            n = len(questions) + 1
+            questions.append({
+                "num": n, "kind": "typed" if q.answer else "open",
+                "prompt": "%s  %s" % (label, re.sub(r"\s+", " ", text)[:160]),
+                "answer": q.answer, "control": q.control,
+                "options": [{"letter": o, "text": q.labels.get(o, "")} for o in q.options],
+            })
+            if placeholder:
+                rest += ' placeholder="%s"' % html.escape(placeholder)
+            return '<input class="bk-blank" data-q="%d"%s>' % (n, rest)
+
+        layout = SPOT.sub(spot, self.html)
+        if missing:
+            raise SystemExit("no decision for:\n  " + "\n  ".join(missing))
+        unused = [k for k in key if k[:2] not in seen or seen[k[:2]] < k[2]]
+        if unused:
+            raise SystemExit("decisions for boxes that are not there: %s" % unused)
+        return {"level": level, "number": number, "title": title, "kind": "handout",
+                "passages": {}, "layout": layout, "questions": questions}
+
+
+def report(data):
+    qs = data["questions"]
+    for q in qs:
+        how = ("chips " + "/".join(o["letter"] for o in q["options"])) if q["options"] \
+            else (q["control"] or "gap")
+        print("%-5s %3d  %-14s %-58s => %s" % ("MARK" if q["kind"] == "typed" else "", q["num"],
+                                              how[:14], q["prompt"][:58], q["answer"]))
+    marked = sum(1 for q in qs if q["kind"] == "typed")
+    taps = sum(1 for q in qs if q["options"] or q["control"] == "tick")
+    print("\nboxes: %d  (%d marked on the spot, %d tapped rather than typed, %d own words)"
+          % (len(qs), marked, taps, len(qs) - marked))

@@ -486,6 +486,15 @@ def migrate(db):
         # work in progress: pages can still be added, the teacher cannot see it.
         # everything that already existed was already sent, so it stays 0.
         db.execute("ALTER TABLE submissions ADD COLUMN draft INTEGER NOT NULL DEFAULT 0")
+    qcols = {r["name"] for r in db.execute("PRAGMA table_info(dquestions)")}
+    # a new database has no dquestions yet: it is made further down, with
+    # the column already in it
+    if qcols and "control" not in qcols:
+        # how a handout box is answered on a phone: 'long' for a sentence,
+        # 'tick', 'number', 'tickfill', 'essay' (a piece of writing, with a word
+        # count), 'note' (may rightly stay empty); options in doptions make it
+        # tap chips
+        db.execute("ALTER TABLE dquestions ADD COLUMN control TEXT")
     if "voice" not in scols:
         # the teacher's spoken feedback, a recording kept beside the mark
         db.execute("ALTER TABLE submissions ADD COLUMN voice TEXT")
@@ -664,7 +673,8 @@ def migrate(db):
         prompt TEXT NOT NULL,
         answer TEXT,                       -- null until the teacher sets the key
         image TEXT,                        -- a passage that only exists as a picture
-        ord INTEGER NOT NULL DEFAULT 0
+        ord INTEGER NOT NULL DEFAULT 0,
+        control TEXT                       -- how a handout box is answered on a phone
     );
     CREATE TABLE IF NOT EXISTS doptions (
         id INTEGER PRIMARY KEY,
@@ -4685,10 +4695,11 @@ def load_test(db, data):
             with open(os.path.join(MATERIAL_DIR, img), "wb") as fh:
                 fh.write(base64.b64decode(q["image_b64"]))
         qid = db.execute(
-            "INSERT INTO dquestions (test_id, num, kind, prompt, answer, image, ord)"
-            " VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO dquestions (test_id, num, kind, prompt, answer, image, ord, control)"
+            " VALUES (?,?,?,?,?,?,?,?)",
             (tid, q.get("num") or i + 1, q.get("kind") or "mcq",
-             q.get("prompt") or "", q.get("answer"), img, i)).lastrowid
+             q.get("prompt") or "", q.get("answer"), img, i,
+             q.get("control") or None)).lastrowid
         for o in q.get("options") or []:
             db.execute("INSERT INTO doptions (question_id, letter, text) VALUES (?,?,?)",
                        (qid, o.get("letter") or "?", o.get("text") or ""))
