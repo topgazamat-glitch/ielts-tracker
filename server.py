@@ -2865,6 +2865,8 @@ def handout_controls(layout, qs, given=None, marks=None):
                 value, label = o["letter"], (o["text"] or o["letter"])
                 on = mine == value
                 state = (" right" if mark == 1 else " wrong") if (on and mark is not None) else ""
+                if lock and mark == 0 and core.answer_matches(value, q["answer"]):
+                    state += " is-key"           # the one they should have tapped
                 chips += (f'<label class="bk-chip{state}"><input type="radio" '
                           f'name="q{q["id"]}" value="{E(value)}"{" checked" if on else ""}'
                           f'{" disabled" if lock else ""}><span>{E(label)}</span></label>')
@@ -2885,6 +2887,10 @@ def handout_controls(layout, qs, given=None, marks=None):
                     if kind == "tickfill" and not lock else "")
             if kind == "essay":          # a piece of writing: room to write, and a word count
                 fill = f'<span class="bk-words" data-q="{num}" aria-live="polite"></span>'
+            if lock and mark == 0:
+                fill = f'<p class="bk-key">Answer: {E(hx_key(q["answer"]))}</p>'
+            elif lock and mark is None and mine.strip():
+                state = " teacher"
             return (f'<textarea class="bk-blank bk-long{" bk-essay" if kind == "essay" else ""}{state}" '
                     f'name="q{q["id"]}" data-q="{num}" rows="{4 if kind == "essay" else 1}" spellcheck="true"'
                     f'{" data-optional" if kind == "note" else ""}'
@@ -2919,6 +2925,296 @@ def jump_menu(sections, exercises):
         out += (f'<optgroup label="{E(sec + " " + title if title else "Section " + sec)}">'
                 + "".join(groups[sec]) + "</optgroup>")
     return f'<select class="bk-jump" id="bkjump" aria-label="Go to an exercise"><option value="">Go to&hellip;</option>{out}</select>'
+
+
+# ------------------------------------------------ a handout in five parts
+#
+# The booklet has five sections - Reading, Grammar, Vocabulary, Listening,
+# Writing - and the phone shows one at a time. Every box in a part is
+# answered, the part is checked once, the student sees how it went, and only
+# then does the next part open; at the end, each part and the whole. What the
+# paper explains - the reading text, the grammar and warning boxes, the
+# tables - is redrawn in the site's own colours; the exercises keep the
+# booklet's look, which the students already know.
+
+BOOKLET_DEEP = "0B5456"          # the booklets' dark teal: a rule's name, DECIDE / OFFER
+BOOKLET_RUST = "C0745F"          # the booklets' warning boxes
+BOOKLET_HEAD = "E8F1F1"          # the header row of a booklet table
+STYLE_ATTR = "style" + '="'      # the patterns below read the booklet's own styles
+PANEL_AT = re.compile(
+    r'<table class="bk"><tr><td ' + STYLE_ATTR + r'[^"]*background:#[0-9A-Fa-f]{6}[^"]*">'
+    r'<table class="bk"><tr><td ' + STYLE_ATTR + r'[^"]*background:#([0-9A-Fa-f]{6})[^"]*">(.*?)</td></tr></table>'
+    r'((?:(?!<table|</td></tr></table>).)*)</td></tr></table>', re.S)
+RULE_LEAD_AT = re.compile(r'^<span ' + STYLE_ATTR + r'[^"]*font-weight:700;color:#' + BOOKLET_DEEP
+                          + r'[^"]*">([^<]+)</span>')
+SPAN_AT = re.compile(r'<span ' + STYLE_ATTR + r'([^"]*)">([^<]*)</span>')
+EX_HEAD_AT = re.compile(r'font-weight:700;color:#' + BOOKLET_TEAL + r';[^"]*">\d+\.\d+')
+SMALL_WORDS = {"a", "an", "the", "and", "or", "of", "in", "on", "at", "to", "for", "by", "with"}
+HX_ICON = {
+    "learn": '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>',
+    "warn": '<path d="M12 3 2 21h20z"/><path d="M12 10v5"/><path d="M12 18h.01"/>',
+    "sound": '<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
+    "listen": '<path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M3 14h4v6H3z"/><path d="M17 14h4v6h-4z"/>',
+    "check": '<path d="M4 12l5 5L20 6"/>',
+    "words": '<path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 7.5h.01"/>',
+    "text": '<path d="M4 5h16v11H8l-4 4z"/>',
+    "read": '<path d="M2 5h7a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H2z"/><path d="M22 5h-7a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h8z"/>',
+}
+
+
+def hx_icon(kind):
+    return ('<svg class="hx-ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" '
+            'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+            'stroke-linejoin="round">%s</svg>' % HX_ICON.get(kind, HX_ICON["learn"]))
+
+
+def _title_case(text):
+    """ONE DAY, ONE CITY -> One Day, One City. Sentence case would lower a
+    name; title case keeps it."""
+    if not text.isupper():
+        return text
+    words = text.lower().split(" ")
+    return " ".join(w if (i and w in SMALL_WORDS) else w[:1].upper() + w[1:]
+                    for i, w in enumerate(words))
+
+
+def _hx_style(m):
+    """Keep bold and italic; let the colours and sizes come from the site."""
+    keep = [d.strip() for d in m.group(3).split(";")
+            if d.strip().startswith(("font-weight", "font-style"))]
+    return "<%s%s%s>" % (m.group(1), m.group(2), (" %s%s\"" % (STYLE_ATTR, ";".join(keep))) if keep else "")
+
+
+def _hx_plainer(fragment):
+    fragment = re.sub(r'<p class="sp"[^>]*></p>', "", fragment)
+    fragment = re.sub(r' data-item="[^"]*"', "", fragment)
+    return re.sub(r'<(p|span)([^>]*?) ' + STYLE_ATTR + r'([^"]*)"([^>]*)>',
+                  lambda m: _hx_style(m).rstrip(">") + m.group(4) + ">", fragment)
+
+
+def _hx_marks(fragment):
+    """✗ and ✓ in the text drawn as the marks they are."""
+    def text(m):
+        t = m.group(1).replace("✗", '<span class="hx-no">✗</span>')
+        t = t.replace("✓", '<span class="hx-yes">✓</span>')
+        return ">" + t + "<"
+    return re.sub(r">([^<]*[✗✓][^<]*)<", text, fragment)
+
+
+def _hx_panel(m):
+    colour, head, body = m.group(1).upper(), m.group(2), m.group(3)
+    title = _plain(head)
+    t = title.upper()
+    if colour == BOOKLET_RUST:
+        kind = "warn"
+    elif t.startswith("CHECK"):
+        kind = "check"
+    elif "KEY WORD" in t:
+        kind = "words"
+    elif "PRONUNCIATION" in t or "HEAR" in t:
+        kind = "sound"
+    elif "LISTEN" in t:
+        kind = "listen"
+    elif "bk-blank" in body or re.match(r"(TWO EMAILS|REPLIES|A MESSAGE|AT THE )", t):
+        kind = "text"
+    else:
+        kind = "learn"
+    paras = []
+    for pm in re.finditer(r"<p([^>]*)>(.*?)</p>", body, re.S):
+        attrs, inner = pm.group(1), pm.group(2)
+        if 'class="sp"' in attrs or not (_plain(inner) or "<input" in inner):
+            continue
+        lead = RULE_LEAD_AT.match(inner)
+        num = re.match(r'^(<span[^>]*>)(\d+)\s+', inner)
+        cls = ""
+        if lead:
+            inner = ('<span class="hx-tag">%s</span><span class="hx-rule-text">%s</span>'
+                     % (lead.group(1).strip(), _hx_plainer(inner[lead.end():])))
+            cls = "hx-rule"
+        else:
+            if num and kind in ("warn", "learn", "sound"):
+                inner = ('<span class="hx-num">%s</span>%s' % (num.group(2), num.group(1))
+                         + inner[num.end():])
+                cls = "hx-item"
+            elif "padding-left" in attrs:
+                cls = "hx-sub"
+            inner = _hx_plainer(inner)
+        paras.append('<p%s>%s</p>' % (' class="%s"' % cls if cls else "", inner))
+    body = "".join(paras)
+    if kind in ("warn", "learn", "sound"):
+        body = _hx_marks(body)
+    return ('<section class="hx-card hx-%s"><header class="hx-head">%s'
+            '<span class="hx-label">%s</span></header><div class="hx-body">%s</div></section>'
+            % (kind, hx_icon(kind), E(title), body))
+
+
+def _top_nodes(fragment):
+    """The top-level paragraphs and tables of a stretch of booklet, in order."""
+    out, i, n = [], 0, len(fragment)
+    start_at = re.compile(r"<(p|table|section|article|div)\b")
+    while i < n:
+        m = start_at.search(fragment, i)
+        if not m:
+            out.append(("text", fragment[i:]))
+            break
+        if m.start() > i:
+            out.append(("text", fragment[i:m.start()]))
+        name, depth, j = m.group(1), 0, n
+        for t in re.finditer(r"<(/?)%s\b[^>]*>" % name, fragment[m.start():]):
+            depth += -1 if t.group(1) else 1
+            if depth == 0:
+                j = m.start() + t.end()
+                break
+        out.append((name, fragment[m.start():j]))
+        i = j
+    return out
+
+
+def _is_prose(node):
+    kind, frag = node
+    return (kind == "p" and "bk-blank" not in frag and "data-q=" not in frag
+            and not EX_HEAD_AT.search(frag) and "{{box" not in frag)
+
+
+def _hx_article(paras):
+    """A run of plain paragraphs - the reading text - as an article."""
+    paras = [p for p in paras if _plain(p)]
+    title = stand = ""
+    first = _plain(paras[0])
+    spans = re.findall(SPAN_AT, paras[0])
+    if len(first) < 90 and spans and all("font-weight:700" in st for st, tx in spans if tx.strip()):
+        title = _title_case(first)
+        paras = paras[1:]
+    spans = re.findall(SPAN_AT, paras[0]) if paras else []
+    if spans and all("italic" in st for st, tx in spans if tx.strip()):
+        stand = _plain(paras[0])
+        paras = paras[1:]
+    words = sum(len(_plain(p).split()) for p in paras)
+    body = ""
+    for p in paras:
+        inner = re.sub(r"^<p[^>]*>|</p>$", "", p)
+        lead = re.match(r'^<span ' + STYLE_ATTR + r'[^"]*font-weight:700[^"]*">([^<]+)</span>', inner)
+        if lead:
+            inner = '<strong class="hx-lead">%s</strong>%s' % (lead.group(1).strip(),
+                                                                _hx_plainer(inner[lead.end():]))
+        else:
+            inner = _hx_plainer(inner)
+        body += "<p>%s</p>" % inner
+    minutes = max(1, round(words / 150))
+    return ('<article class="hx-read"><div class="hx-read-meta">%s<span class="hx-label">Reading</span>'
+            '<span class="hx-read-len">%d words &middot; about %d min</span></div>%s%s'
+            '<div class="hx-read-body">%s</div></article>'
+            % (hx_icon("read"), words, minutes,
+               '<h3 class="hx-read-title">%s</h3>' % E(title) if title else "",
+               '<p class="hx-stand">%s</p>' % E(stand) if stand else "", body))
+
+
+def _hx_table(frag):
+    """A booklet table of examples, header row shaded, as one of the site's."""
+    rows = re.findall(r"<tr>(.*?)</tr>", frag, re.S)
+    if (len(rows) < 2 or "bk-blank" in frag or "data-q=" in frag or "{{box" in frag
+            or frag.count("<table") > 1):
+        return None
+    head = re.findall(r'<td ' + STYLE_ATTR + r'([^"]*)"', rows[0])
+    if not head or not all("#" + BOOKLET_HEAD in st.upper() for st in head):
+        return None
+    names = [_plain(c) for c in re.findall(r"<td[^>]*>(.*?)</td>", rows[0], re.S)]
+    out = ""
+    for k, row in enumerate(rows):
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        if k == 0:
+            out += "<tr>%s</tr>" % "".join("<th>%s</th>" % _hx_plainer(c) for c in cells)
+            continue
+        # each cell carries its column's name, so a phone can show a row as a block
+        out += "<tr>%s</tr>" % "".join(
+            '<td%s>%s</td>' % (' data-label="%s"' % E(names[i]) if i < len(names) and names[i] else "",
+                               _hx_plainer(c)) for i, c in enumerate(cells))
+    return '<div class="hx-scroll"><table class="hx-table hx-wide">%s</table></div>' % out
+
+
+def hx_dress(fragment):
+    """The paper's explanations in the site's clothes: boxes become cards,
+    the reading text an article, tables of examples the site's tables."""
+    fragment = PANEL_AT.sub(_hx_panel, fragment)
+    nodes, out, run = _top_nodes(fragment), [], []
+
+    def flush():
+        prose = [f for k, f in run if k == "p" and _plain(f)]
+        if len(prose) >= 3 and sum(len(_plain(f)) for f in prose) >= 350:
+            out.append(_hx_article(prose))
+        else:
+            out.extend(f for _k, f in run)
+        run.clear()
+    for node in nodes:
+        if _is_prose(node) or (node[0] == "text" and not node[1].strip() and run):
+            run.append(node)
+            continue
+        flush()
+        if node[0] == "table":
+            out.append(_hx_table(node[1]) or node[1])
+        else:
+            out.append(node[1])
+    flush()
+    return "".join(out)
+
+
+def handout_parts(layout):
+    """The booklet's opening, and its parts: [(number, name, what, markup)].
+    A booklet without section bars is one part."""
+    inner = layout
+    wrapped = re.match(r'\s*<div class="booklet">(.*)</div>\s*$', layout, re.S)
+    if wrapped:
+        inner = wrapped.group(1)
+    bars = list(SECTION_AT.finditer(inner))
+    if not bars:
+        return "", [(1, "The handout", "", inner)]
+    parts = []
+    for i, bar in enumerate(bars):
+        end = inner.index("</table>", bar.start()) + len("</table>")
+        stop = bars[i + 1].start() if i + 1 < len(bars) else len(inner)
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", inner[bar.start():end], re.S)
+        name, _sep, what = _plain(cells[-1]).partition("·")
+        parts.append((int(bar.group(2)), name.strip(), what.strip(), inner[end:stop]))
+    return inner[:bars[0].start()], parts
+
+
+def handout_cover(intro, t, level):
+    """What the booklet's first page says about itself: its name, its two
+    lessons, and what the student will be able to do."""
+    tops = [f for k, f in _top_nodes(intro) if k == "p" and _plain(f)]
+    name = _plain(tops[1]) if len(tops) > 1 else t["title"]
+    sub = ""
+    if len(tops) > 2:
+        first = re.search(r"<span[^>]*>([^<]*)</span>", tops[2])
+        sub = html.unescape(first.group(1)).strip() if first else _plain(tops[2])
+    goals = []
+    at = intro.find("You will learn to")
+    if at > 0:
+        for g in re.finditer(r"<p[^>]*>(.*?)</p>", intro[at:], re.S):
+            text = g.group(1)
+            if _plain(text).startswith("—"):
+                text = re.sub(r"^<span[^>]*>—\s*</span>", "", text)
+                goals.append(_hx_plainer(text))
+    kicker = "Unit %s · %s" % (t["number"], level) if t["number"] else level
+    return name, sub, kicker, goals
+
+
+def part_keys(part_markup):
+    """The question numbers a part holds."""
+    return [int(n) for n in re.findall(r'data-q="(\d+)"', part_markup)]
+
+
+def hx_ring(right, marked, cls="hx-ring"):
+    share = round(100 * right / marked) if marked else 0
+    return (f'<svg class="{cls}" viewBox="0 0 36 36" aria-hidden="true">'
+            f'<circle class="hx-ring-bg" cx="18" cy="18" r="15.9" pathLength="100"/>'
+            f'<circle class="hx-ring-fg" cx="18" cy="18" r="15.9" pathLength="100"'
+            f' stroke-dasharray="{share} 100"/></svg>')
+
+
+def hx_key(answer):
+    first = (answer or "").split("/")[0].strip()
+    return "it was right as it was" if first == "✓" else first
 
 
 def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
@@ -2970,25 +3266,36 @@ def portal_handouts(db, s, token, query):
                     'on this page.</p></div>')
         cards = ""
         for b in books:
-            done = db.execute(
-                "SELECT COUNT(*) c FROM dresponses r JOIN dattempts a"
-                " ON a.id=r.attempt_id WHERE a.test_id=? AND a.student_id=?"
-                " AND IFNULL(r.given,'') <> ''", (b["id"], s["id"])).fetchone()["c"]
-            note = (f'{done} of {b["n"]} boxes filled' if done
-                    else f'{b["n"]} things to fill in')
+            layout = db.execute("SELECT layout FROM dtests WHERE id=?",
+                                (b["id"],)).fetchone()["layout"] or ""
+            _intro, parts = handout_parts(layout)
+            att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                             " ORDER BY id DESC LIMIT 1", (b["id"], s["id"])).fetchone()
+            done = core.handout_parts_done(db, att["id"]) if att else {}
+            left = [p for p in parts if p[0] not in done]
+            if not done:
+                note = f'{len(parts)} parts &middot; not started'
+            elif left:
+                note = (f'Part {len(done) + 1} of {len(parts)} next: {E(left[0][1])}')
+            else:
+                right = sum(r["right_n"] for r in done.values())
+                marked = sum(r["right_n"] + r["wrong_n"] for r in done.values())
+                note = f'Finished &middot; {right} of {marked} right'
             cards += (f'<a class="tile small" href="{base}&amp;h={b["id"]}">'
                       f'<div class="tile-title">{E(b["title"])}</div>'
                       f'<div class="sub">{note}</div></a>')
-        return (f'<h2>Handouts</h2><p class="sub">Your booklets, to work '
-                f'through here. Nothing is timed. What you write is saved as '
-                f'you go, and you can check your own answers whenever you '
-                f'like — you do not have to wait for your teacher.</p>'
+        return (f'<h2>Handouts</h2><p class="sub">Your booklets, one part at a '
+                f'time. Nothing is timed and what you write is saved as you go. '
+                f'Answer every box in a part and check it: you see how you did '
+                f'straight away, and the next part opens.</p>'
                 f'<div class="tiles">{cards}</div>')
 
     t = db.execute("SELECT * FROM dtests WHERE id=? AND published=1"
                    " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
     if not t:
         return '<h2>Handouts</h2><p class="sub">That booklet is not open.</p>'
+    if not (t["layout"] if "layout" in t.keys() else None):
+        return '<h2>Handouts</h2><p class="sub">That booklet has no pages.</p>'
     qs = core.test_questions(db, hid)
     attempt = db.execute(
         "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
@@ -2997,31 +3304,161 @@ def portal_handouts(db, s, token, query):
         aid = core.start_attempt(db, hid, s["id"])
         attempt = db.execute("SELECT * FROM dattempts WHERE id=?",
                              (aid,)).fetchone()
+    return handout_view(db, token, t, qs, attempt, query)
+
+
+def handout_where(parts, done, want):
+    """Which part to show: the one asked for if it is open, else the first
+    not yet checked, else the results. A part is open once every part before
+    it has been checked - there is no skipping ahead."""
+    order = [n for n, *_rest in parts]
+    current = next((n for n in order if n not in done), None)
+    if want == "end" and current is None:
+        return "end", current
+    if want.isdigit() and int(want) in order and (int(want) in done or int(want) == current):
+        return int(want), current
+    return (current if current is not None else "end"), current
+
+
+LOCK_SVG = ('<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"'
+            ' stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/>'
+            '<path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>')
+
+
+def handout_view(db, token, t, qs, attempt, query):
+    hid = t["id"]
+    base = f"/s/{E(token)}?tab=handouts"
+    here = f"{base}&amp;h={hid}"
+    level = core.level_name(db, t["level_id"]) or ""
+    intro, parts = handout_parts(t["layout"])
+    done = core.handout_parts_done(db, attempt["id"])
+    view, current = handout_where(parts, done, query.get("part", [""])[0])
+    name, sub, kicker, goals = handout_cover(intro, t, level)
     given = {r["question_id"]: r["given"] for r in db.execute(
         "SELECT * FROM dresponses WHERE attempt_id=?", (attempt["id"],))}
-    layout = t["layout"] if "layout" in t.keys() else None
-    if not layout:
-        return '<h2>Handouts</h2><p class="sub">That booklet has no pages.</p>'
-    layout, sections, exercises = handout_controls(layout, qs, given)
-    filled = fill_layout(layout, qs, given,
-                         level=core.level_name(db, t["level_id"]), who=token)
-    # ticks and "correct it if it is false" may rightly stay empty
-    total = sum(1 for q, _o in qs
+
+    steps = ""
+    for n, pname, _what, _m in parts:
+        if n in done:
+            state, dot = "done", "&#10003;"
+        elif n == current:
+            state, dot = "now", str(n)
+        else:
+            state, dot = "locked", LOCK_SVG
+        mark = " here" if n == view else ""
+        now = ' aria-current="step"' if mark else ""
+        label = (f'<span class="hx-step-dot">{dot}</span>'
+                 f'<span class="hx-step-name">{E(pname)}</span>')
+        steps += (f'<li class="hx-step {state}{mark}" aria-disabled="true">{label}</li>'
+                  if state == "locked" else
+                  f'<li class="hx-step {state}{mark}"><a href="{here}&amp;part={n}"'
+                  f'{now}>{label}</a></li>')
+    finished = current is None
+    end_label = ('<span class="hx-step-dot">&#9733;</span><span class="hx-step-name">Results</span>')
+    steps += (f'<li class="hx-step done{" here" if view == "end" else ""}">'
+              f'<a href="{here}&amp;part=end">{end_label}</a></li>' if finished else
+              f'<li class="hx-step locked" aria-disabled="true">{end_label}</li>')
+    # the cover is shown in full before the first part is checked and on the
+    # results; every other part gets a strip, so the work is near the top
+    slim = "" if (view == "end" or not done) else " slim"
+    hero = f"""<p class="sub"><a class="crumb" href="{base}">Handouts</a> &rsaquo; {E(t["title"])}</p>
+<header class="hx-hero{slim}">
+  <p class="hx-kicker">{E(kicker)}</p>
+  <h1 class="hx-title">{E(name)}</h1>
+  {f'<p class="hx-sub">{E(sub)}</p>' if sub else ""}
+  <ol class="hx-steps">{steps}</ol>
+</header>"""
+    goals_head = "What you practised" if view == "end" else "In this handout you will learn to"
+    goals_card = (f'<section class="hx-goals"><h2 class="hx-label">{goals_head}</h2>'
+                  f'<ul>{"".join(f"<li>{g}</li>" for g in goals)}</ul></section>' if goals else "")
+
+    if view == "end":
+        return hero + handout_results(parts, done, here, name) + goals_card
+
+    idx = [n for n, *_r in parts].index(view)
+    n, pname, what, markup = parts[idx]
+    nums = set(part_keys(markup))
+    pqs = [(q, o) for q, o in qs if q["num"] in nums]
+    locked = n in done
+    marks = None
+    if locked:
+        marks = {r["question_id"]: r["correct"] for r in db.execute(
+            "SELECT question_id, correct FROM dresponses WHERE attempt_id=?", (attempt["id"],))}
+    layout = '<div class="booklet">' + hx_dress(markup) + "</div>"
+    layout, _secs, exercises = handout_controls(layout, pqs, given, marks)
+    filled = fill_layout(layout, pqs, given, marks, level=level, who=token)
+    if locked:
+        answer = {str(q["id"]): q["answer"] for q, _o in pqs}
+        filled = re.sub(r'(<input class="bk-blank wrong" name="q(\d+)"[^>]*>)',
+                        lambda m: m.group(1) + '<span class="bk-key">%s</span>'
+                        % E(hx_key(answer.get(m.group(2)))), filled)
+    head = (f'<div class="hx-parthead"><p class="hx-partno">Part {idx + 1} of {len(parts)}</p>'
+            f'<h2>{E(pname)}</h2>{f"<p>{E(what)}</p>" if what else ""}</div>')
+    sheet = f'<div class="booksheet handout hx-sheet">{filled}</div>'
+    if locked:
+        after = parts[idx + 1] if idx + 1 < len(parts) else None
+        if after:
+            onward = (f'<a class="btn hx-go" href="{here}&amp;part={after[0]}">'
+                      f'Next: {E(after[1])} &rsaquo;</a>')
+        else:
+            onward = f'<a class="btn hx-go" href="{here}&amp;part=end">See your results &rsaquo;</a>'
+        r = done[n]
+        return (hero + head + part_result(pname, r, onward) + sheet
+                + f'<div class="hx-bottom">{onward}</div>')
+    total = sum(1 for q, _o in pqs
                 if (q["control"] if "control" in q.keys() else None) not in ("tick", "note"))
-    return f"""<p class="sub"><a class="crumb" href="{base}">Handouts</a> ›
-{E(t["title"])}</p>
-<div class="booksheet handout">{filled}</div>
+    return hero + (goals_card if idx == 0 else "") + head + sheet + f"""
 <div class="savebar" id="savebar">
   <div class="sb-prog" aria-hidden="true"><i id="sbfill"></i></div>
-  {jump_menu(sections, exercises)}
+  {jump_menu([(str(n), pname)], exercises)}
   <button type="button" class="ghost sb-next" id="sbnext"
           title="Go to the next empty box"><span id="sbcount">0 of {total}</span> &rsaquo;</button>
-  <button type="button" class="checkbtn" id="checkbtn">Check</button>
+  <button type="button" class="checkbtn" id="checkbtn" data-label="Check {E(pname)}">Check {E(pname)}</button>
   <div class="sb-notes"><span id="savenote">Saved as you type</span>
-    <span id="marknote" class="marknote"></span></div>
+    <span id="marknote" class="marknote">Answer every box, then check this part to open the next.</span></div>
 </div>
 <div id="handoutdata" hidden data-save="/s/{E(token)}/handout/{hid}/save"
-     data-check="/s/{E(token)}/handout/{hid}/check"></div>"""
+     data-check="/s/{E(token)}/handout/{hid}/check" data-part="{n}"></div>"""
+
+
+def part_result(pname, r, onward):
+    """How a part went, at the top of it once it is checked."""
+    marked = r["right_n"] + r["wrong_n"]
+    teacher = (f' &middot; {r["teacher_n"]} of your own for your teacher to read'
+               if r["teacher_n"] else "")
+    fix = (" The right answer is shown under each one to look at again."
+           if r["wrong_n"] else " Every one right.")
+    return f"""<section class="hx-result" id="result">
+  <div class="hx-dial">{hx_ring(r["right_n"], marked)}<p class="hx-dial-fig"><b>{r["right_n"]}</b><small>/{marked}</small></p></div>
+  <div class="hx-result-text"><h3>{E(pname)} checked</h3>
+  <p>{r["right_n"]} of {marked} right{teacher}.{fix}</p>{onward}</div>
+</section>"""
+
+
+def handout_results(parts, done, here, name):
+    """The end: each part and the whole, as rows a student can read at a glance."""
+    right = sum(r["right_n"] for r in done.values())
+    marked = sum(r["right_n"] + r["wrong_n"] for r in done.values())
+    teacher = sum(r["teacher_n"] for r in done.values())
+    share = round(100 * right / marked) if marked else 0
+    rows = ""
+    for n, pname, _w, _m in parts:
+        r = done[n]
+        m = r["right_n"] + r["wrong_n"]
+        pct = round(100 * r["right_n"] / m) if m else 0
+        rows += (f'<a class="hx-row" href="{here}&amp;part={n}"><span class="hx-row-name">'
+                 f'<span class="hx-row-no">{n}</span>{E(pname)}</span>'
+                 f'<i class="hx-bar"><b style="width:{pct}%"></b></i>'
+                 f'<span class="hx-row-fig">{r["right_n"]}/{m}</span></a>')
+    what = "the answer" if teacher == 1 else f"the {teacher} answers"
+    mine = (f'<p class="hx-final-note">Your teacher will read {what} you wrote '
+            f'in your own words.</p>' if teacher else "")
+    return f"""<section class="hx-final">
+  <div class="hx-dial hx-dial-big">{hx_ring(right, marked)}<p class="hx-dial-fig"><b>{share}%</b></p></div>
+  <h2>You finished {E(name)}</h2>
+  <p class="hx-final-sub">{right} of {marked} right across the {len(parts)} parts.</p>
+  <div class="hx-rows">{rows}</div>{mine}
+</section>"""
 
 
 def act_handout_save(req, db, token, hid):
@@ -3041,10 +3478,19 @@ def act_handout_save(req, db, token, hid):
         aid = core.start_attempt(db, hid, st["id"])
     else:
         aid = attempt["id"]
+    # a part already checked is locked: a late save from an old tab must not
+    # change what was marked
+    done = core.handout_parts_done(db, aid)
+    frozen = set()
+    if done:
+        lay = db.execute("SELECT layout FROM dtests WHERE id=?", (hid,)).fetchone()["layout"] or ""
+        nums = {k for n, _a, _b, m in handout_parts(lay)[1] if n in done for k in part_keys(m)}
+        frozen = {r["id"] for r in db.execute("SELECT id, num FROM dquestions WHERE test_id=?",
+                                              (hid,)) if r["num"] in nums}
     saved = 0
     for key, values in req["form"].items():
         m = re.match(r"^q(\d+)$", key)
-        if not m:
+        if not m or int(m.group(1)) in frozen:
             continue
         qid, answer = int(m.group(1)), (values[0] or "").strip()
         db.execute(
@@ -3081,12 +3527,15 @@ def act_handout_check(req, db, token, hid):
     aid = attempt["id"] if attempt else core.start_attempt(db, hid, st["id"])
 
     qs = {q["id"]: q for q in db.execute(
-        "SELECT id, kind, answer FROM dquestions WHERE test_id=?", (hid,))}
+        "SELECT id, num, kind, answer, control FROM dquestions WHERE test_id=?", (hid,))}
     typed = {}
     for key, values in req["form"].items():
         m = re.match(r"^q(\d+)$", key)
         if m and int(m.group(1)) in qs:
             typed[int(m.group(1))] = (values[0] or "").strip()
+    part = (req["form"].get("part", [""])[0] or "").strip()
+    if part.isdigit():
+        return check_part(db, token, hid, aid, int(part), qs, typed)
 
     marks, right, wrong, open_ = {}, 0, 0, 0
     for qid, text in typed.items():
@@ -3116,6 +3565,57 @@ def act_handout_check(req, db, token, hid):
                                        if q["kind"] != "open" and q["answer"]
                                        and not typed.get(q["id"], ""))})
 
+
+
+def check_part(db, token, hid, aid, part, qs, typed):
+    """Check one part of a handout - once, and only when it is complete.
+
+    Every box in the part must have an answer (a tick, and a correction to a
+    sentence that was already right, may stay empty). The part is marked,
+    kept, and locked; the next part opens. Checking a part already checked
+    changes nothing, and a part further on than the current one is refused.
+    """
+    t = db.execute("SELECT layout FROM dtests WHERE id=?", (hid,)).fetchone()
+    _intro, parts = handout_parts(t["layout"] or "")
+    order = [n for n, *_r in parts]
+    markup = {n: m for n, _a, _b, m in parts}.get(part)
+    if markup is None:
+        return json_response({"ok": False})
+    done = core.handout_parts_done(db, aid)
+    last = part == order[-1]
+    go = f"/s/{token}?tab=handouts&h={hid}&part={'end' if last else part}"
+    if part in done:
+        return json_response({"ok": True, "go": go})
+    if part != next((n for n in order if n not in done), None):
+        return json_response({"ok": False, "locked": True})
+    nums = set(part_keys(markup))
+    mine = [q for q in qs.values() if q["num"] in nums]
+    saved = {r["question_id"]: r["given"] or "" for r in db.execute(
+        "SELECT question_id, given FROM dresponses WHERE attempt_id=?", (aid,))}
+
+    def text(q):
+        return typed[q["id"]] if q["id"] in typed else saved.get(q["id"], "").strip()
+    missing = sorted(q["num"] for q in mine
+                     if (q["control"] or "") not in ("tick", "note") and not text(q))
+    if missing:
+        return json_response({"ok": False, "missing": missing})
+    right = wrong = teacher = 0
+    for q in mine:
+        got = text(q)
+        if q["kind"] == "open" or not q["answer"]:
+            ok = None
+            teacher += 1 if got else 0
+        else:
+            ok = core.answer_matches(got, q["answer"])
+            right += 1 if ok else 0
+            wrong += 0 if ok else 1
+        db.execute(
+            "INSERT INTO dresponses (attempt_id, question_id, given, correct)"
+            " VALUES (?,?,?,?) ON CONFLICT(attempt_id, question_id)"
+            " DO UPDATE SET given=excluded.given, correct=excluded.correct",
+            (aid, q["id"], got, None if ok is None else (1 if ok else 0)))
+    core.record_part(db, aid, part, right, wrong, teacher)
+    return json_response({"ok": True, "go": go, "right": right, "wrong": wrong})
 
 
 def portal_tests(db, s, token, query):
@@ -7966,9 +8466,50 @@ type, never a blank page.</p>{busy}</div>"""
 <button class="ghost danger">Delete</button></form></div>
 </form>
 <div class="card gap-4">{pub}</div>
+{carry_card(db, t, req)}
 {timing}
 {results}"""
     return html_response(page(t["title"], body, "Tests"))
+
+
+def carry_card(db, t, req):
+    """On a rebuilt handout: bring the students' answers over from the old
+    one, so nobody who had started it finds an empty page."""
+    if (t["kind"] if "kind" in t.keys() else None) != "handout":
+        return ""
+    olds = db.execute("SELECT id, title, published FROM dtests WHERE kind='handout'"
+                      " AND id<>? AND IFNULL(level_id,0)=IFNULL(?,0) ORDER BY id DESC",
+                      (t["id"], t["level_id"])).fetchall()
+    if not olds:
+        return ""
+    done = req["query"].get("carried", [""])[0]
+    said = ""
+    if done:
+        who = req["query"].get("students", ["0"])[0]
+        said = (f'<p class="sub gap-3"><strong>{E(done)} answers</strong> brought over '
+                f'for {E(who)} student(s). Anything they had already typed here was left alone.</p>')
+    opts = "".join(f'<option value="{o["id"]}">{E(o["title"])} '
+                   f'({"published" if o["published"] else "hidden"}, #{o["id"]})</option>'
+                   for o in olds)
+    return f"""<h2>Answers from an older version</h2>
+<div class="card"><form method="post" action="/tests/{t["id"]}/carry" class="inline">
+<label class="f">Copy what students typed in<select name="from">{opts}</select></label>
+<label class="f pushed">&nbsp;<button>Bring their answers over</button></label>
+</form>
+<p class="sub gap-3">For a handout that was rebuilt: every box is matched by its
+exercise and item, and each student finds their answers waiting here. The old
+version keeps its copy.</p>{said}</div>"""
+
+
+def act_test_carry(req, db, tid):
+    new = db.execute("SELECT * FROM dtests WHERE id=? AND kind='handout'", (tid,)).fetchone()
+    old = (req["form"].get("from", [""])[0] or "").strip()
+    if not new or not old.isdigit() or int(old) == tid or not db.execute(
+            "SELECT 1 FROM dtests WHERE id=? AND kind='handout'", (int(old),)).fetchone():
+        return redirect(f"/tests/{tid}")
+    done = core.carry_answers(db, int(old), tid)
+    copied = sum(n for n, _left in done.values())
+    return redirect(f"/tests/{tid}?carried={copied}&students={len(done)}")
 
 
 def view_test_writing(req, db, tid):
@@ -9069,6 +9610,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/key$", act_test_key),
     ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
+    ("POST", r"^/tests/(\d+)/carry$", act_test_carry),
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("POST", r"^/tests/(\d+)/timing$", act_test_timing),
     ("GET",  r"^/tests/(\d+)/writing$", view_test_writing),

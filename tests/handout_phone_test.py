@@ -118,7 +118,7 @@ def post(path, fields):
 
 
 page = get("/s/%s?tab=handouts&h=%d" % (tok, hid))
-sheet = page[page.index('class="booksheet handout"'):]
+sheet = page[page.index('class="booksheet handout'):]
 
 print("1. A CHOICE IS TAPPED, NOT TYPED")
 check("each choice question is a row of chips", sheet.count('<span class="bk-chips"') == 5)

@@ -676,6 +676,17 @@ def migrate(db):
         ord INTEGER NOT NULL DEFAULT 0,
         control TEXT                       -- how a handout box is answered on a phone
     );
+    CREATE TABLE IF NOT EXISTS dparts (
+        -- a handout is done one part at a time: a row here is a part the
+        -- student has checked, with how it went; the next part opens after it
+        attempt_id INTEGER NOT NULL REFERENCES dattempts(id) ON DELETE CASCADE,
+        part INTEGER NOT NULL,
+        right_n INTEGER NOT NULL DEFAULT 0,
+        wrong_n INTEGER NOT NULL DEFAULT 0,
+        teacher_n INTEGER NOT NULL DEFAULT 0,
+        checked_at TEXT NOT NULL,
+        PRIMARY KEY (attempt_id, part)
+    );
     CREATE TABLE IF NOT EXISTS doptions (
         id INTEGER PRIMARY KEY,
         question_id INTEGER NOT NULL REFERENCES dquestions(id) ON DELETE CASCADE,
@@ -4657,8 +4668,11 @@ def answer_matches(given, expected):
     """
     def tidy(t):
         t = (t or "").strip().lower()
-        t = t.replace("\u2019", "'").replace("\u2018", "'")
+        # a phone types ’ for an apostrophe, and some keyboards only offer ` or ´
+        for mark in ("\u2019", "\u2018", "`", "\u00b4", "\u02bc"):
+            t = t.replace(mark, "'")
         t = re.sub(r"^[\s\-–—]+|[\s.,;:!?]+$", "", t)
+        t = re.sub(r"\s*,\s*", ", ", t)        # "yes,let's" is "yes, let's"
         return re.sub(r"\s+", " ", t)
     got = tidy(given)
     if not got:
@@ -4783,6 +4797,108 @@ def sat_already(db, test_id, student_id):
     return bool(db.execute(
         "SELECT 1 FROM dattempts WHERE test_id=? AND student_id=?"
         " AND finished_at IS NOT NULL LIMIT 1", (test_id, student_id)).fetchone())
+
+
+# ------------------------------------------------ a handout, rebuilt
+#
+# When a handout is rebuilt - a better layout, a corrected key - the students
+# who had already started the old one should find their answers waiting in
+# the new one, not an empty page. Boxes are matched by exercise and item,
+# which is what a rebuild keeps; the question numbers are not.
+
+SAME_WORD = {"will": "'ll", "will not": "won't", "shall not": "shan't",
+             "let us": "let's", "i will": "i'll"}
+
+
+def _box_keys(rows):
+    """(exercise, item, n-th box of that item) for each question, in order."""
+    seen, out = {}, {}
+    for q in rows:
+        label, _, rest = (q["prompt"] or "").strip().partition(" ")
+        rest = rest.strip()
+        if rest.startswith(label):
+            m = re.search(r"\bitem (\d+)", rest)
+        else:
+            m = re.match(r"(\d+)\s", rest)
+        item = int(m.group(1)) if m else None
+        k = (label, item)
+        seen[k] = seen.get(k, 0) + 1
+        out[q["id"]] = (label, item, seen[k])
+    return out
+
+
+def _as_option(given, options):
+    """The chip a typed answer means, or None if it is not one of them."""
+    def tidy(t):
+        t = (t or "").strip().lower()
+        for mark in ("\u2019", "\u2018", "`", "\u00b4", "\u02bc"):
+            t = t.replace(mark, "'")
+        return re.sub(r"[\s.!?]+$", "", re.sub(r"\s+", " ", t))
+    g = tidy(given)
+    g = SAME_WORD.get(g, g)
+    for o in options:
+        if g in (tidy(o["letter"]), tidy(o["text"])):
+            return o["letter"]
+    return None
+
+
+def carry_answers(db, old_tid, new_tid):
+    """Copy every student's typed answers from an old version of a handout
+    into the new one, box by box. Nothing already typed in the new one is
+    touched. Returns {student_id: (copied, left_behind)}."""
+    def questions(tid):
+        return db.execute("SELECT * FROM dquestions WHERE test_id=? ORDER BY num, id",
+                          (tid,)).fetchall()
+    old_q, new_q = questions(old_tid), questions(new_tid)
+    old_key, new_key = _box_keys(old_q), _box_keys(new_q)
+    target = {k: qid for qid, k in new_key.items()}
+    options = {}
+    for o in db.execute("SELECT o.* FROM doptions o JOIN dquestions q ON q.id=o.question_id"
+                        " WHERE q.test_id=? ORDER BY o.id", (new_tid,)):
+        options.setdefault(o["question_id"], []).append(o)
+    done = {}
+    for a in db.execute("SELECT * FROM dattempts WHERE test_id=? ORDER BY id", (old_tid,)).fetchall():
+        typed = db.execute("SELECT * FROM dresponses WHERE attempt_id=? AND IFNULL(given,'')<>''",
+                           (a["id"],)).fetchall()
+        if not typed:
+            continue
+        aid = start_attempt(db, new_tid, a["student_id"])
+        have = {r["question_id"] for r in db.execute(
+            "SELECT question_id FROM dresponses WHERE attempt_id=? AND IFNULL(given,'')<>''", (aid,))}
+        copied, left = 0, []
+        for r in typed:
+            qid = target.get(old_key.get(r["question_id"]))
+            if qid is None:
+                left.append(r["given"])
+                continue
+            if qid in have:
+                continue
+            given = r["given"]
+            if qid in options:
+                given = _as_option(given, options[qid])
+                if given is None:
+                    left.append(r["given"])
+                    continue
+            db.execute("INSERT INTO dresponses (attempt_id, question_id, given, correct)"
+                       " VALUES (?,?,?,NULL) ON CONFLICT(attempt_id, question_id)"
+                       " DO UPDATE SET given=excluded.given", (aid, qid, given))
+            copied += 1
+        done[a["student_id"]] = (copied, left)
+    db.commit()
+    return done
+
+
+def handout_parts_done(db, attempt_id):
+    """{part number: its row} for the parts of a handout already checked."""
+    return {r["part"]: r for r in db.execute(
+        "SELECT * FROM dparts WHERE attempt_id=? ORDER BY part", (attempt_id,))}
+
+
+def record_part(db, attempt_id, part, right, wrong, teacher):
+    db.execute("INSERT OR IGNORE INTO dparts (attempt_id, part, right_n, wrong_n,"
+               " teacher_n, checked_at) VALUES (?,?,?,?,?,?)",
+               (attempt_id, part, right, wrong, teacher, iso(now())))
+    db.commit()
 
 
 def start_attempt(db, test_id, student_id):
@@ -4996,6 +5112,7 @@ def drop_attempt(db, attempt_id):
     if not row:
         return None
     db.execute("DELETE FROM dresponses WHERE attempt_id=?", (attempt_id,))
+    db.execute("DELETE FROM dparts WHERE attempt_id=?", (attempt_id,))
     db.execute("DELETE FROM dattempts WHERE id=?", (attempt_id,))
     db.commit()
     return row["test_id"]
@@ -5817,6 +5934,8 @@ def remove_student(db, student_id):
     # to a row that is about to disappear is let go
     db.execute("UPDATE seasons SET winner_id=NULL WHERE winner_id=?", (student_id,))
     db.execute("DELETE FROM dresponses WHERE attempt_id IN"
+               " (SELECT id FROM dattempts WHERE student_id=?)", (student_id,))
+    db.execute("DELETE FROM dparts WHERE attempt_id IN"
                " (SELECT id FROM dattempts WHERE student_id=?)", (student_id,))
     db.execute("DELETE FROM game_answers WHERE student_id=?", (student_id,))
     db.execute("DELETE FROM solo_questions WHERE run_id IN"

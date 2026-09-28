@@ -131,9 +131,64 @@
     var after = (el.type === "hidden" ? el : box).nextElementSibling;
     if (after && after.classList.contains("bk-answer")) after.remove();
   }
+  // ---- a handout in parts: a part is checked once, when it is complete,
+  // and then locks; the second tap is the confirmation, not a dialog
+  var armed = null;
+  function checkPart(d, part) {
+    var mk = document.getElementById("marknote");
+    var btn = document.getElementById("checkbtn");
+    var left = groups().filter(function (n) { return !answered(n); });
+    if (left.length) {
+      if (mk) mk.textContent = (left.length === 1 ? "1 box is" : left.length + " boxes are") +
+        " still empty. Answer every box in this part first.";
+      nextEmpty();
+      return;
+    }
+    if (btn && !btn.classList.contains("armed")) {
+      btn.classList.add("armed");
+      btn.textContent = "Sure? Answers lock";
+      if (mk) mk.textContent = "Tap again to check. After that the answers in this part can't be changed.";
+      clearTimeout(armed);
+      armed = setTimeout(function () {
+        btn.classList.remove("armed");
+        btn.textContent = btn.getAttribute("data-label") || "Check";
+      }, 5000);
+      return;
+    }
+    clearTimeout(armed);
+    if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+    var b = body();
+    b.append("part", part);
+    fetch(d.getAttribute("data-check"), {method: "POST", body: b,
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"}})
+      .then(function (r) { return r.json(); })
+      .then(function (out) {
+        if (out.ok && out.go) {
+          dirty = false;
+          if (window.Nav && window.Nav.go) window.Nav.go(out.go, true);
+          else window.location.href = out.go;
+          return;
+        }
+        if (btn) { btn.disabled = false; btn.classList.remove("armed");
+                   btn.textContent = btn.getAttribute("data-label") || "Check"; }
+        if (out.missing && out.missing.length) {
+          if (mk) mk.textContent = "Some boxes are still empty.";
+          var first = sheet().querySelector('[data-q="' + out.missing[0] + '"]');
+          if (first) first.scrollIntoView({block: "center", behavior: "smooth"});
+        } else if (mk) mk.textContent = "Could not check just now. Try again in a moment.";
+      })
+      .catch(function () {
+        if (btn) { btn.disabled = false; btn.classList.remove("armed");
+                   btn.textContent = btn.getAttribute("data-label") || "Check"; }
+        if (mk) mk.textContent = "Could not check just now — are you online?";
+      });
+  }
+
   function check() {
     var d = data();
     if (!d) return;
+    if (d.getAttribute("data-part")) { checkPart(d, d.getAttribute("data-part")); return; }
     var mk = document.getElementById("marknote");
     if (mk) mk.textContent = "Checking…";
     fetch(d.getAttribute("data-check"), {method: "POST", body: body(),
@@ -241,6 +296,6 @@
     progress();
   }
   document.addEventListener("DOMContentLoaded", boot);
-  document.addEventListener("pageswap", function () { dirty = false; boot(); });
+  document.addEventListener("pageswap", function () { dirty = false; clearTimeout(armed); boot(); });
   boot();
 })();
