@@ -2398,6 +2398,12 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 .hx-step.here .hx-step-name { color: #fff; }
 .hx-step a:focus-visible { outline: 2px solid var(--hx-gold); outline-offset: 3px; border-radius: var(--r-sm); }
 
+/* a handout set as homework says so, above everything else */
+.hwstrip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2);
+  margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
+  background: var(--accent-soft); border: 1px solid var(--accent-line); font-size: 14px; }
+.hwstrip .sub { margin-left: auto; }
+
 .hx-parthead { margin: 0 0 var(--sp-3); }
 .hx-partno { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .12em;
   text-transform: uppercase; color: var(--brand); }

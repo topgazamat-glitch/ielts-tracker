@@ -111,8 +111,18 @@
 
       const form = document.querySelector('form[action="/assignments/list"]');
       form.querySelector('select[name=group_id]').value = $("u_group").value;
-      form.querySelector('textarea[name=items]').value =
-        items.map((i) => i.title).join("\n");
+      handoutsForLevel();
+      // a digital handout goes in its own box, where it marks itself; the
+      // rest are lines
+      const pick = document.getElementById("hwhandout");
+      const book = items.find((i) => i.kind === "booklet" && i.test_id);
+      let picked = false;
+      if (pick && book && pick.querySelector('option[value="' + book.test_id + '"]:not(:disabled)')) {
+        pick.value = String(book.test_id);
+        picked = true;
+      }
+      form.querySelector('textarea[name=items]').value = items
+        .filter((i) => !(picked && i === book)).map((i) => i.title).join("\n");
 
       const writing = items.find((i) => i.kind === "writing");
       const promptBox = form.querySelector('textarea[name=prompt]');
@@ -136,3 +146,26 @@
     }
   });
 })();
+
+/* ------------------------------------------------- the handout to open
+ * Only the handouts on the chosen class's level are offered; changing the
+ * class changes the list.
+ */
+function handoutsForLevel() {
+  const pick = document.getElementById("hwhandout");
+  if (!pick) return;
+  const group = pick.form.querySelector('select[name="group_id"]');
+  const lv = group.options[group.selectedIndex].getAttribute("data-level");
+  pick.querySelectorAll("optgroup").forEach((og) => {
+    const mine = !lv || og.getAttribute("data-level") === lv;
+    og.hidden = !mine;
+    og.disabled = !mine;
+  });
+  const chosen = pick.selectedOptions[0];
+  if (chosen && chosen.parentNode.disabled) pick.value = "";
+}
+document.addEventListener("change", (e) => {
+  if (e.target.name === "group_id") handoutsForLevel();
+});
+document.addEventListener("pageswap", handoutsForLevel);
+handoutsForLevel();

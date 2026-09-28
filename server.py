@@ -1553,6 +1553,11 @@ def view_student(req, db, sid):
             ]
             detail = " · ".join(filter(None, [", ".join(tags), sub["note"] or ""]))
             state = score_pill(t["score"]) if t["score"] is not None else '<span class="pill mute">pending</span>'
+        elif t.get("handout") and t["status"] == "handout":
+            h_ = t["handout"]
+            detail = f'digital handout · {h_["parts"]} of {h_["total"]} parts'
+            state = (score_pill(t["score"]) if t["score"] is not None
+                     else '<span class="pill mute">in progress</span>')
         else:
             detail, state = "", '<span class="pill risk">not submitted</span>'
         hist += (
@@ -1650,7 +1655,23 @@ def view_assignments(req, db):
     sug_levels = "".join(f'<option value="{E(l)}">{E(l)}</option>' for l in core.LEVELS)
     sug_kinds = "".join(f'<option value="{k}">{E(lab)}</option>'
                         for k, lab, _w, _m in core.prompt_kinds())
-    opts = "".join(f'<option value="{g["id"]}">{E(g["name"])}</option>' for g in groups)
+    opts = "".join(f'<option value="{g["id"]}" data-level="{g["level_id"] or ""}">{E(g["name"])}</option>'
+                   for g in groups)
+    # every digital handout, under its level; one open only as a class's
+    # homework says so. An older version with the same title is left out.
+    shelves = ""
+    open_titles = {r["title"] for r in db.execute(
+        "SELECT title FROM dtests WHERE kind='handout' AND published=1")}
+    for lv in db.execute("SELECT id, name FROM levels ORDER BY sort"):
+        books = [b for b in db.execute(
+            "SELECT id, title, published FROM dtests WHERE kind='handout' AND level_id=?"
+            " ORDER BY number, id DESC", (lv["id"],))
+            if b["published"] or b["title"] not in open_titles]
+        if books:
+            shelves += (f'<optgroup label="{E(lv["name"])}" data-level="{lv["id"]}">'
+                        + "".join(f'<option value="{b["id"]}">{E(b["title"])}'
+                                  f'{"" if b["published"] else " (opens only for this class)"}'
+                                  f'</option>' for b in books) + "</optgroup>")
     body = f"""<h1>Set homework</h1>
 <p class="sub">What you set here is what the bot offers students when they send a photo.
 Everything already set is on the <a class="linky" href="/homework">Homework</a> page,
@@ -1693,9 +1714,16 @@ neither has to be typed twice.</p>
 <span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
 <input type="checkbox" name="rubric" value="1"> mark on the four criteria</span></label>
 </div>
+<div class="hwpick gap-2">
+<label class="f">Digital handout<select name="handout" id="hwhandout">
+<option value="">none</option>{shelves}</select></label>
+<p class="sub">It opens for this class with the deadline above and marks itself:
+half for the parts done by the deadline, half for the right answers. Its mark
+out of ten is averaged with your marks for the rest of this homework.</p>
+</div>
 <label class="f">One item per line &mdash; numbering is optional
-<textarea name="items" rows="6" class="wide" required
-placeholder="Task 2 essay &ndash; Technology&#10;Grammar handout page 45&#10;Vocabulary unit 4 &ndash; write 10 sentences"></textarea></label>
+<textarea name="items" rows="6" class="wide"
+placeholder="Workbook unit 4 A &amp; C&#10;Writing &ndash; an email to a friend&#10;Grammar paper page 45"></textarea></label>
 <details class="gap-3"><summary>Make it a writing task they type</summary>
 <p class="sub gap-2">Students get a writing paper &mdash; the question on one side, the
 sheet on the other &mdash; instead of sending a photo of their handwriting. One question
@@ -2309,10 +2337,13 @@ def student_shell(s, db, token, tab, body):
 
 def portal_home(db, s, token, flash):
     st = core.student_stats(db, s["id"])
+    # a handout is done on the site, not photographed: it is not a thing to
+    # send pages for
     opens = [a for a in db.execute(
         "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
         " ORDER BY COALESCE(due_at, created_at) DESC, id DESC",
-        (s["group_id"],)).fetchall() if core.still_open(a["due_at"])]
+        (s["group_id"],)).fetchall()
+        if core.still_open(a["due_at"]) and not core.is_handout(db, a["test_id"])]
     if opens:
         opts = "".join(f'<option value="{a["id"]}">{E(a["title"])}</option>' for a in opens)
         picker = (f'<label class="f">Which task?<select name="assignment_id">{opts}</select></label>'
@@ -2333,7 +2364,17 @@ def portal_home(db, s, token, flash):
             done = a["id"] in prog["done_ids"]
             link = ""
             tid = a["test_id"] if "test_id" in a.keys() else None
-            if tid:
+            if tid and core.is_handout(db, tid):
+                # a digital handout: open it, and see how many parts are done
+                state = core.handout_status(db, tid, s["id"])
+                done = state["done"]
+                link = (f' <span class="pill{" good" if done else ""}">'
+                        f'{state["parts"]}/{state["total"]} parts</span>'
+                        f' <a class="linky" href="/s/{E(token)}?tab=handouts&amp;h={tid}">'
+                        f'{"open it" if not state["started"] else "carry on"} &rarr;</a>'
+                        if not done else
+                        f' <span class="pill good">{state["mark"]:g} / 10</span>')
+            elif tid:
                 # the handout is on the site, so the homework opens it rather
                 # than telling the student to go and find it
                 sat = db.execute(
@@ -2765,11 +2806,8 @@ def fill_choices(layout, qs, given=None, marks=None):
 # tick. Two-column exercises get their reading order back on a narrow
 # screen, and every exercise gets an anchor so the page can be navigated.
 
-BOOKLET_TEAL = "127D80"          # the booklets' own colour: section bars, exercise numbers
-SECTION_AT = re.compile(
-    r'<table class="bk">(<tr><td style="[^"]*background:#' + BOOKLET_TEAL + r'[^"]*">'
-    r'<p[^>]*><span[^>]*>(\d+)</span></p></td><td[^>]*><p[^>]*>'
-    r'<span[^>]*>([^<]+)</span>)')
+BOOKLET_TEAL = core.BOOKLET_TEAL  # the booklets' own colour: section bars, exercise numbers
+SECTION_AT = core.SECTION_AT
 EXERCISE_AT = re.compile(
     r'<p((?: [a-z-]+="[^"]*")*)>(<span style="font-weight:700;color:#' + BOOKLET_TEAL
     + r';[^"]*">(\d+\.\d+)\s*</span>)')
@@ -2896,9 +2934,11 @@ def handout_controls(layout, qs, given=None, marks=None):
                 fill = f'<p class="bk-key">Answer: {E(hx_key(q["answer"]))}</p>'
             elif lock and mark is None and mine.strip():
                 state = " teacher"
+            short = (f' data-min-words="{core.WRITING_MIN_WORDS}"'
+                     if core.is_writing(q) and not lock else "")
             return (f'<textarea class="bk-blank bk-long{" bk-essay" if kind == "essay" else ""}{state}" '
                     f'name="q{q["id"]}" data-q="{num}" rows="{4 if kind == "essay" else 1}" spellcheck="true"'
-                    f'{" data-optional" if kind in ("note", "pair") else ""}'
+                    f'{short}{" data-optional" if kind in ("note", "pair") else ""}'
                     f'{" " + hint.group(0) if hint else ""}'
                     f'{" readonly" if lock else ""}>{E(mine)}</textarea>{fill}')
         if kind == "number":
@@ -3167,24 +3207,9 @@ def hx_dress(fragment):
     return "".join(out)
 
 
-def handout_parts(layout):
-    """The booklet's opening, and its parts: [(number, name, what, markup)].
-    A booklet without section bars is one part."""
-    inner = layout
-    wrapped = re.match(r'\s*<div class="booklet"[^>]*>(.*)</div>\s*$', layout, re.S)
-    if wrapped:
-        inner = wrapped.group(1)
-    bars = list(SECTION_AT.finditer(inner))
-    if not bars:
-        return "", [(1, "The handout", "", inner)]
-    parts = []
-    for i, bar in enumerate(bars):
-        end = inner.index("</table>", bar.start()) + len("</table>")
-        stop = bars[i + 1].start() if i + 1 < len(bars) else len(inner)
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", inner[bar.start():end], re.S)
-        name, _sep, what = _plain(cells[-1]).partition("·")
-        parts.append((int(bar.group(2)), name.strip(), what.strip(), inner[end:stop]))
-    return inner[:bars[0].start()], parts
+# the parts of a handout are worked out in core, where the league needs them too
+handout_parts = core.handout_parts
+part_keys = core.part_keys
 
 
 def handout_cover(intro, t, level):
@@ -3206,11 +3231,6 @@ def handout_cover(intro, t, level):
                 goals.append(_hx_plainer(text))
     kicker = "Unit %s · %s" % (t["number"], level) if t["number"] else level
     return name, sub, kicker, goals
-
-
-def part_keys(part_markup):
-    """The question numbers a part holds."""
-    return [int(n) for n in re.findall(r'data-q="(\d+)"', part_markup)]
 
 
 def hx_ring(right, marked, cls="hx-ring"):
@@ -3267,8 +3287,13 @@ def portal_handouts(db, s, token, query):
     hid = int(hid) if hid and hid.isdigit() else None
 
     if hid is None:
-        books = core.digital_tests(db, level_id, published_only=True,
-                                   kind="handout")
+        books = core.digital_tests(db, level_id, published_only=True, kind="handout")
+        seen = {b["id"] for b in books}
+        # a handout set as homework to this class opens for it even when it is
+        # not open to everyone as practice
+        books = list(books) + [b for b in core.digital_tests(db, level_id, kind="handout")
+                               if b["id"] not in seen
+                               and core.handout_assigned(db, b["id"], s["group_id"])]
         if not books:
             return ('<h2>Handouts</h2><div class="card"><p class="flush">'
                     'Nothing here yet. Your teacher will put your booklets '
@@ -3299,9 +3324,9 @@ def portal_handouts(db, s, token, query):
                 f'straight away, and the next part opens.</p>'
                 f'<div class="tiles">{cards}</div>')
 
-    t = db.execute("SELECT * FROM dtests WHERE id=? AND published=1"
-                   " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
-    if not t:
+    t = db.execute("SELECT * FROM dtests WHERE id=? AND IFNULL(kind,'test')='handout'",
+                   (hid,)).fetchone()
+    if not t or not core.handout_open_to(db, hid, s["group_id"]):
         return '<h2>Handouts</h2><p class="sub">That booklet is not open.</p>'
     if not (t["layout"] if "layout" in t.keys() else None):
         return '<h2>Handouts</h2><p class="sub">That booklet has no pages.</p>'
@@ -3371,6 +3396,7 @@ def handout_view(db, token, t, qs, attempt, query):
     # results; every other part gets a strip, so the work is near the top
     slim = "" if (view == "end" or not done) else " slim"
     hero = f"""<p class="sub"><a class="crumb" href="{base}">Handouts</a> &rsaquo; {E(t["title"])}</p>
+{homework_strip(db, t, attempt)}
 <header class="hx-hero{slim}">
   <p class="hx-kicker">{E(kicker)}</p>
   <h1 class="hx-title">{E(name)}</h1>
@@ -3435,6 +3461,29 @@ def handout_view(db, token, t, qs, attempt, query):
      data-check="/s/{E(token)}/handout/{hid}/check" data-part="{n}"></div>"""
 
 
+def homework_strip(db, t, attempt):
+    """A handout set as homework says so: when it is due and what it is worth
+    so far - half for the parts checked in time, half for the right answers."""
+    st = db.execute("SELECT group_id FROM students WHERE id=?", (attempt["student_id"],)).fetchone()
+    a = db.execute("SELECT * FROM assignments WHERE test_id=? AND group_id=? AND published=1"
+                   " ORDER BY due_at IS NULL, due_at DESC LIMIT 1",
+                   (t["id"], st["group_id"] if st else None)).fetchone()
+    if not a:
+        return ""
+    state = core.handout_status(db, t["id"], attempt["student_id"], a["due_at"])
+    cfg = core.load_config()
+    when, rel = due_words(a["due_at"], cfg) if a["due_at"] else ("no deadline", "")
+    open_now = core.still_open(a["due_at"])
+    tail = (f"{state['parts']} of {state['total']} parts done in time &middot; "
+            f"<strong>{state['mark']:g}</strong> out of 10 so far" if state["started"] else
+            f"Not started &middot; {state['total']} parts")
+    late = ("" if open_now else
+            '<span class="pill risk">deadline passed &mdash; what you do now is practice</span> ')
+    return (f'<div class="hwstrip"><span class="pill">Homework</span> '
+            f'<span>due {E(when)}{(" &middot; " + E(rel)) if rel and open_now else ""}</span> '
+            f'{late}<span class="sub">{tail}</span></div>')
+
+
 def part_result(pname, r, onward):
     """How a part went, at the top of it once it is checked."""
     marked = r["right_n"] + r["wrong_n"]
@@ -3481,9 +3530,7 @@ def act_handout_save(req, db, token, hid):
     st = core.student_by_token(db, token)
     if not st:
         return json_response({"ok": False})
-    t = db.execute("SELECT id FROM dtests WHERE id=? AND published=1"
-                   " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
-    if not t:
+    if not core.handout_open_to(db, hid, st["group_id"]):
         return json_response({"ok": False})
     attempt = db.execute(
         "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
@@ -3531,9 +3578,7 @@ def act_handout_check(req, db, token, hid):
     st = core.student_by_token(db, token)
     if not st:
         return json_response({"ok": False})
-    t = db.execute("SELECT id FROM dtests WHERE id=? AND published=1"
-                   " AND IFNULL(kind,'test')='handout'", (hid,)).fetchone()
-    if not t:
+    if not core.handout_open_to(db, hid, st["group_id"]):
         return json_response({"ok": False})
     attempt = db.execute(
         "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
@@ -3610,7 +3655,8 @@ def check_part(db, token, hid, aid, part, qs, typed):
     def text(q):
         return typed[q["id"]] if q["id"] in typed else saved.get(q["id"], "").strip()
     missing = sorted(q["num"] for q in mine
-                     if (q["control"] or "") not in OPTIONAL_BOXES and not text(q))
+                     if (q["control"] or "") not in OPTIONAL_BOXES
+                     and (not text(q) or core.too_short(q, text(q))))
     if missing:
         return json_response({"ok": False, "missing": missing})
     right, wrong = mark_part(db, aid, part, mine, text)
@@ -4024,8 +4070,9 @@ def portal_progress(db, s, token):
     for t in reversed(st["timeline"]):
         if t["score"] is not None:
             state = score_pill(t["score"])
-        elif t["submission_id"]:
-            state = '<span class="pill mute">waiting</span>'
+        elif t["submission_id"] or t["status"] == "handout":
+            state = ('<span class="pill mute">in progress</span>' if t["status"] == "handout"
+                     else '<span class="pill mute">waiting</span>')
         else:
             state = '<span class="pill risk">not sent</span>'
         hist += f'<tr><td>{E(t["title"])}</td><td class="right">{state}</td></tr>'
@@ -4370,8 +4417,9 @@ def view_parent_report(req, db, token):
     for t in reversed(st["timeline"][-12:]):
         if t["score"] is not None:
             state = score_pill(t["score"])
-        elif t["submission_id"]:
-            state = '<span class="pill mute">waiting to be marked</span>'
+        elif t["submission_id"] or t["status"] == "handout":
+            state = ('<span class="pill mute">in progress</span>' if t["status"] == "handout"
+                     else '<span class="pill mute">waiting to be marked</span>')
         else:
             state = '<span class="pill risk">not handed in</span>'
         hist += f'<tr><td>{E(t["title"])}</td><td class="right">{state}</td></tr>'
@@ -5371,7 +5419,8 @@ def act_student_upload(req, db, token):
     if raw_aid and raw_aid.isdigit():
         # only accept an assignment that is genuinely open for this student's group
         ok = db.execute(
-            "SELECT id FROM assignments WHERE id=? AND group_id=? AND closed=0",
+            "SELECT id FROM assignments WHERE id=? AND group_id=? AND closed=0"
+            " AND (test_id IS NULL OR test_id NOT IN (SELECT id FROM dtests WHERE kind='handout'))",
             (int(raw_aid), s["group_id"]),
         ).fetchone()
         aid = ok["id"] if ok else None
@@ -5649,12 +5698,27 @@ def view_homework_set(req, db):
 </div>"""
 
     head = "".join(f'<th title="{E(a["title"])}">{E(a["title"][:14])}</th>' for a in items)
+    handouts = {a["id"]: a["test_id"] for a in items if core.is_handout(db, a["test_id"])}
+
+    def cell(a, p):
+        tid = handouts.get(a["id"])
+        if tid:
+            # a handout marks itself: its mark once the deadline has gone, the
+            # parts done until then
+            st = core.handout_status(db, tid, p["student"]["id"], due)
+            if not st["started"]:
+                return '<td class="tick"><span class="mute">&#11036;</span></td>'
+            past = not core.still_open(due)
+            shown = (f'{st["mark"]:g}' if past or st["done"] else f'{st["parts"]}/{st["total"]}')
+            flag = ' <span class="pill risk">void</span>' if st["voided"] else ""
+            return (f'<td class="tick"><span class="pill{" good" if st["done"] else ""}"'
+                    f' title="{st["parts"]} of {st["total"]} parts, {st["mark"]:g} out of 10">'
+                    f'{shown}</span>{flag}</td>')
+        return ('<td class="tick">' + ("&#9989;" if a["id"] in p["done_ids"] else
+                                       '<span class="mute">&#11036;</span>') + "</td>")
     grid = ""
     for p in prog:
-        cells = "".join(
-            '<td class="tick">' + ("&#9989;" if a["id"] in p["done_ids"] else
-                                   '<span class="mute">&#11036;</span>') + "</td>"
-            for a in items)
+        cells = "".join(cell(a, p) for a in items)
         cls = "pill risk" if p["percent"] < 50 else "pill"
         grid += (f'<tr><td><a href="/students/{p["student"]["id"]}">'
                  f'{E(p["student"]["name"])}</a></td>{cells}'
@@ -5692,6 +5756,9 @@ def view_homework_set(req, db):
     for a in items:
         n = db.execute("SELECT COUNT(*) c FROM submissions WHERE assignment_id=?",
                        (a["id"],)).fetchone()["c"]
+        if a["id"] in handouts:
+            n = sum(1 for p in prog
+                    if core.handout_status(db, handouts[a["id"]], p["student"]["id"])["started"])
         if a["closed"]:
             flip = ("open", "reopen")
         elif not a["published"]:
@@ -5738,8 +5805,22 @@ on the students' page and keeps your marks &mdash; it simply stops awarding poin
 {who}
 <h2>Item by item</h2>
 <div class="tablewrap"><table><tr><th>Student</th>{head}<th>Done</th></tr>{grid}</table></div>
+{handout_note(handouts)}
 {manage}"""
     return html_response(page(f"{g['name']} homework", body, "Homework"))
+
+
+def handout_note(handouts):
+    """Under the table, for a set with a handout in it: what its column means,
+    and where to read what the class wrote."""
+    if not handouts:
+        return ""
+    links = " ".join(f'<a class="linky" href="/tests/{tid}/writing">read their writing</a>'
+                     for tid in sorted(set(handouts.values())))
+    return (f'<p class="sub gap-2">The handout marks itself: parts done until the '
+            f'deadline, then its mark out of ten &mdash; half for the parts done in time, '
+            f'half for the right answers. {links} &mdash; a nonsense answer can be '
+            f'marked as not counting there, and the part it is in stops counting as done.</p>')
 
 
 
@@ -8591,13 +8672,23 @@ def view_test_writing(req, db, tid):
                 f'{len(blank)} left blank &middot; '
                 f'{middle} words in the middle of the class</p>')
         rows = ""
+        handout = (t["kind"] if "kind" in t.keys() else None) == "handout"
         for a in written:
             when = E((a["finished_at"] or "")[:16].replace("T", " "))
+            void = ""
+            if handout:
+                void = (f'<form method="post" action="/tests/{tid}/void" class="inline">'
+                        f'<input type="hidden" name="attempt" value="{a["attempt_id"]}">'
+                        f'<input type="hidden" name="question" value="{q["id"]}">'
+                        f'<input type="hidden" name="on" value="{0 if a["void"] else 1}">'
+                        f'<button class="linky{"" if a["void"] else " danger"}">'
+                        f'{"count it after all" if a["void"] else "does not count"}</button></form>')
+            flag = ' <span class="pill risk">does not count</span>' if a.get("void") else ""
             rows += (f'<div class="card writ">'
                      f'<div class="rowline">'
                      f'<strong><a href="/students/{a["student_id"]}">'
-                     f'{E(a["name"])}</a></strong>'
-                     f'<span class="sub">{a["words"]} words &middot; {when}</span>'
+                     f'{E(a["name"])}</a>{flag}</strong>'
+                     f'<span class="sub">{a["words"]} words &middot; {when} {void}</span>'
                      f'</div>'
                      f'<div class="passage gap-2">{E(a["text"])}</div></div>')
         if blank:
@@ -8610,11 +8701,21 @@ def view_test_writing(req, db, tid):
     body = (f'<h1>Writing &mdash; {E(t["title"])}</h1>'
             f'<p class="sub">What students wrote, in their own words. Nothing '
             f'here is marked by the system &mdash; the writing is yours to '
-            f'read.</p>'
+            f'read.{" An answer marked as not counting takes the part it is in out of the handout&rsquo;s mark." if (t["kind"] if "kind" in t.keys() else None) == "handout" else ""}</p>'
             f'{blocks}'
             f'<p class="gap-4"><a class="tab" href="/tests/{tid}">'
             f'Back to the test</a></p>')
     return html_response(page("Writing", body, "Tests"))
+
+
+def act_test_void(req, db, tid):
+    """A written answer in a handout does not count - or counts after all."""
+    f = req["form"]
+    att, qid = (f.get("attempt", [""])[0] or ""), (f.get("question", [""])[0] or "")
+    if att.isdigit() and qid.isdigit() and db.execute(
+            "SELECT 1 FROM dattempts WHERE id=? AND test_id=?", (int(att), tid)).fetchone():
+        core.void_answer(db, int(att), int(qid), (f.get("on", ["1"])[0] or "1") == "1")
+    return redirect(f"/tests/{tid}/writing")
 
 
 def act_test_timing(req, db, tid):
@@ -9250,7 +9351,8 @@ def act_repeat_homework(req, db, gid):
     Setting homework is the most repetitive thing on the site: the same six or
     seven tasks, a week later. This is that, in one press.
     """
-    due = (req["form"].get("due", [""])[0] or "").strip()
+    f = req["form"]
+    due = (f.get("due", [""])[0] or "").strip()
     if not due:
         return redirect(f"/groups/{gid}?tab=homework")
     due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
@@ -9260,8 +9362,9 @@ def act_repeat_homework(req, db, gid):
             continue
         made.append(db.execute(
             "INSERT INTO assignments (group_id, title, task_type, due_at, created_at,"
-            " published) VALUES (?,?,?,?,?,1)",
-            (gid, a["title"], a["task_type"], due_iso, core.iso(core.now())),
+            " published, test_id) VALUES (?,?,?,?,?,1,?)",
+            (gid, a["title"], a["task_type"], due_iso, core.iso(core.now()),
+             a["test_id"] if "test_id" in a.keys() else None),
         ).lastrowid)
     db.commit()
     if made and req["form"].get("announce", [""])[0] == "1":
@@ -9432,6 +9535,14 @@ def act_new_list(req, db):
     f = req["form"]
     gid = f.get("group_id", [None])[0]
     items = parse_list(f.get("items", [""])[0])
+    handout = (f.get("handout", [""])[0] or "").strip()
+    book = None
+    if handout.isdigit() and gid and gid.isdigit():
+        book = db.execute("SELECT id, title FROM dtests WHERE id=? AND kind='handout'"
+                          " AND level_id=(SELECT level_id FROM groups WHERE id=?)",
+                          (int(handout), int(gid))).fetchone()
+    if book and book["title"] not in items:
+        items.append(book["title"])       # the handout is one more piece of the set
     if not gid or not items:
         return redirect("/assignments")
     due = f.get("due", [""])[0]
@@ -9460,9 +9571,11 @@ def act_new_list(req, db):
     level_id = core.level_of(db, int(gid))
     if level_id:
         for r in db.execute(
-                "SELECT id, title FROM dtests WHERE level_id=? AND layout IS NOT NULL",
-                (level_id,)):
+                "SELECT id, title FROM dtests WHERE level_id=? AND layout IS NOT NULL"
+                " ORDER BY published, id", (level_id,)):
             booklets[r["title"].replace(" (booklet)", "").strip().lower()] = r["id"]
+    if book:
+        booklets[book["title"].strip().lower()] = book["id"]   # the one chosen, exactly
 
     created = []
     for i, title in enumerate(items):
@@ -9664,6 +9777,7 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("POST", r"^/tests/(\d+)/carry$", act_test_carry),
+    ("POST", r"^/tests/(\d+)/void$", act_test_void),
     ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("POST", r"^/tests/(\d+)/timing$", act_test_timing),
     ("GET",  r"^/tests/(\d+)/writing$", view_test_writing),

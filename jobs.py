@@ -43,14 +43,19 @@ def due_soon_reminders(db, token, cfg):
             key = f"{a['id']}:{st['id']}"
             if core.already_sent(db, "due_soon", key):
                 continue
-            done = db.execute(
-                "SELECT 1 FROM submissions WHERE student_id=? AND assignment_id=?",
-                (st["id"], a["id"]),
-            ).fetchone()
+            handout = core.is_handout(db, a["test_id"])
+            if handout:
+                done = core.handout_status(db, a["test_id"], st["id"], a["due_at"])["done"]
+            else:
+                done = db.execute(
+                    "SELECT 1 FROM submissions WHERE student_id=? AND assignment_id=?",
+                    (st["id"], a["id"]),
+                ).fetchone()
             if done:
                 core.mark_sent(db, "due_soon", key)   # nothing to chase
                 continue
-            _send(token, st["telegram_id"], _phrase(st["lang"], "due_soon", a["title"]))
+            _send(token, st["telegram_id"], _phrase(
+                st["lang"], "due_soon_handout" if handout else "due_soon", a["title"]))
             core.mark_sent(db, "due_soon", key)
             sent += 1
     return sent
@@ -72,11 +77,19 @@ def missed_nudges(db, token, cfg):
             key = f"{a['id']}:{st['id']}"
             if core.already_sent(db, "missed", key):
                 continue
+            core.mark_sent(db, "missed", key)
+            if core.is_handout(db, a["test_id"]):
+                state = core.handout_status(db, a["test_id"], st["id"], a["due_at"])
+                if not state["done"]:
+                    _send(token, st["telegram_id"], _phrase(
+                        st["lang"], "missed_handout", a["title"],
+                        parts=state["parts"], total=state["total"]))
+                    sent += 1
+                continue
             done = db.execute(
                 "SELECT 1 FROM submissions WHERE student_id=? AND assignment_id=?",
                 (st["id"], a["id"]),
             ).fetchone()
-            core.mark_sent(db, "missed", key)
             if done:
                 continue
             _send(token, st["telegram_id"], _phrase(st["lang"], "missed", a["title"]))
@@ -274,6 +287,24 @@ PHRASES = {
         "ru": "Напоминание: «{title}» нужно сдать завтра. Отправьте фото, когда будет готово.",
         "uz": "Eslatma: “{title}” ertaga topshiriladi. Tayyor bo'lganda rasmini yuboring.",
     },
+    # a digital handout is done on the site, part by part - there is nothing
+    # to photograph, and a part checked after the deadline is practice
+    "due_soon_handout": {
+        "en": "Reminder: “{title}” is due tomorrow. It is on your Handouts page — "
+              "check every part before the deadline.",
+        "ru": "Напоминание: «{title}» нужно выполнить к завтрашнему дню. Он на странице "
+              "Handouts — проверьте каждую часть до срока.",
+        "uz": "Eslatma: “{title}” ertagacha bajarilishi kerak. U Handouts sahifangizda — "
+              "muddatdan oldin har bir qismini tekshiring.",
+    },
+    "missed_handout": {
+        "en": "The deadline for “{title}” has passed: you checked {parts} of {total} parts "
+              "in time. What you do in it now is practice and does not count.",
+        "ru": "Срок для «{title}» истёк: вовремя проверено частей — {parts} из {total}. "
+              "Всё, что вы сделаете сейчас, — практика и в зачёт не идёт.",
+        "uz": "“{title}” muddati tugadi: {total} qismdan {parts} tasi vaqtida tekshirildi. "
+              "Endi bajarganlaringiz mashq hisoblanadi va baholanmaydi.",
+    },
     "missed": {
         "en": "The deadline for “{title}” has passed and you did not send it. "
               "Speak to your teacher if you still want it marked.",
@@ -285,9 +316,9 @@ PHRASES = {
 }
 
 
-def _phrase(lang, kind, title):
+def _phrase(lang, kind, title, **kw):
     table = PHRASES[kind]
-    return table.get(lang, table["en"]).format(title=title)
+    return table.get(lang, table["en"]).format(title=title, **kw)
 
 
 def _phrase_fmt(lang, kind, **kw):

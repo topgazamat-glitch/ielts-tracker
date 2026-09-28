@@ -705,13 +705,15 @@ def student_of(db, tid):
 
 
 def open_assignments(db, group_id):
-    """What a student may still send work for: published, not closed, not past."""
+    """What a student may still send work for: published, not closed, not past.
+    A digital handout is done on the site, so it is never one of them."""
     rows = db.execute(
         "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
         " ORDER BY COALESCE(due_at, created_at) DESC, id DESC",
         (group_id,),
     ).fetchall()
-    return [a for a in rows if core.still_open(a["due_at"])]
+    return [a for a in rows if core.still_open(a["due_at"])
+            and not core.is_handout(db, a["test_id"])]
 
 
 

@@ -1,5 +1,6 @@
 """Shared config, database access and domain logic."""
 import hashlib
+import html
 import json
 import os
 import random
@@ -489,6 +490,11 @@ def migrate(db):
     qcols = {r["name"] for r in db.execute("PRAGMA table_info(dquestions)")}
     # a new database has no dquestions yet: it is made further down, with
     # the column already in it
+    rcols = {r["name"] for r in db.execute("PRAGMA table_info(dresponses)")}
+    if rcols and "void" not in rcols:
+        # a teacher can say a written answer does not count - "x", "asdf" -
+        # and the part it was in stops counting as done
+        db.execute("ALTER TABLE dresponses ADD COLUMN void INTEGER NOT NULL DEFAULT 0")
     if qcols and "control" not in qcols:
         # how a handout box is answered on a phone: 'long' for a sentence,
         # 'tick', 'number', 'tickfill', 'essay' (a piece of writing, with a word
@@ -707,6 +713,7 @@ def migrate(db):
         question_id INTEGER NOT NULL REFERENCES dquestions(id) ON DELETE CASCADE,
         given TEXT,
         correct INTEGER,
+        void INTEGER NOT NULL DEFAULT 0,   -- the teacher said this answer does not count
         PRIMARY KEY (attempt_id, question_id)
     );
     CREATE TABLE IF NOT EXISTS criteria_scores (
@@ -1346,7 +1353,7 @@ def student_timeline(db, student_id):
     if not row or row["group_id"] is None:
         return []
     assignments = db.execute(
-        "SELECT id, title, created_at, due_at FROM assignments"
+        "SELECT id, title, created_at, due_at, test_id FROM assignments"
         " WHERE group_id=? ORDER BY COALESCE(due_at, created_at), id",
         (row["group_id"],),
     ).fetchall()
@@ -1360,6 +1367,17 @@ def student_timeline(db, student_id):
     }
     timeline = []
     for a in assignments:
+        if a["test_id"] and is_handout(db, a["test_id"]):
+            # no photograph: handed in once a part is checked, and marked once
+            # the deadline has passed, by the same rule as the league
+            state = handout_status(db, a["test_id"], student_id, a["due_at"])
+            past = _is_past(a["due_at"]) or not a["due_at"]
+            timeline.append({
+                "assignment_id": a["id"], "title": a["title"], "due_at": a["due_at"],
+                "submission_id": None, "handout": state,
+                "status": "handout" if state["started"] else "missing",
+                "score": state["mark"] if (state["started"] and past) else None})
+            continue
         s = subs.get(a["id"])
         timeline.append(
             {
@@ -3627,9 +3645,13 @@ def set_progress(db, student_id, items):
     ).fetchall()
     done_ids = {r["assignment_id"] for r in rows}
     # a booklet is handed in by sitting it, not by sending a photograph, so
-    # its tick comes from the attempt
+    # its tick comes from the attempt; a handout, from checking every part
     for a in items:
         tid = a["test_id"] if "test_id" in a.keys() else None
+        if tid and a["id"] not in done_ids and is_handout(db, tid):
+            if handout_status(db, tid, student_id)["done"]:
+                done_ids.add(a["id"])
+            continue
         if tid and a["id"] not in done_ids and db.execute(
                 "SELECT 1 FROM dattempts WHERE test_id=? AND student_id=?"
                 " AND finished_at IS NOT NULL LIMIT 1",
@@ -3665,7 +3687,7 @@ def streak(db, student_id):
     for row in reversed(student_timeline(db, student_id)):
         if not _is_past(row["due_at"]):
             continue
-        if row["submission_id"]:
+        if row["submission_id"] or row["status"] == "handout":
             n += 1
         else:
             break
@@ -3693,6 +3715,10 @@ def live_completion(db, student_id):
         " AND assignment_id IS NOT NULL AND draft=0",
         (student_id,),
     ).fetchone()["c"]
+    for a in db.execute("SELECT test_id FROM assignments WHERE group_id=? AND published=1"
+                        " AND test_id IS NOT NULL", (row["group_id"],)):
+        if is_handout(db, a["test_id"]) and handout_status(db, a["test_id"], student_id)["started"]:
+            done += 1
     return round(100 * min(done, total) / total)
 
 
@@ -4163,8 +4189,9 @@ def homework_marks(db, student, lo, hi, windows):
     # a deadline should not be lost because the season began the morning after
     # the homework was written
     was_set = db.execute(
-        "SELECT id, due_at FROM assignments WHERE group_id=? AND published=1"
-        " AND in_league=1 AND test_id IS NULL"
+        "SELECT id, due_at, test_id FROM assignments WHERE group_id=? AND published=1"
+        " AND in_league=1 AND (test_id IS NULL OR test_id IN"
+        " (SELECT id FROM dtests WHERE kind='handout'))"
         " AND created_at < ? AND (created_at >= ? OR (due_at IS NOT NULL AND due_at >= ?))"
         " ORDER BY due_at IS NULL, due_at",
         (student["group_id"], hi, lo, lo)).fetchall()
@@ -4178,6 +4205,21 @@ def homework_marks(db, student, lo, hi, windows):
             continue
         if due and paused_at(due, windows):
             continue                      # the league was off when this fell due
+        if a["test_id"]:
+            # a digital handout marks itself: half for the parts checked by the
+            # deadline, half for the right answers - averaged with the rest of
+            # the set, like any other piece of it
+            key = due or "none"
+            state = handout_status(db, a["test_id"], student["id"], due)
+            if not state["started"]:
+                if due:
+                    scores.append(0.0)
+                    batches.setdefault(key, []).append(0.0)
+                    missing += 1
+                continue
+            scores.append(state["mark"])
+            batches.setdefault(key, []).append(state["mark"])
+            continue
         sub = db.execute(
             "SELECT status, score, created_at FROM submissions WHERE student_id=?"
             " AND assignment_id=? AND draft=0 ORDER BY status='graded' DESC,"
@@ -4800,6 +4842,141 @@ def sat_already(db, test_id, student_id):
         " AND finished_at IS NOT NULL LIMIT 1", (test_id, student_id)).fetchone())
 
 
+# ------------------------------------------------ a handout's parts
+#
+# A handout is split into its parts by the booklet's own section bars - the
+# teal band with a number and a name. The page uses this to show one part at
+# a time, and the league uses it to score a handout set as homework.
+
+BOOKLET_TEAL = "127D80"
+SECTION_AT = re.compile(
+    r'<table class="bk">(<tr><td style="[^"]*background:#' + BOOKLET_TEAL + r'[^"]*">'
+    r'<p[^>]*><span[^>]*>(\d+)</span></p></td><td[^>]*><p[^>]*>'
+    r'<span[^>]*>([^<]+)</span>)')
+WRITING_MIN_WORDS = 3     # a box for a sentence of your own: "x" is not an answer
+
+
+def plain_text(fragment):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment))).strip()
+
+
+def handout_parts(layout):
+    """The booklet's opening, and its parts: [(number, name, what, markup)].
+    A booklet without section bars is one part."""
+    inner = layout or ""
+    wrapped = re.match(r'\s*<div class="booklet"[^>]*>(.*)</div>\s*$', inner, re.S)
+    if wrapped:
+        inner = wrapped.group(1)
+    bars = list(SECTION_AT.finditer(inner))
+    if not bars:
+        return "", [(1, "The handout", "", inner)]
+    parts = []
+    for i, bar in enumerate(bars):
+        end = inner.index("</table>", bar.start()) + len("</table>")
+        stop = bars[i + 1].start() if i + 1 < len(bars) else len(inner)
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", inner[bar.start():end], re.S)
+        name, _sep, what = plain_text(cells[-1]).partition("·")
+        parts.append((int(bar.group(2)), name.strip(), what.strip(), inner[end:stop]))
+    return inner[:bars[0].start()], parts
+
+
+def part_keys(part_markup):
+    """The question numbers a part holds."""
+    return [int(n) for n in re.findall(r'data-q="(\d+)"', part_markup)]
+
+
+def is_writing(q):
+    """A box for a sentence of the student's own, which nobody can mark by key."""
+    return q["kind"] == "open" and (q["control"] or "") in ("long", "essay")
+
+
+def too_short(q, text):
+    """A written answer that does not count as an answer yet."""
+    return is_writing(q) and len((text or "").split()) < WRITING_MIN_WORDS
+
+
+_HANDOUT_INFO = {}
+
+
+def handout_info(db, test_id):
+    """What scoring a handout needs from its layout, worked out once: how many
+    parts, which question is in which, and which part is the listening."""
+    t = db.execute("SELECT layout FROM dtests WHERE id=?", (test_id,)).fetchone()
+    layout = (t["layout"] if t else "") or ""
+    key = (test_id, len(layout))
+    if key not in _HANDOUT_INFO:
+        _intro, parts = handout_parts(layout)
+        part_of = {}
+        for n, _name, _what, markup in parts:
+            for k in part_keys(markup):
+                part_of[k] = n
+        listening = {n for n, name, _w, _m in parts if "listen" in name.lower()}
+        qs = db.execute("SELECT id, num, kind, answer, control FROM dquestions WHERE test_id=?",
+                        (test_id,)).fetchall()
+        marked = {q["id"]: part_of.get(q["num"]) for q in qs
+                  if q["kind"] != "open" and q["answer"]}
+        _HANDOUT_INFO[key] = {"parts": [n for n, *_r in parts], "listening": listening,
+                              "marked": marked,
+                              "part_of_id": {q["id"]: part_of.get(q["num"]) for q in qs}}
+    return _HANDOUT_INFO[key]
+
+
+def handout_status(db, test_id, student_id, due_at=None):
+    """Where a student is in a handout, and its mark out of ten.
+
+    Half the mark is for doing it: a point for every part checked by the
+    deadline, out of five. Half is for getting it right: right answers over
+    every box the key can mark. The listening counts for doing but not for
+    right, since without the recording at home it can only be guessed. A part
+    with a written answer the teacher has said does not count is not done.
+    """
+    info = handout_info(db, test_id)
+    total = len(info["parts"]) or 1
+    att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                     " ORDER BY id DESC LIMIT 1", (test_id, student_id)).fetchone()
+    out = {"started": False, "parts": 0, "total": total, "mark": 0.0, "done": False,
+           "voided": 0}
+    if not att:
+        return out
+    rows = db.execute("SELECT part, checked_at FROM dparts WHERE attempt_id=?",
+                      (att["id"],)).fetchall()
+    checked = {r["part"] for r in rows if not due_at or r["checked_at"] <= due_at}
+    void_parts = {info["part_of_id"].get(r["question_id"]) for r in db.execute(
+        "SELECT question_id FROM dresponses WHERE attempt_id=? AND void=1", (att["id"],))}
+    finished = checked - void_parts
+    scored = {qid for qid, part in info["marked"].items() if part not in info["listening"]}
+    right = sum(1 for r in db.execute(
+        "SELECT question_id FROM dresponses WHERE attempt_id=? AND correct=1", (att["id"],))
+        if r["question_id"] in scored and info["marked"][r["question_id"]] in checked)
+    doing = len(finished) / total
+    rightness = right / len(scored) if scored else doing
+    out.update(started=bool(checked), parts=len(finished), done=len(finished) >= total,
+               mark=round(5 * doing + 5 * rightness, 1), voided=len(checked & void_parts))
+    return out
+
+
+def handout_assigned(db, test_id, group_id):
+    """Set as homework to this class - which opens it even if it is not open
+    to everyone as practice."""
+    return bool(db.execute(
+        "SELECT 1 FROM assignments WHERE test_id=? AND group_id=? AND published=1 LIMIT 1",
+        (test_id, group_id)).fetchone())
+
+
+def handout_open_to(db, test_id, group_id):
+    t = db.execute("SELECT published, kind FROM dtests WHERE id=?", (test_id,)).fetchone()
+    if not t or (t["kind"] or "test") != "handout":
+        return False
+    return bool(t["published"]) or handout_assigned(db, test_id, group_id)
+
+
+def is_handout(db, test_id):
+    if not test_id:
+        return False
+    t = db.execute("SELECT kind FROM dtests WHERE id=?", (test_id,)).fetchone()
+    return bool(t) and (t["kind"] or "") == "handout"
+
+
 # ------------------------------------------------ a handout, rebuilt
 #
 # When a handout is rebuilt - a better layout, a corrected key - the students
@@ -5075,22 +5252,42 @@ def written_answers(db, test_id):
     instead of thirty-nine.
     """
     out = []
+    handout = is_handout(db, test_id)
+    info = handout_info(db, test_id) if handout else None
     for q in db.execute(
             "SELECT * FROM dquestions WHERE test_id=? AND kind='open'"
             " ORDER BY num", (test_id,)):
+        if handout and not is_writing(q):
+            continue                  # a tick, a face, a choice: nothing to read
         answers = []
+        # a handout is never handed in whole: its writing is read once the
+        # part it is in has been checked
         for r in db.execute(
-                "SELECT s.id student_id, s.name, a.finished_at, r.given"
+                "SELECT s.id student_id, s.name, a.id attempt_id, a.finished_at, r.given,"
+                " IFNULL(r.void, 0) void,"
+                " (SELECT checked_at FROM dparts p WHERE p.attempt_id=a.id AND p.part=?) checked"
                 " FROM dattempts a JOIN students s ON s.id=a.student_id"
                 " LEFT JOIN dresponses r ON r.attempt_id=a.id AND r.question_id=?"
-                " WHERE a.test_id=? AND a.finished_at IS NOT NULL"
-                " ORDER BY s.name", (q["id"], test_id)):
+                " WHERE a.test_id=? AND (a.finished_at IS NOT NULL OR ?)"
+                " ORDER BY s.name",
+                (info["part_of_id"].get(q["id"]) if handout else None, q["id"], test_id,
+                 1 if handout else 0)):
+            if handout and not r["checked"]:
+                continue
             text = (r["given"] or "").strip()
             answers.append({"student_id": r["student_id"], "name": r["name"],
-                            "finished_at": r["finished_at"], "text": text,
-                            "words": len(text.split()) if text else 0})
+                            "finished_at": r["finished_at"] or r["checked"], "text": text,
+                            "words": len(text.split()) if text else 0,
+                            "attempt_id": r["attempt_id"], "void": bool(r["void"])})
         out.append({"question": q, "answers": answers})
     return out
+
+
+def void_answer(db, attempt_id, question_id, on=True):
+    """The teacher says a written answer does not count - or counts after all."""
+    db.execute("UPDATE dresponses SET void=? WHERE attempt_id=? AND question_id=?",
+               (1 if on else 0, attempt_id, question_id))
+    db.commit()
 
 
 def attempts_for_test(db, test_id):
@@ -5670,10 +5867,13 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice=""):
 
     booklet = None
     if level_id:
+        # the digital handout for these two lessons first - 4B & 4D, not 4A & 4C
+        letter = (pair or "A")[0].upper()
         booklet = db.execute(
             "SELECT id, title FROM dtests WHERE level_id=? AND number=?"
-            " AND layout IS NOT NULL ORDER BY published DESC, id DESC LIMIT 1",
-            (level_id, unit)).fetchone()
+            " AND layout IS NOT NULL ORDER BY IFNULL(kind,'test')='handout' DESC,"
+            " title LIKE ? DESC, published DESC, id DESC LIMIT 1",
+            (level_id, unit, "%%%s%s%%" % (unit, letter))).fetchone()
     out["items"].append({
         "kind": "booklet",
         "test_id": booklet["id"] if booklet else None,

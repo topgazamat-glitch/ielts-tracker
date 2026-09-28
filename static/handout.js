@@ -67,7 +67,11 @@
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (el.type === "radio") { if (el.checked) return true; }
-      else if ((el.value || "").trim()) return true;
+      else if ((el.value || "").trim()) {
+        // a sentence of your own needs a few words to be an answer, not "x"
+        var least = parseInt(el.getAttribute("data-min-words") || "0", 10);
+        if (!least || el.value.trim().split(/\s+/).length >= least) return true;
+      }
     }
     return false;
   }
@@ -139,8 +143,13 @@
     var btn = document.getElementById("checkbtn");
     var left = groups().filter(function (n) { return !answered(n); });
     if (left.length) {
+      var short = left.some(function (n) {
+        var el = sheet().querySelector('[name="' + n + '"][data-min-words]');
+        return el && (el.value || "").trim();
+      });
       if (mk) mk.textContent = (left.length === 1 ? "1 box is" : left.length + " boxes are") +
-        " still empty. Answer every box in this part first.";
+        " still empty" + (short ? " or too short — write at least three words" : "") +
+        ". Answer every box in this part first.";
       nextEmpty();
       return;
     }

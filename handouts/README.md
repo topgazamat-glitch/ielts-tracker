@@ -57,3 +57,18 @@ but are marked `pair()`, so they never hold a part back at home.
 The keys are his answer keys, joined box by box by hand. Where his key gives
 samples rather than one answer (2.7 in 2A & 2C, the listening questions), the
 box is his to mark, not the computer's.
+
+# A handout as homework
+
+On Set homework, "Digital handout" opens one of these for a class with the
+set's deadline. It is one piece of that homework and marks itself, out of
+ten: half for the parts checked by the deadline (a point a part, out of
+five), half for the right answers over every box the key can mark. The
+listening part counts for doing, not for right, since at home it can only
+be guessed. A written answer needs three words, and the teacher can mark
+one as not counting on the handout's writing page - the part it is in then
+stops counting as done. The mark is averaged with the teacher's marks for
+the rest of the set, like any other piece, into the league.
+
+A handout open to the whole level is practice and earns nothing; one that
+is not open opens only for the class it is set to.
