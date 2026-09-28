@@ -69,6 +69,15 @@
   --dream-rose:    #ff8fb8;
   --dream-snow:    #fdebff;
   --dream-star:    #fff8e6;
+  /* the mountain in the first light: rock in shadow and in the light, the
+     glow on the faces nearest the dawn, snow in shadow, the ranges in the
+     haze behind, and the pines at the foot */
+  --dream-rock-shade: #1a0730;
+  --dream-rock-lit:   #5a2468;
+  --dream-rock-glow:  #b8618f;
+  --dream-snow-shade: #a995cf;
+  --dream-haze:       #6e3f8f;
+  --dream-pine:       #0c0216;
   --font-dream: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype",
                 Palatino, Georgia, serif;
 }
@@ -1353,7 +1362,7 @@ label.check input { width: 17px; height: 17px; accent-color: var(--brand); }
   background:
     /* the ground's own colour along the very bottom, so no hairline of sky
        shows where the picture meets the card on any screen width */
-    linear-gradient(0deg, var(--dream-near) 0 4px, transparent 4px),
+    linear-gradient(0deg, var(--dream-pine) 0 4px, transparent 4px),
     radial-gradient(90% 60% at 18% 0%, rgba(120, 60, 200, .35), transparent 70%),
     linear-gradient(180deg, var(--dream-top) 0%, var(--dream-sky) 55%, var(--dream-horizon) 100%); }
 /* two layers of faint stars, tiled at different sizes so no pattern shows */
@@ -1418,6 +1427,8 @@ label.check input { width: 17px; height: 17px; accent-color: var(--brand); }
 /* the picture itself */
 .climb { position: relative; display: block; width: 100%; height: auto; }
 .climb .walked { animation: cl-draw 1.8s var(--ease) .4s both; }
+/* the grain of the rock sits in the light and shadow, not on top of them */
+.climb .rock { mix-blend-mode: overlay; opacity: .5; }
 @keyframes cl-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 .climb .me { transform-box: fill-box; transform-origin: center;
   animation: cl-pop .7s var(--ease) 1.7s both; }

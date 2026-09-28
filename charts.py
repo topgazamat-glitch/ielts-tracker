@@ -304,16 +304,156 @@ def journey_chart(j, w=560, h=220):
 _ROUTE = [(46, 236), (96, 224), (146, 214), (196, 198), (244, 184), (290, 166),
           (334, 150), (376, 132), (416, 116), (452, 100), (486, 84), (518, 66),
           (548, 48)]
-_RIDGE_NEAR = ("M 0 300 L 0 262 L 40 244 L 100 232 L 150 220 L 200 204 L 250 188 "
-               "L 300 170 L 340 152 L 380 134 L 420 118 L 458 100 L 492 82 L 522 64 "
-               "L 548 44 L 566 60 L 590 90 L 620 130 L 640 150 L 640 300 Z")
-_RIDGE_MID = ("M 0 300 L 0 230 L 60 210 L 120 224 L 170 200 L 230 214 L 280 186 "
-              "L 330 200 L 380 176 L 430 190 L 470 160 L 520 178 L 570 140 L 610 168 "
-              "L 640 152 L 640 300 Z")
-_RIDGE_FAR = ("M 0 300 L 0 200 L 50 176 L 110 196 L 160 170 L 220 188 L 270 156 "
-              "L 320 174 L 370 146 L 420 164 L 460 136 L 500 150 L 550 118 L 600 146 "
-              "L 640 126 L 640 300 Z")
-_SNOW = "M 522 64 L 548 44 L 566 60 L 578 76 L 560 70 L 548 80 L 534 72 Z"
+# ------------------------------------------------------------ the mountain
+#
+# The mountain is drawn the way light falls on a real one at dawn: the
+# ridges are jagged rather than ruled, the faces turned towards the first
+# light are lit rose and the ones turned away are in shadow, the snow runs
+# down into the gullies and catches the light on the same side as the rock,
+# the rock has grain, the ranges behind go pale into the haze, and the pines
+# at the foot are black against it. All of it comes from a fixed seed, so
+# the mountain is the same one every time and for every student; only the
+# route, the camps and the climber change.
+
+def _frac(points, rough, depth, seed):
+    """A line through `points`, broken into a natural edge: every segment is
+    split at its middle, and the middle pushed sideways by up to `rough` of
+    its length, over and over. The same seed makes the same edge."""
+    import math
+    import random
+    rnd = random.Random(seed)
+    pts = [tuple(map(float, p)) for p in points]
+    for _level in range(depth):
+        out = [pts[0]]
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            dx, dy = x2 - x1, y2 - y1
+            span = math.hypot(dx, dy) or 1.0
+            push = rnd.uniform(-1.0, 1.0) * span * rough
+            out.append(((x1 + x2) / 2.0 - dy / span * push, (y1 + y2) / 2.0 + dx / span * push))
+            out.append((x2, y2))
+        pts = out
+        rough *= 0.62
+    return pts
+
+
+def _route_y(x):
+    """How high the route is at x, for keeping the crest above it."""
+    for (x1, y1), (x2, y2) in zip(_ROUTE, _ROUTE[1:]):
+        if x1 <= x <= x2:
+            return y1 + (y2 - y1) * (x - x1) / float(x2 - x1)
+    return None
+
+
+def _d(points, close=False):
+    return "M " + " L ".join("%.1f %.1f" % p for p in points) + (" Z" if close else "")
+
+
+def _between(points, lo, hi):
+    return [p for p in points if lo <= p[0] <= hi]
+
+
+def _blob(cx, cy, r, seed):
+    """A small patch of snow: a ragged ring around a point."""
+    import math
+    ring = [(cx + r * math.cos(t * math.pi / 3) * (1.4 if t % 3 == 0 else 1.0),
+             cy + r * 0.6 * math.sin(t * math.pi / 3)) for t in range(7)]
+    return _frac(ring, 0.22, 3, seed)
+
+
+def _build_mountain():
+    # the crest of the main mountain, left foot to right edge; the route runs
+    # across its face, so the crest is kept above the route all the way up
+    crest = _frac([(0, 250), (60, 218), (130, 194), (180, 188), (240, 160), (300, 128),
+                   (340, 138), (400, 104), (450, 84), (500, 60), (549, 36), (566, 55),
+                   (585, 70), (604, 60), (625, 90), (640, 104)], 0.07, 4, 11)
+    fixed = []
+    for x, y in crest:
+        ry = _route_y(x)
+        if ry is not None and x < 549:
+            y = min(y, ry - 9)                 # the route is on the face, never in the sky
+        fixed.append((x, y))
+    crest = fixed
+    summit = min(crest, key=lambda p: p[1])
+    massif = crest + [(640, 300), (0, 300)]
+
+    def on_crest(x):
+        return min(crest, key=lambda p: abs(p[0] - x))
+
+    def wedge(x_top, x_right, bottom, seed, rough=0.1):
+        """A rib of the mountain: from the crest between two points, down to
+        one point below - the shape a spur and the gully beside it make."""
+        tl, tr = on_crest(x_top), on_crest(x_right)
+        edge = _between(crest, tl[0], tr[0]) or [tl, tr]
+        right_side = _frac([tr, bottom], rough, 4, seed)
+        left_side = _frac([bottom, tl], rough, 4, seed + 1)
+        return edge + right_side[1:] + left_side[1:]
+
+    # the big face turned to the dawn: right of the spine from the summit
+    spine = _frac([summit, (532, 84), (508, 132), (480, 192), (462, 250), (452, 300)], 0.09, 4, 21)
+    right = [p for p in crest if p[0] >= summit[0]]
+    lit_main = right + [(640, 300)] + list(reversed(spine))
+    # ribs on the long left slope, each lit on its dawn side, leaning away
+    ribs = [wedge(x, x + w, (x - 14 + dx, on_crest(x)[1] + h), 31 + k)
+            for k, (x, w, h, dx) in enumerate((
+                (62, 34, 70, 0), (128, 40, 84, 4), (206, 36, 92, -2), (286, 44, 104, 2),
+                (356, 38, 112, 0), (410, 40, 118, 6), (462, 34, 110, 4)))]
+    # on the lit face, the gullies are the shadows
+    gullies = [wedge(x, x + w, bottom, 61 + k, 0.12) for k, (x, w, bottom) in enumerate((
+        (566, 16, (552, 156)), (604, 18, (590, 176)), (625, 12, (618, 196)), (586, 10, (574, 132))))]
+
+    # the snow: a ragged snowline, deeper in the gullies, and loose patches below
+    # snow lies thick on the lit side and thin on the steep shadow side, and
+    # its edge is torn by the rock, not scalloped
+    cap_top = _between(crest, 494, 630)
+    lower = _frac([(cap_top[-1][0], cap_top[-1][1] + 5), (617, 102), (609, 96), (603, 121),
+                   (596, 104), (589, 110), (583, 131), (577, 108), (569, 114), (563, 124),
+                   (556, 101), (549, 92), (542, 99), (534, 84), (526, 90), (517, 76),
+                   (508, 80), (500, 69), (cap_top[0][0], cap_top[0][1] + 3)],
+                  0.3, 5, 51)
+    snow = cap_top + lower
+    patches = []
+    rim = _between(crest, 420, 632)
+
+    # the ranges behind, paler as they go back
+    far = _frac([(0, 182), (70, 160), (130, 176), (190, 142), (250, 166), (310, 132),
+                 (380, 150), (440, 120), (520, 138), (590, 112), (640, 124)], 0.09, 5, 91)
+    mid = _frac([(0, 214), (50, 196), (110, 210), (170, 180), (230, 204), (280, 186),
+                 (350, 206), (420, 178), (500, 196), (570, 164), (640, 176)], 0.08, 5, 101)
+
+    # the foot: a dark band of ground with pines against the haze
+    ground = _frac([(0, 272), (60, 266), (120, 278), (200, 284), (300, 286), (400, 288),
+                    (480, 282), (560, 272), (640, 266)], 0.05, 3, 111)
+    pines = []
+    import random
+    rnd = random.Random(121)
+    for lo, hi in ((0, 118), (500, 640)):
+        x = lo + rnd.uniform(2, 8)
+        while x < hi:
+            base = min(ground, key=lambda p: abs(p[0] - x))[1] + 3
+            h = rnd.uniform(14, 30) * (1.0 if (x < 60 or x > 580) else 0.72)
+            wdt = h * rnd.uniform(0.34, 0.42)
+            tiers = []
+            for t in range(3):                 # three tiers of branches, narrowing up
+                top = base - h * (1.0 - t * 0.28)
+                half = wdt * (0.5 + t * 0.25) / 2.0
+                foot = base - h * (0.55 - t * 0.24)
+                tiers.append("M %.1f %.1f L %.1f %.1f L %.1f %.1f Z"
+                             % (x, top, x + half, foot, x - half, foot))
+            pines.append(" ".join(tiers) + " M %.1f %.1f L %.1f %.1f L %.1f %.1f L %.1f %.1f Z"
+                         % (x - .9, base, x - .9, base - h * .3, x + .9, base - h * .3, x + .9, base))
+            x += rnd.uniform(7, 15)
+    return {
+        "massif": _d(massif, True), "lit": _d(lit_main, True),
+        "ribs": [_d(r, True) for r in ribs], "gullies": [_d(g, True) for g in gullies],
+        "snow": _d(snow, True), "patches": [_d(pt, True) for pt in patches],
+        "rim": _d(rim), "far": _d(far + [(640, 300), (0, 300)], True),
+        "far_edge": _d(far), "mid": _d(mid + [(640, 300), (0, 300)], True),
+        "ground": _d(ground + [(640, 300), (0, 300)], True), "pines": " ".join(pines),
+        "summit": summit,
+    }
+
+
+_MOUNTAIN = _build_mountain()
 # A few bright stars in the mountain's own sky; the faint ones are a CSS
 # layer over the whole hero, so the sky runs on above the picture.
 _BRIGHT = [(318, 34, 5, "tw1"), (404, 70, 4, "tw2"), (468, 26, 6, "tw3"),
@@ -372,20 +512,87 @@ def mountain(c, w=640, h=300, avatar="", photo=""):
         '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
         '<filter id="cl-mist" x="-30%" y="-200%" width="160%" height="500%">'
         '<feGaussianBlur stdDeviation="9"/></filter>'
+        # the rock's grain: noise, lit from the dawn side, laid over the faces
+        '<filter id="cl-grain" x="0" y="0" width="100%" height="100%">'
+        '<feTurbulence type="fractalNoise" baseFrequency="0.05 0.014" numOctaves="3" seed="7"/>'
+        '<feDiffuseLighting surfaceScale="4" lighting-color="#fff">'
+        '<feDistantLight azimuth="330" elevation="38"/></feDiffuseLighting></filter>'
+        '<linearGradient id="cl-far" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%" stop-color="var(--dream-haze)"/>'
+        '<stop offset="100%" stop-color="var(--dream-far)"/></linearGradient>'
+        '<linearGradient id="cl-mid" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%" stop-color="var(--dream-far)"/>'
+        '<stop offset="100%" stop-color="var(--dream-mid)"/></linearGradient>'
+        '<linearGradient id="cl-shade" gradientUnits="userSpaceOnUse" x1="0" y1="36" x2="0" y2="300">'
+        '<stop offset="0%" stop-color="var(--dream-mid)"/>'
+        '<stop offset="100%" stop-color="var(--dream-rock-shade)"/></linearGradient>'
+        '<linearGradient id="cl-lit" gradientUnits="userSpaceOnUse" x1="0" y1="36" x2="0" y2="290">'
+        '<stop offset="0%" stop-color="var(--dream-rock-glow)"/>'
+        '<stop offset="28%" stop-color="var(--dream-rock-lit)"/>'
+        '<stop offset="72%" stop-color="var(--dream-rock-lit)" stop-opacity=".35"/>'
+        '<stop offset="100%" stop-color="var(--dream-rock-lit)" stop-opacity="0"/></linearGradient>'
+        '<linearGradient id="cl-gully" gradientUnits="userSpaceOnUse" x1="0" y1="50" x2="0" y2="200">'
+        '<stop offset="0%" stop-color="var(--dream-rock-shade)" stop-opacity=".85"/>'
+        '<stop offset="100%" stop-color="var(--dream-rock-shade)" stop-opacity="0"/></linearGradient>'
+        '<linearGradient id="cl-snowshade" gradientUnits="userSpaceOnUse" x1="0" y1="36" x2="0" y2="130">'
+        '<stop offset="0%" stop-color="var(--dream-snow-shade)"/>'
+        '<stop offset="100%" stop-color="var(--dream-snow-shade)" stop-opacity=".75"/></linearGradient>'
+        '<linearGradient id="cl-haze" x1="0" y1="1" x2="0" y2="0">'
+        '<stop offset="0%" stop-color="var(--dream-haze)" stop-opacity=".45"/>'
+        '<stop offset="100%" stop-color="var(--dream-haze)" stop-opacity="0"/></linearGradient>'
+        '<linearGradient id="cl-snowlit" gradientUnits="userSpaceOnUse" x1="0" y1="36" x2="0" y2="130">'
+        '<stop offset="0%" stop-color="#fff"/>'
+        '<stop offset="100%" stop-color="var(--dream-snow)"/></linearGradient>'
+        '<linearGradient id="cl-rim" gradientUnits="userSpaceOnUse" x1="420" y1="0" x2="632" y2="0">'
+        '<stop offset="0%" stop-color="var(--dream-rose)" stop-opacity="0"/>'
+        '<stop offset="55%" stop-color="var(--dream-gold)"/>'
+        '<stop offset="100%" stop-color="var(--dream-rose)" stop-opacity=".4"/></linearGradient>'
+        + '<clipPath id="cl-massif"><path d="%s"/></clipPath>' % _MOUNTAIN["massif"]
+        + '<clipPath id="cl-lightside"><path d="%s"/></clipPath>' % _MOUNTAIN["lit"]
+        + '<clipPath id="cl-darkside"><path d="%s"/></clipPath>' % _MOUNTAIN["massif"]
         + '<clipPath id="cl-face"><circle cx="%.1f" cy="%.1f" r="13"/></clipPath>' % (cx, cy)
         + '</defs>')
     # the first light, behind the summit: the dream, glowing
     out.append('<ellipse class="breathe" cx="560" cy="112" rx="260" ry="112" fill="url(#cl-dawn)"/>')
     for x, y, r, cls in _BRIGHT:
         out.append(_sparkle(x, y, r, cls))
-    out.append('<path d="%s" fill="var(--dream-far)"/>' % _RIDGE_FAR)
-    out.append('<path d="%s" fill="var(--dream-mid)"/>' % _RIDGE_MID)
-    out.append('<ellipse class="mist" cx="210" cy="226" rx="170" ry="16" fill="#fff" '
-               'opacity=".13" filter="url(#cl-mist)"/>')
-    out.append('<ellipse class="mist two" cx="440" cy="192" rx="180" ry="15" fill="#fff" '
-               'opacity=".10" filter="url(#cl-mist)"/>')
-    out.append('<path d="%s" fill="var(--dream-near)"/>' % _RIDGE_NEAR)
-    out.append('<path d="%s" fill="var(--dream-snow)" opacity=".92"/>' % _SNOW)
+    m = _MOUNTAIN
+    # the ranges behind: pale in the haze, the farthest catching the dawn
+    out.append('<path d="%s" fill="url(#cl-far)"/>' % m["far"])
+    out.append('<path d="%s" fill="none" stroke="var(--dream-rose)" stroke-width="1" '
+               'opacity=".35"/>' % m["far_edge"])
+    out.append('<ellipse class="mist" cx="200" cy="206" rx="190" ry="14" fill="#fff" '
+               'opacity=".12" filter="url(#cl-mist)"/>')
+    out.append('<path d="%s" fill="url(#cl-mid)"/>' % m["mid"])
+    # the mountain: the whole of it in shadow, then the faces the light reaches,
+    # fading into the haze of the valley rather than stopping at an edge
+    out.append('<path d="%s" fill="url(#cl-shade)"/>' % m["massif"])
+    out.append('<path d="%s" fill="url(#cl-lit)"/>' % m["lit"])
+    for rib in m["ribs"]:
+        out.append('<path d="%s" fill="url(#cl-lit)" opacity=".7"/>' % rib)
+    for gully in m["gullies"]:
+        out.append('<path d="%s" fill="url(#cl-gully)"/>' % gully)
+    # the grain of the rock, over all of it
+    out.append('<g class="rock" clip-path="url(#cl-massif)"><rect x="0" y="30" width="%d" '
+               'height="270" fill="#fff" filter="url(#cl-grain)"/></g>' % w)
+    # the snow: lavender in the shadow, rose-white where the light falls
+    out.append('<path d="%s" fill="url(#cl-snowshade)"/>' % m["snow"])
+    out.append('<g clip-path="url(#cl-lightside)"><path d="%s" fill="url(#cl-snowlit)"/>'
+               % m["snow"] + "".join('<path d="%s" fill="var(--dream-snow)" opacity=".8"/>' % pt
+                                     for pt in m["patches"]) + '</g>')
+    out.append('<g clip-path="url(#cl-darkside)">' + "".join(
+        '<path d="%s" fill="var(--dream-snow-shade)" opacity=".55"/>' % pt
+        for pt in m["patches"]) + '</g>')
+    # the first light running along the edge of the ridge
+    out.append('<path d="%s" fill="none" stroke="url(#cl-rim)" stroke-width="1.6" '
+               'stroke-linejoin="round" opacity=".9" filter="url(#cl-glow)"/>' % m["rim"])
+    # the valley haze, rising over the foot of the mountain
+    out.append('<rect x="0" y="170" width="%d" height="130" fill="url(#cl-haze)"/>' % w)
+    out.append('<ellipse class="mist two" cx="330" cy="250" rx="260" ry="12" fill="#fff" '
+               'opacity=".08" filter="url(#cl-mist)"/>')
+    # the foot, and its pines, black against the haze
+    out.append('<path d="%s" fill="var(--dream-pine)"/>' % m["ground"])
+    out.append('<path d="%s" fill="var(--dream-pine)"/>' % m["pines"])
     # the whole route, faint; then the part already walked, drawn in gold
     out.append('<polyline points="%s" fill="none" stroke="#fff" stroke-width="2" '
                'stroke-dasharray="2 7" stroke-linecap="round" opacity=".45"/>'
