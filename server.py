@@ -3613,6 +3613,12 @@ def check_part(db, token, hid, aid, part, qs, typed):
                      if (q["control"] or "") not in OPTIONAL_BOXES and not text(q))
     if missing:
         return json_response({"ok": False, "missing": missing})
+    right, wrong = mark_part(db, aid, part, mine, text)
+    return json_response({"ok": True, "go": go, "right": right, "wrong": wrong})
+
+
+def mark_part(db, aid, part, mine, text):
+    """Mark every box of one part, keep the marks, and record the part as checked."""
     right = wrong = teacher = 0
     for q in mine:
         got = text(q)
@@ -3629,7 +3635,36 @@ def check_part(db, token, hid, aid, part, qs, typed):
             " DO UPDATE SET given=excluded.given, correct=excluded.correct",
             (aid, q["id"], got, None if ok is None else (1 if ok else 0)))
     core.record_part(db, aid, part, right, wrong, teacher)
-    return json_response({"ok": True, "go": go, "right": right, "wrong": wrong})
+    return right, wrong
+
+
+def carry_checked_parts(db, old_tid, new_tid):
+    """A part a student had already checked in the old version stays checked
+    in the new one - they have seen its answers - marked again by the new
+    key. Only between versions with the same parts."""
+    lay = {r["id"]: r["layout"] or "" for r in db.execute(
+        "SELECT id, layout FROM dtests WHERE id IN (?,?)", (old_tid, new_tid))}
+    old_parts, new_parts = handout_parts(lay.get(old_tid, ""))[1], handout_parts(lay.get(new_tid, ""))[1]
+    if [(n, name) for n, name, *_r in old_parts] != [(n, name) for n, name, *_r in new_parts]:
+        return 0
+    qs = db.execute("SELECT id, num, kind, answer, control FROM dquestions WHERE test_id=?",
+                    (new_tid,)).fetchall()
+    carried = 0
+    for a in db.execute("SELECT id, student_id FROM dattempts WHERE test_id=?", (old_tid,)).fetchall():
+        done = core.handout_parts_done(db, a["id"])
+        if not done:
+            continue
+        aid = core.start_attempt(db, new_tid, a["student_id"])
+        have = core.handout_parts_done(db, aid)
+        given = {r["question_id"]: (r["given"] or "").strip() for r in db.execute(
+            "SELECT question_id, given FROM dresponses WHERE attempt_id=?", (aid,))}
+        for n, _name, _what, markup in new_parts:
+            if n in done and n not in have:
+                nums = set(part_keys(markup))
+                mark_part(db, aid, n, [q for q in qs if q["num"] in nums],
+                          lambda q: given.get(q["id"], ""))
+                carried += 1
+    return carried
 
 
 def portal_tests(db, s, token, query):
@@ -8500,8 +8535,11 @@ def carry_card(db, t, req):
     said = ""
     if done:
         who = req["query"].get("students", ["0"])[0]
+        parts = req["query"].get("parts", ["0"])[0]
+        locked = (f' {E(parts)} part(s) they had already checked stay checked, marked by this '
+                  f'version\'s key.' if parts not in ("", "0") else "")
         said = (f'<p class="sub gap-3"><strong>{E(done)} answers</strong> brought over '
-                f'for {E(who)} student(s). Anything they had already typed here was left alone.</p>')
+                f'for {E(who)} student(s). Anything they had already typed here was left alone.{locked}</p>')
     opts = "".join(f'<option value="{o["id"]}">{E(o["title"])} '
                    f'({"published" if o["published"] else "hidden"}, #{o["id"]})</option>'
                    for o in olds)
@@ -8523,7 +8561,8 @@ def act_test_carry(req, db, tid):
         return redirect(f"/tests/{tid}")
     done = core.carry_answers(db, int(old), tid)
     copied = sum(n for n, _left in done.values())
-    return redirect(f"/tests/{tid}?carried={copied}&students={len(done)}")
+    parts = carry_checked_parts(db, int(old), tid)
+    return redirect(f"/tests/{tid}?carried={copied}&students={len(done)}&parts={parts}")
 
 
 def view_test_writing(req, db, tid):

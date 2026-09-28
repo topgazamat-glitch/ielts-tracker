@@ -237,6 +237,25 @@ check("the old version keeps its copy", db.execute(
 check("a comma does not make a sentence wrong",
       core.answer_matches("In the evening I have dinner", "In the evening, I have dinner"))
 
+same = core.load_test(db, {
+    "level": "Pre-Intermediate", "number": 2, "title": "Same again", "kind": "handout",
+    "layout": layout, "passages": {}, "questions": [
+        {"num": 1, "kind": "typed", "prompt": "1.1  1 Clocks", "answer": "1", "options": DAY},
+        {"num": 2, "kind": "typed", "prompt": "1.1  2 Go", "answer": "went"},
+        {"num": 3, "kind": "open", "prompt": "1.1  3 Why?", "answer": None, "control": "long"},
+        {"num": 4, "kind": "typed", "prompt": "2.1  1 go", "answer": "went"},
+        {"num": 5, "kind": "open", "prompt": "1.1  4 Your partner?", "answer": None, "control": "pair"}]})
+r = teacher.open(base + "/tests/%d/carry" % same, urllib.parse.urlencode({"from": hid}).encode(), timeout=20)
+check("parts already checked come over checked", "parts=2" in r.geturl())
+sa = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?", (same, sid)).fetchone()["id"]
+sd = core.handout_parts_done(db, sa)
+check("and marked again by the new key", sorted(sd) == [1, 2] and sd[1]["wrong_n"] == 2 and sd[2]["right_n"] == 1)
+db.execute("UPDATE dtests SET published=1 WHERE id=?", (same,)); db.commit()
+spg = get("/s/%s?tab=handouts&h=%d&part=1" % (tok, same))
+check("so the student cannot change what they have already seen marked",
+      "Reading checked" in spg and 'id="handoutdata"' not in spg)
+db.execute("UPDATE dtests SET published=0 WHERE id=?", (same,)); db.commit()
+
 print("\n6. A BOOKLET WHOSE EXPLANATIONS ARE IN UZBEK")
 uz = core.load_test(db, {
     "level": "Pre-Intermediate", "number": 3, "title": "Uzbek version", "kind": "handout",
