@@ -2,8 +2,9 @@
 
 His design is rendered as it is and this decides every box. The key is his
 (P02BD Travel and tourism - answer key), joined box by box by hand. Its
-explanations are told again in Uzbek - every explanation box, the goals and
-the headings of the tables that explain - with the English examples kept;
+explanations are told again in Uzbek - every explanation box, the goals,
+the headings of the tables that explain, and a line under every exercise
+instruction - with the English examples kept;
 the reading, the texts to fill in and the exercises stay English.
 
 What a phone gets that paper does not:
@@ -83,6 +84,52 @@ for n in (1, 2, 3, 4):
     h.item_box("5.5", n, where="leader")
 h.grid_rows("5.6", [""])
 h.leaders("5.7", "CHECK BEFORE", [(20, "95%", "Write your blog entry here")])
+
+# ------------------------------- every instruction, once more, in Uzbek
+# Said the way the phone asks for it: where paper says "write" or
+# "underline" a letter or a word, the student taps, so the Uzbek says "tanlang".
+INSTRUCTIONS = [
+    ("1.1", "Muhokama qiling. Hayotingizdagi eng yomon safar qaysi boʻlgan? Nima notoʻgʻri ketgan?"),
+    ("1.2", "Qaysi hikoya? *Platform*, *Stranger* yoki *The push* ni tanlang."),
+    ("1.3", "Eng toʻgʻri javobni tanlang: *A*, *B* yoki *C*."),
+    ("1.4", "Matndan shu maʼnodagi soʻz yoki iborani toping."),
+    ("1.5", "Matndan oltita *past continuous* feʼlni toping. Har bir harakat davom etayotganda nima "
+            "sodir boʻldi?"),
+    ("1.6", "Savollarga javob bering."),
+    ("2.1", "Gaplarni *past continuous* bilan toʻldiring."),
+    ("2.2", "*Past simple* mi yoki *past continuous* mi? Gaplarni toʻldiring."),
+    ("2.3", "Uzun harakat toʻxtadimi (*S*) yoki davom etdimi (*C*)? Tanlang."),
+    ("2.4", "*when* yoki *while*? Tanlang."),
+    ("2.5", "Xatoni topib, toʻgʻrilang. IKKITA gap toʻgʻri — ular uchun *✓ It is correct* tugmasini bosing."),
+    ("2.6", "Hikoyani qavs ichidagi feʼllar bilan toʻldiring."),
+    ("2.7", "Har bir gapni *past simple* dagi harakat bilan tugating."),
+    ("2.8", "Oʻzingizning bir safaringiz haqida uchta gap yozing. *when* ni bir marta, *while* ni bir "
+            "marta ishlating."),
+    ("3.1", "Har bir iborani maʼnosi bilan moslashtiring: mos harfni tanlang."),
+    ("3.2", "Hikoyani 3.1 dagi iboralar bilan toʻldiring."),
+    ("3.3", "Muammo nima edi? Bitta soʻz yoki ibora yozing."),
+    ("3.4", "Har bir gapdagi xatoni topib, toʻgʻrilang."),
+    ("3.5", "Kuchsiz (*W*) mi yoki kuchli (*S*) mi? Tanlang, keyin har bir gapni ovoz chiqarib ayting."),
+    ("3.6", "Sherigingizga yomon ketgan bir safaringiz haqida aytib bering. Bu boʻlimdagi beshta iborani "
+            "ishlating."),
+    ("4.1", "Tinglashdan oldin. Sizningcha, nima boʻlgan? Sherigingizga aytib bering."),
+    ("4.2", "Bir marta tinglang. Har biri haqida qisqa qayd yozing."),
+    ("4.3", "Yana tinglang va har bir qatorni toʻldiring."),
+    ("4.4", "Tinglang va nima boʻlishiga eʼtibor bering."),
+    ("4.5", "Har bir iborani ikki marta ayting — avval sekin, keyin tez."),
+    ("4.6", "Voqealarni sodir boʻlgan tartibda raqamlang, 1–6."),
+    ("4.7", "Gapiruvchi nima demoqchi? *A* yoki *B* ni tanlang."),
+    ("5.1", "Tinglang va toʻgʻri javobni tanlang."),
+    ("5.2", "▲ belgisi turgan joy uchun *and*, *but*, *so*, *because* yoki *when* ni tanlang."),
+    ("5.3", "Har bir juftlikni ikki marta bogʻlang — bir marta *so* bilan, bir marta *because* bilan."),
+    ("5.4", "Namunaviy blog yozuvini oʻqing, keyin javob bering."),
+    ("5.5", "Namuna haqidagi savollarga javob bering."),
+    ("5.6", "Avval reja tuzing: ikki daqiqa, keyin yozing."),
+    ("5.7", "Endi oʻz blog yozuvingizni yozing (120–150 soʻz). Taʼtil, yangi joydagi birinchi kun yoki "
+            "yaqinda borgan joyingizni tanlang."),
+]
+for label, text in INSTRUCTIONS:
+    h.say_also(label, text)
 
 # ------------------------------------------ the explanations, told in Uzbek
 h.goals([
