@@ -2514,6 +2514,14 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 .booksheet.handout .booklet [style*="solid #C9C9C9" i] { border-color: var(--hx-line) !important; }
 .booksheet.handout .booklet .bk-blank { color: var(--hx-deep); }
 
+/* an instruction told again in Uzbek, under the English, for a class that
+   cannot yet read the English one */
+.booksheet.handout .booklet p.hx-uz { margin-top: -2px !important; margin-bottom: var(--sp-3) !important;
+  font-size: 15px; line-height: 1.45; color: var(--hx-ink-2); }
+.booksheet.handout .booklet p.hx-uz::before { content: "UZ"; display: inline-block; margin-right: var(--sp-2);
+  padding: 0 6px; border-radius: 999px; background: var(--hx-soft); color: var(--hx-brand);
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; line-height: 1.7; vertical-align: 1px; }
+
 /* the answers are always in the plain face, even inside a text set as a book */
 .booksheet.handout .bk-chip span, .booksheet.handout .booklet input.bk-blank,
 .booksheet.handout .booklet textarea.bk-long, .booksheet.handout .bk-key,

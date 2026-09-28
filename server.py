@@ -3081,7 +3081,8 @@ def _top_nodes(fragment):
 def _is_prose(node):
     kind, frag = node
     return (kind == "p" and "bk-blank" not in frag and "data-q=" not in frag
-            and not EX_HEAD_AT.search(frag) and "{{box" not in frag)
+            and not EX_HEAD_AT.search(frag) and "{{box" not in frag
+            and 'class="hx-uz"' not in frag)       # an instruction in Uzbek is not prose
 
 
 def _hx_article(paras):

@@ -118,6 +118,55 @@ h.grid_rows("5.7", [""])
 h.leaders("5.8", "5.9  </span>", [(1, "95%", "Three sentences about your survey")])
 FACES, CAN_DO = h.can_do_grid("5.9")
 
+# ------------------------------- every instruction, once more, in Uzbek
+# Said the way the phone asks for it: where paper says "write T or F", the
+# student taps, so the Uzbek says "tanlang" (choose).
+INSTRUCTIONS = [
+    ("1.1", "Nonushtangiz. Har bir ovqat uchun *Yes* (ha) yoki *No* (yoʻq) ni tanlang."),
+    ("1.2", "Qaysi davlat? *Italy* (Italiya), *Turkey* (Turkiya) yoki *Japan* (Yaponiya) ni tanlang."),
+    ("1.3", "Toʻgʻri (*T*) yoki notoʻgʻri (*F*)?"),
+    ("1.4", "Gaplarni matndagi soʻz bilan toʻldiring."),
+    ("1.5", "Qaysi nonushta sizniki bilan bir xil? Qaysi biri juda boshqacha? Sherigingizga aytib bering."),
+    ("1.6", "Endi oʻz davlatingizdagi nonushta haqida uchta gap yozing."),
+    ("2.1", "Vaqtni soʻz bilan yozing."),
+    ("2.2", "Vaqtni raqam bilan yozing."),
+    ("2.3", "*at* yoki *in* ni tanlang."),
+    ("2.4", "*have* va qavs ichidagi ovqat nomi bilan toʻldiring."),
+    ("2.5", "*What time* bilan savol yozing. Keyin oʻzingiz haqingizda javob bering."),
+    ("2.6", "Qavs ichidagi ravishni toʻgʻri joyga qoʻyib, gapni toʻliq yozing."),
+    ("2.7", "Xatoni topib, toʻgʻrilang. IKKITA gap toʻgʻri — ular uchun *✓ It is correct* tugmasini bosing."),
+    ("2.8", "Uch kishidan soʻrang va vaqtlarni yozing. Buni sinfda bajarasiz."),
+    ("2.9", "Vaqtni soʻz bilan yozing. Soatni daftaringizga chizsangiz ham boʻladi."),
+    ("3.1", "Qaysi mahal? *Breakfast* (nonushta), *Lunch* (tushlik) yoki *Dinner* (kechki ovqat) ni "
+            "tanlang. Baʼzilariga ikkita javob ham toʻgʻri — bittasini tanlang."),
+    ("3.2", "Ovqat nomini yozing."),
+    ("3.3", "*a*, *an* yoki hech narsa (*–*)? Tanlang."),
+    ("3.4", "Har bir soʻzdagi tovushni tanlang: /ɑː/ (*half* dagi kabi) yoki /ɔː/ (*quarter* dagi kabi)."),
+    ("3.5", "Bu vaqtlarni ovoz chiqarib ayting. Daftaringizda /ɑː/ ning tagiga chizing, /ɔː/ ni aylanaga oling."),
+    ("3.6", "Qaysi soʻz boshqacha? Uni tanlang va nega ekanini yozing."),
+    ("3.7", "Sherigingizga har bir mahalda nima yeyishingizni aytib bering."),
+    ("4.1", "Bir marta tinglang. Har bir kishi qaysi davlatdan? Tanlang."),
+    ("4.2", "Yana tinglang. Har bir kishi nima yeydi va soat nechada? Yozing."),
+    ("4.3", "Yana bir marta tinglang. Eshitgan ravishingizni tanlang."),
+    ("4.4", "Toʻgʻri (*T*) yoki notoʻgʻri (*F*)?"),
+    ("4.5", "Endi siz. Sherigingizdan kechki ovqati haqida soʻrang. Buni sinfda bajarasiz."),
+    ("4.6", "Julie, Lucas yoki Monica — kim sizga koʻproq oʻxshaydi? Ikkita gap yozing."),
+    ("4.7", "Uchta kechki ovqatni vaqt boʻyicha tartiblang: eng ertasidan eng kechigacha."),
+    ("5.1", "Namunani yana oʻqing va quyidagilarni toping."),
+    ("5.2", "Oʻzingiz haqingizda toʻliq gaplar bilan javob bering."),
+    ("5.3", "Beshta savolingizni boshqa oʻquvchilarga bering. Kimning javoblari sizniki bilan bir xil?"),
+    ("5.4", "*What time* yoki *When* ni tanlang. Baʼzan ikkalasi ham toʻgʻri."),
+    ("5.6", "Sherigingiz bilan matn almashing. Uning matnini oʻqib, toʻldiring. Buni sinfda bajarasiz."),
+    ("5.7", "Sinf soʻrovi. Har bir gap uchun bitta odam toping va ismini yozing. Buni sinfda bajarasiz."),
+    ("5.8", "Sinfga natijani aytib bering. Soʻrovingiz haqida uchta gap yozing."),
+    ("5.9", "Butun darsni eslang. Har bir ish uchun qanchalik qila olishingizni tanlang."),
+]
+for label, text in INSTRUCTIONS:
+    h.say_also(label, text)
+h.say_also("5.5", "Kuningiz haqida ovqatlar orqali yozing (50–60 soʻz), namunadagi tuzilishda. "
+           "Unda boʻlsin: uch mahal ovqat · uchta aniq vaqt · ikkita chastota ravishi · "
+           "*in the morning / evening* · *at the weekend*.", after="Include:")
+
 # ------------------------------------------ the explanations, told in Uzbek
 h.goals([
     "soatni *o'clock*, *past* va *to* bilan aytishni",

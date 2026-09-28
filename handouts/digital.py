@@ -285,6 +285,20 @@ class Handout:
             return
         raise SystemExit("no box called %r" % title)
 
+    def say_also(self, label, text, after=None):
+        """The exercise's instruction once more, in Uzbek, on a line of its own
+        under the English - under the paragraph holding `after`, if the
+        instruction runs on to a second line."""
+        at = self.html.index("%s  </span>" % label)
+        start = self.html.rfind("<p", 0, at)
+        if after:
+            at = self.html.index(after, at)
+        end = self.html.index("</p>", at) + len("</p>")
+        style = re.match(r'<p[^>]*?( style="[^"]*")', self.html[start:end])
+        line = '<p class="hx-uz" lang="uz"%s>%s</p>' % (style.group(1) if style else "",
+                                                          told(text, bare=True))
+        self.html = self.html[:end] + line + self.html[end:]
+
     def goals(self, lines):
         """The "You will learn to" lines, told again."""
         at = self.html.index("You will learn to")

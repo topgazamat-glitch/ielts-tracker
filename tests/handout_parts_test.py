@@ -240,13 +240,19 @@ check("a comma does not make a sentence wrong",
 print("\n6. A BOOKLET WHOSE EXPLANATIONS ARE IN UZBEK")
 uz = core.load_test(db, {
     "level": "Pre-Intermediate", "number": 3, "title": "Uzbek version", "kind": "handout",
-    "layout": layout.replace('<div class="booklet">', '<div class="booklet" data-lang="uz">', 1),
+    "layout": layout.replace('<div class="booklet">', '<div class="booklet" data-lang="uz">', 1)
+                    .replace("Which day?</span></p>", "Which day?</span></p>"
+                             '<p class="hx-uz" lang="uz">Qaysi kun? Tanlang.</p>', 1),
     "passages": {}, "questions": [{"num": n, "kind": "open", "prompt": "x", "answer": None}
                                   for n in (1, 2, 3, 4, 5)]})
 db.execute("UPDATE dtests SET published=1 WHERE id=?", (uz,)); db.commit()
 upg = get("/s/%s?tab=handouts&h=%d" % (tok, uz))
 check("its cover says what it teaches in Uzbek", "Bu qoʻllanmada oʻrganasiz" in upg)
 check("and it is still split into its parts", "Part 1 of 2" in upg)
+check("the instruction is told again in Uzbek, on its own line",
+      '<p class="hx-uz" lang="uz">Qaysi kun? Tanlang.</p>' in upg)
+check("which is not mistaken for part of the reading text",
+      "Qaysi kun" not in upg[upg.index("<article"):upg.index("</article>")])
 kinds = server.hx_dress(panel("127D80", "TALAFFUZ — /ɑː/", "<p><span>Ikkita tovush.</span></p>")
                         + panel("127D80", "TOPSHIRISHDAN OLDIN TEKSHIRING", "<p><span>x</span></p>")
                         + panel("127D80", "KALIT SOʻZLAR", "<p><span>x</span></p>"))
