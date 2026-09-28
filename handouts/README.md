@@ -46,8 +46,9 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 | `p04bd_digital.py` | Pre-Intermediate | 4B + 4D Celebrations | 152 | 100 |
 | `p02ac_digital.py` | Pre-Intermediate | 2A + 2C Travel and tourism | 163 | 129 |
 | `b03b_digital.py` | Beginner | 3B Food and drink | 188 | 116 |
+| `e12ac_digital.py` | Elementary | 12A + 12C Travel | 155 | 110 |
 
-The Beginner one tells its explanations again in Uzbek (`Handout.retell`):
+The Beginner and Elementary ones tell their explanations again in Uzbek (`Handout.retell`):
 at that level most students cannot read a grammar box in English. The
 examples inside stay English, and so do the reading text and the exercises.
 Its class and pair tasks - surveys, a partner's answers - keep their boxes

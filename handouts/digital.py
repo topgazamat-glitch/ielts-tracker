@@ -40,6 +40,9 @@ def plain(fragment):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment))).strip()
 
 
+ITEM_STYLE = 'style="margin-bottom:3.5px;line-height:1.25;padding-left:35px"'
+NUM_SPAN = '<span style="color:#6E6E6E;font-size:10.5pt">%d  </span>'
+TEXT_SPAN = '<span style="color:#1A1A1A;font-size:11.5pt">%s</span>'
 PANEL = re.compile(
     r'(<table class="bk"><tr><td style="[^"]*background:#[0-9A-Fa-f]{6}[^"]*">'
     r'<table class="bk"><tr><td style="[^"]*background:#[0-9A-Fa-f]{6}[^"]*">)(.*?)(</td></tr></table>)'
@@ -310,6 +313,97 @@ class Handout:
         for m, line in reversed(list(zip(old, lines))):
             part = part[:m.start()] + '<p><span>—  </span>%s</p>' % told(line, bare=True) + part[m.end():]
         self.html = self.html[:at] + part + self.html[end:]
+
+    # ---------------------------------------------------- shapes that recur
+    def _items(self, label):
+        return [m for m in ITEM_P.finditer(self.html) if m.group(2) == label]
+
+    def options_on_lines(self, label):
+        """A, B and C each on a line of their own, not run together in one line
+        that wraps wherever the phone's width happens to fall."""
+        for m in reversed(self._items(label)):
+            guts = re.sub(r"(<span[^>]*>)([ABC])(</span>)", r"<br>\1\2\3", m.group(4))
+            guts = re.sub(r"^<br>", "", guts)
+            self.html = self.html[:m.start()] + m.group(1) + guts + "</p>" + self.html[m.end():]
+
+    def odd_one_out(self, label, why="Why?"):
+        """"Which word is different?": the item's words become the chips, and a
+        box for why. Returns {item: [words]}; the key is (label, n, 1) for the
+        word and (label, n, 2) for why."""
+        def firsts():
+            # only each item's own paragraph: Word sometimes tags a paragraph
+            # further on - inside the next explanation box - with the same item
+            seen, out = set(), []
+            for m in self._items(label):
+                if int(m.group(3)) not in seen and "·" in plain(m.group(4)):
+                    seen.add(int(m.group(3)))
+                    out.append(m)
+            return out
+        words = {int(m.group(3)): [w.strip() for w in re.sub(r"^\d+\s+", "", plain(m.group(4))).split("·")]
+                 for m in firsts()}
+        for n in sorted(words):
+            self.item_box(label, n)
+            self.item_box(label, n, placeholder=why)
+        for m in reversed(firsts()):
+            boxes = "".join(re.findall(r"\{\{box:[^}]*\}\}", m.group(4)))
+            self.html = (self.html[:m.start()] + m.group(1) + NUM_SPAN % int(m.group(3)) + boxes
+                         + "</p>" + self.html[m.end():])
+        return words
+
+    def sort_words(self, label, words, header_starts):
+        """"Put the words in the groups": the word box and the empty group table
+        become one line per word with the groups to tap. Returns the words in
+        their numbered order; the key is (label, n, 1)."""
+        head = self.html.index("%s  </span>" % label)
+        t1 = self.html.index("<table", head)
+        t2 = self.html.index("<table", self.html.index("</table>", t1))
+        end = self.html.index("</table>", t2) + len("</table>")
+        if not plain(self.html[t2:end]).startswith(header_starts):
+            raise SystemExit("%s: the group table starts %r" % (label, plain(self.html[t2:end])[:40]))
+        half = (len(words) + 1) // 2
+
+        def cell(n):
+            if n > len(words):
+                return "<td></td>"
+            self.texts[(label, n)] = words[n - 1]
+            return ('<td style="vertical-align:top;border-top:0;border-bottom:0;border-left:0;border-right:0">'
+                    '<p data-item="%s:%d" %s>%s%s</p></td>'
+                    % (label, n, ITEM_STYLE, NUM_SPAN % n,
+                       TEXT_SPAN % ("%s  {{box:%s:%d:60px:}}" % (words[n - 1], label, n))))
+        rows = "".join("<tr>%s%s</tr>" % (cell(n), cell(n + half)) for n in range(1, half + 1))
+        self.html = self.html[:t1] + '<table class="bk">' + rows + "</table>" + self.html[end:]
+        return list(words)
+
+    def key_first(self, label):
+        """"Match the two halves": paper puts the halves side by side; a phone
+        stacks them into one list alternating between the two. The endings go
+        first, as a key; then each beginning, with the letters to tap."""
+        head = self.html.index("%s  </span>" % label)
+        a = self.html.index('<table class="bk">', head)
+        b = self.html.index("</table>", a) + len("</table>")
+        begin, ends = [], []
+        for tr in re.findall(r"<tr>(.*?)</tr>", self.html[a:b], re.S):
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+            if len(cells) < 2 or not BLANK_TAG.search(cells[0]):
+                continue
+            n = int(re.search(r'data-item="[^:"]+:(\d+)"', cells[0]).group(1))
+            begin.append((n, cells[0]))
+            letter, rest = re.match(r"([a-z])\s+(.*)", plain(cells[1])).groups()
+            ends.append((letter, rest))
+        key = ('<table class="bk"><tr><td style="vertical-align:top;background:#F2F8F8;'
+               'border-left:3px solid #127D80">'
+               + "".join('<p style="margin:0"><span style="font-weight:700;color:#127D80">%s</span>  %s</p>'
+                         % (l, html.escape(r, quote=False)) for l, r in sorted(ends))
+               + "</td></tr></table>")
+        self.html = self.html[:a] + key + "".join(c for _n, c in sorted(begin)) + self.html[b:]
+        return [l for l, _r in sorted(ends)]
+
+    def replace_para(self, containing, new):
+        """Swap the whole paragraph that holds `containing` for `new`."""
+        at = self.html.index(containing)
+        start = self.html.rfind("<p", 0, at)
+        end = self.html.index("</p>", at) + len("</p>")
+        self.html = self.html[:start] + new + self.html[end:]
 
     def drop_blanks(self, indices):
         self.removed.update(indices)
