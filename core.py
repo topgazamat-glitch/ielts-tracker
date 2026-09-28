@@ -4679,7 +4679,8 @@ def answer_matches(given, expected):
         return False
     for want in str(expected or "").split("/"):
         want = tidy(want)
-        if want and got == want:
+        # a comma is punctuation, not the word: "In the evening I..." is right too
+        if want and (got == want or got.replace(",", "") == want.replace(",", "")):
             return True
     return False
 

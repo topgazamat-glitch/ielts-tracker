@@ -40,6 +40,31 @@ def plain(fragment):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment))).strip()
 
 
+PANEL = re.compile(
+    r'(<table class="bk"><tr><td style="[^"]*background:#[0-9A-Fa-f]{6}[^"]*">'
+    r'<table class="bk"><tr><td style="[^"]*background:#[0-9A-Fa-f]{6}[^"]*">)(.*?)(</td></tr></table>)'
+    r'((?:(?!<table|</td></tr></table>).)*)(</td></tr></table>)', re.S)
+DEEP_TEAL = "0B5456"
+
+
+def told(line, bare=False):
+    """One paragraph of an explanation, from **bold** / *italic* / [[RULE]]."""
+    rule = re.match(r"^\[\[(.+?)\]\]\s*", line)
+    lead = ""
+    if rule:
+        lead = ('<span style="font-weight:700;color:#%s">%s  </span>'
+                % (DEEP_TEAL, html.escape(rule.group(1), quote=False)))
+        line = line[rule.end():]
+    num = re.match(r"^(\d+)\s+", line)
+    if num and not rule:
+        lead = '<span style="font-weight:700">%s  </span>' % num.group(1)
+        line = line[num.end():]
+    text = html.escape(line, quote=False)
+    text = re.sub(r"\*\*(.+?)\*\*", r'<span style="font-weight:700">\1</span>', text)
+    text = re.sub(r"\*(.+?)\*", r'<span style="font-style:italic">\1</span>', text)
+    return (lead + text) if bare else "<p>%s%s</p>" % (lead, text)
+
+
 class Q:
     """What one box wants. answer=None is the student's own words."""
 
@@ -70,6 +95,12 @@ def note():
     """A box that may rightly stay empty - "correct the false ones" - so it
     is not counted as work left to do."""
     return Q(None, control="note")
+
+
+def pair():
+    """Work done in class - a survey, a partner's answers: saved if it is
+    filled in, never holding a part back at home."""
+    return Q(None, control="pair")
 
 
 def number(answer):
@@ -205,6 +236,66 @@ class Handout:
             out.append("<tr>%s%s</td>%s%s</td></tr>" % (t_open, text, b_open, box))
         self.html = self.html[:a] + '<table class="bk">' + "".join(out) + "</table>" + self.html[b:]
         return faces, nums
+
+    def grid_rows(self, label, columns=None):
+        """A table of boxes - things down the side, answers across - as one
+        block per row: the row's name, then each box with its column's name.
+        On a phone the table would otherwise stack into a list of loose boxes."""
+        head = self.html.index("%s  </span>" % label)
+        a = self.html.index('<table class="bk">', head)
+        b = self.html.index("</table>", a) + len("</table>")
+        rows = [re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)
+                for r in re.findall(r"<tr>(.*?)</tr>", self.html[a:b], re.S)]
+        names = columns if columns is not None else [plain(c) for c in rows[0][1:]]
+        out = ""
+        for k, row in enumerate(rows[1:], 1):
+            bits = []
+            for name, cell in zip(names, row[1:]):
+                tag = BLANK_TAG.search(cell)
+                if tag:                     # the teacher sees which row and column it was
+                    self.blanks[int(tag.group(1))]["text"] = " ".join(
+                        x for x in (plain(row[0]), name.rstrip(":")) if x)
+                    box = re.sub(r' style="[^"]*"', "", tag.group(0))[:-1] + ' style="width:11em">'  # room for an answer
+                    bits.append(('<span style="color:#6E6E6E">%s</span> ' % html.escape(name)
+                                 if name else "") + box)
+            out += ('<p data-item="%s:%d" style="margin-bottom:8px"><span style="font-weight:700">%s</span>'
+                    '<br>%s</p>' % (label, k, html.escape(plain(row[0])), "<br>".join(bits)))
+        self.html = self.html[:a] + out + self.html[b:]
+
+    def retell(self, title, new_title, paragraphs):
+        """An explanation box told again - in Uzbek, for a class that needs it.
+        paragraphs use a small markup: **bold**, *italic*, [[NAME]] to start a
+        rule, and {box} wherever one of the box's own answer boxes goes, in
+        the order they were."""
+        for m in PANEL.finditer(self.html):
+            if plain(m.group(2)) != title:
+                continue
+            boxes = [t.group(0) for t in BLANK_TAG.finditer(m.group(4))]
+            body = "".join(told(p) for p in paragraphs)
+            for box in boxes:
+                if "{box}" not in body:
+                    raise SystemExit("the new %s has fewer boxes than the old" % title)
+                body = body.replace("{box}", box, 1)
+            if "{box}" in body:
+                raise SystemExit("the new %s has more boxes than the old" % title)
+            head = ('<p style="margin-bottom:0px"><span style="font-weight:700;color:#FFFFFF">%s</span></p>'
+                    % html.escape(new_title))
+            self.html = (self.html[:m.start()] + m.group(1) + head + m.group(3) + body
+                         + m.group(5) + self.html[m.end():])
+            return
+        raise SystemExit("no box called %r" % title)
+
+    def goals(self, lines):
+        """The "You will learn to" lines, told again."""
+        at = self.html.index("You will learn to")
+        end = self.html.index("</table>", at)
+        part = self.html[at:end]
+        old = [m for m in re.finditer(r"<p[^>]*>(.*?)</p>", part, re.S) if plain(m.group(1)).startswith("—")]
+        if len(old) != len(lines):
+            raise SystemExit("%d goals on the page, %d given" % (len(old), len(lines)))
+        for m, line in reversed(list(zip(old, lines))):
+            part = part[:m.start()] + '<p><span>—  </span>%s</p>' % told(line, bare=True) + part[m.end():]
+        self.html = self.html[:at] + part + self.html[end:]
 
     def drop_blanks(self, indices):
         self.removed.update(indices)

@@ -64,6 +64,7 @@ layout = (
     + ex("1.1", "Which day?") + '<p data-item="1.1:1"><span>1  </span><span>Clocks ' + box(1) + '</span></p>'
     + '<p data-item="1.1:2"><span>2  </span><span>Go ' + box(2) + '</span></p>'
     + '<p data-item="1.1:3"><span>3  </span><span>Why? ' + box(3) + '</span></p>'
+    + '<p data-item="1.1:4"><span>4  </span><span>Your partner? ' + box(5) + '</span></p>'
     + bar(2, "Grammar · past simple")
     + panel("C0745F", "ERROR WARNING",
             '<p><span style="font-weight:700">1  Double past.</span><span> I didn\'t went. ✗ → '
@@ -81,6 +82,7 @@ hid = core.load_test(db, {
         {"num": 2, "kind": "typed", "prompt": "1.1  2 Go", "answer": "went"},
         {"num": 3, "kind": "open", "prompt": "1.1  3 Why?", "answer": None, "control": "long"},
         {"num": 4, "kind": "typed", "prompt": "2.1  1 go", "answer": "went"},
+        {"num": 5, "kind": "open", "prompt": "1.1  4 Your partner?", "answer": None, "control": "pair"},
     ]})
 db.execute("UPDATE dtests SET published=1 WHERE id=?", (hid,))
 db.commit()
@@ -130,6 +132,9 @@ check("the cover names the booklet and what it teaches",
       "Travel" in pg and "Lessons 2A + 2C" in pg and "past simple" in pg and "hx-goals" in pg)
 out = post(CHECK, {"part": "2", "q%d" % qid[4]: "went"})
 check("checking part 2 first is refused", out.get("ok") is False and out.get("locked"))
+
+check("a box done in class says so and is not required",
+      re.search(r'name="q%d"[^>]*placeholder="in class"[^>]*data-optional' % qid[5], pg) is not None)
 
 print("\n2. THE PAPER'S EXPLANATIONS IN THE SITE'S CLOTHES")
 check("the reading text is an article with its title", '<article class="hx-read">' in pg
@@ -229,7 +234,26 @@ check("what they had already typed in the new one is left alone", got.get(nq[4])
 check("the old version keeps its copy", db.execute(
     "SELECT COUNT(*) FROM dresponses WHERE attempt_id=?", (oa,)).fetchone()[0] == 4)
 
-print("\n6. A STUDENT WHO LEAVES TAKES THEIR PARTS WITH THEM")
+check("a comma does not make a sentence wrong",
+      core.answer_matches("In the evening I have dinner", "In the evening, I have dinner"))
+
+print("\n6. A BOOKLET WHOSE EXPLANATIONS ARE IN UZBEK")
+uz = core.load_test(db, {
+    "level": "Pre-Intermediate", "number": 3, "title": "Uzbek version", "kind": "handout",
+    "layout": layout.replace('<div class="booklet">', '<div class="booklet" data-lang="uz">', 1),
+    "passages": {}, "questions": [{"num": n, "kind": "open", "prompt": "x", "answer": None}
+                                  for n in (1, 2, 3, 4, 5)]})
+db.execute("UPDATE dtests SET published=1 WHERE id=?", (uz,)); db.commit()
+upg = get("/s/%s?tab=handouts&h=%d" % (tok, uz))
+check("its cover says what it teaches in Uzbek", "Bu qoʻllanmada oʻrganasiz" in upg)
+check("and it is still split into its parts", "Part 1 of 2" in upg)
+kinds = server.hx_dress(panel("127D80", "TALAFFUZ — /ɑː/", "<p><span>Ikkita tovush.</span></p>")
+                        + panel("127D80", "TOPSHIRISHDAN OLDIN TEKSHIRING", "<p><span>x</span></p>")
+                        + panel("127D80", "KALIT SOʻZLAR", "<p><span>x</span></p>"))
+check("Uzbek box titles are recognised", "hx-card hx-sound" in kinds and "hx-card hx-check" in kinds
+      and "hx-card hx-words" in kinds)
+
+print("\n7. A STUDENT WHO LEAVES TAKES THEIR PARTS WITH THEM")
 core.remove_student(db, sid)
 check("no part rows are left behind", db.execute("SELECT COUNT(*) FROM dparts").fetchone()[0] == 0)
 srv.shutdown()

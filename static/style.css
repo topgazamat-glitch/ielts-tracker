@@ -2212,7 +2212,7 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
   display: inline-block; max-width: 100%; min-width: 4ch; height: 34px;
   vertical-align: middle; margin: 2px 0; padding: 0 var(--sp-2);
   font-size: 16px; line-height: 1.2;           /* 16px stops iOS zooming on focus */
-  border: 1px solid #9CC; border-radius: 6px; background: #F2F8F8; color: #0B5456; }
+  border: 1px solid var(--hx-chip); border-radius: 6px; background: var(--hx-soft-2); color: var(--hx-deep); }
 .booksheet.handout .booklet .bk-blank:focus {
   outline: 2px solid var(--brand); outline-offset: 1px; background: #fff; }
 
@@ -2220,8 +2220,8 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 .booksheet.handout .booklet textarea.bk-long {
   display: block; width: 100% !important; min-height: 44px; resize: none;
   overflow: hidden; margin: var(--sp-1) 0 var(--sp-2); padding: var(--sp-2) var(--sp-3);
-  font: inherit; font-size: 16px; line-height: 1.45; color: #0B5456;
-  border: 1px solid #9CC; border-radius: 8px; background: #F2F8F8; }
+  font: inherit; font-size: 16px; line-height: 1.45; color: var(--hx-deep);
+  border: 1px solid var(--hx-chip); border-radius: 8px; background: var(--hx-soft-2); }
 
 /* a choice: chips to tap, the chosen one filled with the booklet's teal */
 .booksheet.handout .bk-chips { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1);
@@ -2231,12 +2231,12 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 .booksheet.handout .bk-chip span {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 36px; height: 34px; padding: 0 var(--sp-3); border-radius: 999px;
-  border: 1.5px solid #9CC; background: #fff; color: #0B5456;
+  border: 1.5px solid var(--hx-chip); background: #fff; color: var(--hx-deep);
   font-size: 15px; font-weight: 600; line-height: 1; white-space: nowrap;
   transition: background .12s var(--ease), border-color .12s var(--ease), transform .08s var(--ease); }
 .booksheet.handout .bk-chip:active span { transform: scale(.95); }
 .booksheet.handout .bk-chip input:checked + span {
-  background: #127D80; border-color: #127D80; color: #fff; }
+  background: var(--hx-brand); border-color: var(--hx-brand); color: #fff; }
 .booksheet.handout .bk-chip input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
 .booksheet.handout .bk-chips.right { box-shadow: 0 0 0 2px #2E9E5B; }
 .booksheet.handout .bk-chips.right input:checked + span { background: #2E9E5B; border-color: #2E9E5B; }
@@ -2247,18 +2247,18 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 /* a tick: a square to tap */
 .booksheet.handout .bk-tick { display: inline-grid; place-items: center; width: 34px; height: 34px;
   padding: 0; margin: 2px 0; vertical-align: middle; border-radius: 8px;
-  border: 1.5px solid #9CC; background: #fff; color: transparent;
+  border: 1.5px solid var(--hx-chip); background: #fff; color: transparent;
   font-size: 18px; font-weight: 700; line-height: 1; filter: none; }
-.booksheet.handout .bk-tick.on { background: #127D80; border-color: #127D80; color: #fff; }
+.booksheet.handout .bk-tick.on { background: var(--hx-brand); border-color: var(--hx-brand); color: #fff; }
 .booksheet.handout .bk-tick.right { box-shadow: 0 0 0 2px #2E9E5B; }
 .booksheet.handout .bk-tick.wrong { box-shadow: 0 0 0 2px var(--warn); }
 /* a piece of writing: room for a paragraph, and how many words so far */
 .booksheet.handout .booklet textarea.bk-essay { min-height: 9.5em; }
 .booksheet.handout .bk-words { display: block; margin: calc(-1 * var(--sp-1)) 0 var(--sp-2);
-  text-align: right; font-size: 12px; line-height: 1.4; color: #0B5456;
+  text-align: right; font-size: 12px; line-height: 1.4; color: var(--hx-deep);
   font-variant-numeric: tabular-nums; }
 .booksheet.handout .bk-tickfill { margin: 0 0 var(--sp-2); padding: var(--sp-1) var(--sp-3);
-  border-radius: 999px; border: 1px solid #9CC; background: #fff; color: #0B5456;
+  border-radius: 999px; border: 1px solid var(--hx-chip); background: #fff; color: var(--hx-deep);
   font-size: 13px; font-weight: 600; filter: none; }
 
 .booksheet.handout .bk-blank.right, .booksheet.handout textarea.bk-long.right {
@@ -2329,7 +2329,7 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
   font-size: 13px; color: var(--ink-2); overflow: hidden; }
 .sb-prog { grid-area: prog; height: 4px; margin: 0 calc(-1 * var(--sp-3));
   background: var(--line-soft); }
-.sb-prog i { display: block; height: 100%; width: 0; background: #127D80;
+.sb-prog i { display: block; height: 100%; width: 0; background: var(--brand);
   transition: width .4s var(--ease); }
 .bk-jump { grid-area: jump; min-width: 0; height: 38px; font-size: 14px; }
 .sb-next { grid-area: next; height: 38px; padding: 0 var(--sp-3); font-size: 14px;
@@ -2416,6 +2416,7 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 
 /* ---- inside the sheet: the paper's explanations in the site's colours */
 .booksheet.handout {
+  --hx-chip: #d9c2e2;
   --hx-ink: #1c0f22; --hx-ink-2: #5c3c65; --hx-ink-3: #857a8c;
   --hx-brand: #701589; --hx-deep: #320a3e; --hx-soft: #f5edf8; --hx-soft-2: #fbf8fc;
   --hx-line: #e8def0; --hx-warn: #b8283a; --hx-warn-soft: #fff1f2; --hx-warn-line: #f8ccd2;
@@ -2431,6 +2432,9 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
   background: var(--hx-soft); color: var(--hx-brand); }
 .booklet .hx-label { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
   color: var(--hx-brand); line-height: 1.3; }
+/* a box's title and a rule's name keep their own letters: the booklet writes
+   them in capitals already, and a capital IPA symbol is a different sound */
+.booklet .hx-card .hx-label, .booklet .hx-card .hx-tag { text-transform: none; }
 .booklet .hx-body p { margin: 0 0 var(--sp-2); }
 .booklet .hx-body p:last-child { margin-bottom: 0; }
 .booklet .hx-body .hx-sub { padding-left: var(--sp-4); border-left: 2px solid var(--hx-line); }
@@ -2497,6 +2501,18 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
   vertical-align: top; }
 .booklet table.hx-table td:first-child { font-weight: 600; color: var(--hx-deep); }
 .booklet table.hx-table p { margin: 0; }
+
+/* the questions in the site's plum too: the booklet's teal, wherever its own
+   styles put it - exercise numbers, headed tables, the key panels - is
+   repainted, and the boxes and chips above already use the plum */
+.booksheet.handout .booklet [style*="color:#127D80" i] { color: var(--hx-brand) !important; }
+.booksheet.handout .booklet [style*="color:#0B5456" i] { color: var(--hx-deep) !important; }
+.booksheet.handout .booklet [style*="background:#127D80" i] { background: var(--hx-brand) !important; }
+.booksheet.handout .booklet [style*="background:#E8F1F1" i] { background: var(--hx-soft) !important; }
+.booksheet.handout .booklet [style*="background:#F2F8F8" i] { background: var(--hx-soft-2) !important; }
+.booksheet.handout .booklet [style*="solid #127D80" i] { border-color: var(--hx-brand) !important; }
+.booksheet.handout .booklet [style*="solid #C9C9C9" i] { border-color: var(--hx-line) !important; }
+.booksheet.handout .booklet .bk-blank { color: var(--hx-deep); }
 
 /* the answers are always in the plain face, even inside a text set as a book */
 .booksheet.handout .bk-chip span, .booksheet.handout .booklet input.bk-blank,

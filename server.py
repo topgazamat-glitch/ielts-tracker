@@ -2879,7 +2879,12 @@ def handout_controls(layout, qs, given=None, marks=None):
                     f'<input type="hidden" name="q{q["id"]}" value="{E(mine)}" data-q="{num}">')
         w = BOX_WIDTH_AT.search(rest)
         wide = w and (w.group(2) == "%" or float(w.group(1)) >= 180)
-        if kind in ("long", "tickfill", "essay", "note") or (wide and kind != "number"):
+        if kind == "pair" and "placeholder=" not in rest:
+            rest += ' placeholder="in class"'     # says why it may stay empty
+        if kind == "pair" and not wide:
+            # done in class with a partner: a gap that may stay empty at home
+            return f'<input class="bk-blank" data-q="{num}"{rest} data-optional enterkeyhint="next">'
+        if kind in ("long", "tickfill", "essay", "note", "pair") or (wide and kind != "number"):
             state = " right" if mark == 1 else " wrong" if mark == 0 else ""
             hint = PLACEHOLDER_AT.search(rest)
             fill = (f'<button type="button" class="bk-tickfill" data-q="{num}">'
@@ -2893,7 +2898,7 @@ def handout_controls(layout, qs, given=None, marks=None):
                 state = " teacher"
             return (f'<textarea class="bk-blank bk-long{" bk-essay" if kind == "essay" else ""}{state}" '
                     f'name="q{q["id"]}" data-q="{num}" rows="{4 if kind == "essay" else 1}" spellcheck="true"'
-                    f'{" data-optional" if kind == "note" else ""}'
+                    f'{" data-optional" if kind in ("note", "pair") else ""}'
                     f'{" " + hint.group(0) if hint else ""}'
                     f'{" readonly" if lock else ""}>{E(mine)}</textarea>{fill}')
         if kind == "number":
@@ -2937,6 +2942,9 @@ def jump_menu(sections, exercises):
 # tables - is redrawn in the site's own colours; the exercises keep the
 # booklet's look, which the students already know.
 
+# a tick, a correction to a sentence that was already right, and work done in
+# class with a partner may all rightly stay empty: none of them holds a part back
+OPTIONAL_BOXES = ("tick", "note", "pair")
 BOOKLET_DEEP = "0B5456"          # the booklets' dark teal: a rule's name, DECIDE / OFFER
 BOOKLET_RUST = "C0745F"          # the booklets' warning boxes
 BOOKLET_HEAD = "E8F1F1"          # the header row of a booklet table
@@ -3007,13 +3015,13 @@ def _hx_panel(m):
     t = title.upper()
     if colour == BOOKLET_RUST:
         kind = "warn"
-    elif t.startswith("CHECK"):
+    elif t.startswith("CHECK") or "TEKSHIR" in t:
         kind = "check"
-    elif "KEY WORD" in t:
+    elif "KEY WORD" in t or "KALIT SO" in t:
         kind = "words"
-    elif "PRONUNCIATION" in t or "HEAR" in t:
+    elif any(w in t for w in ("PRONUNCIATION", "HEAR", "TALAFFUZ", "ESHIT")):
         kind = "sound"
-    elif "LISTEN" in t:
+    elif "LISTEN" in t or "TINGLA" in t:
         kind = "listen"
     elif "bk-blank" in body or re.match(r"(TWO EMAILS|REPLIES|A MESSAGE|AT THE )", t):
         kind = "text"
@@ -3162,7 +3170,7 @@ def handout_parts(layout):
     """The booklet's opening, and its parts: [(number, name, what, markup)].
     A booklet without section bars is one part."""
     inner = layout
-    wrapped = re.match(r'\s*<div class="booklet">(.*)</div>\s*$', layout, re.S)
+    wrapped = re.match(r'\s*<div class="booklet"[^>]*>(.*)</div>\s*$', layout, re.S)
     if wrapped:
         inner = wrapped.group(1)
     bars = list(SECTION_AT.finditer(inner))
@@ -3368,7 +3376,10 @@ def handout_view(db, token, t, qs, attempt, query):
   {f'<p class="hx-sub">{E(sub)}</p>' if sub else ""}
   <ol class="hx-steps">{steps}</ol>
 </header>"""
-    goals_head = "What you practised" if view == "end" else "In this handout you will learn to"
+    uzbek = 'data-lang="uz"' in t["layout"][:200]
+    goals_head = (("Nimalarni mashq qildingiz" if view == "end" else "Bu qoʻllanmada oʻrganasiz")
+                  if uzbek else
+                  ("What you practised" if view == "end" else "In this handout you will learn to"))
     goals_card = (f'<section class="hx-goals"><h2 class="hx-label">{goals_head}</h2>'
                   f'<ul>{"".join(f"<li>{g}</li>" for g in goals)}</ul></section>' if goals else "")
 
@@ -3406,14 +3417,16 @@ def handout_view(db, token, t, qs, attempt, query):
         return (hero + head + part_result(pname, r, onward) + sheet
                 + f'<div class="hx-bottom">{onward}</div>')
     total = sum(1 for q, _o in pqs
-                if (q["control"] if "control" in q.keys() else None) not in ("tick", "note"))
+                if (q["control"] if "control" in q.keys() else None) not in OPTIONAL_BOXES)
+    # the button has to share a phone's width with two others
+    check_label = f"Check {pname}" if len(pname) <= 11 else f"Check part {idx + 1}"
     return hero + (goals_card if idx == 0 else "") + head + sheet + f"""
 <div class="savebar" id="savebar">
   <div class="sb-prog" aria-hidden="true"><i id="sbfill"></i></div>
   {jump_menu([(str(n), pname)], exercises)}
   <button type="button" class="ghost sb-next" id="sbnext"
           title="Go to the next empty box"><span id="sbcount">0 of {total}</span> &rsaquo;</button>
-  <button type="button" class="checkbtn" id="checkbtn" data-label="Check {E(pname)}">Check {E(pname)}</button>
+  <button type="button" class="checkbtn" id="checkbtn" data-label="{E(check_label)}">{E(check_label)}</button>
   <div class="sb-notes"><span id="savenote">Saved as you type</span>
     <span id="marknote" class="marknote">Answer every box, then check this part to open the next.</span></div>
 </div>
@@ -3596,7 +3609,7 @@ def check_part(db, token, hid, aid, part, qs, typed):
     def text(q):
         return typed[q["id"]] if q["id"] in typed else saved.get(q["id"], "").strip()
     missing = sorted(q["num"] for q in mine
-                     if (q["control"] or "") not in ("tick", "note") and not text(q))
+                     if (q["control"] or "") not in OPTIONAL_BOXES and not text(q))
     if missing:
         return json_response({"ok": False, "missing": missing})
     right = wrong = teacher = 0
