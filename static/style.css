@@ -2626,9 +2626,12 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
   .booklet table.hx-wide tr { padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--hx-line); }
   .booklet table.hx-wide tr:nth-child(2) { border-top: 0; }
   .booklet table.hx-wide td { border: 0; padding: 2px 0; }
-  .booklet table.hx-wide td:first-child { font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--hx-brand); font-weight: 700; }
-  .booklet table.hx-wide td[data-label]:not(:first-child)::before { content: attr(data-label);
+  /* a first column with no heading of its own names the row; one with a
+     heading is data like the rest, and says what it is */
+  .booklet table.hx-wide td:first-child:not([data-label]) { font-size: 12px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--hx-brand); font-weight: 700; }
+  .booklet table.hx-wide td[data-label]:first-child { font-weight: 400; color: var(--hx-ink); }
+  .booklet table.hx-wide td[data-label]::before { content: attr(data-label);
     display: block; font-size: 12px; color: var(--hx-ink-3); font-weight: 600; }
   .booklet .hx-read-len { margin-left: 0; width: 100%; }
 }

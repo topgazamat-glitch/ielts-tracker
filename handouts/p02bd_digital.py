@@ -1,8 +1,10 @@
 """P02BD Travel and tourism - Azamat's Pre-Intermediate booklet, done on a phone.
 
 His design is rendered as it is and this decides every box. The key is his
-(P02BD Travel and tourism - answer key), joined box by box by hand. Like the
-other Pre-Intermediate handouts, its explanations stay in English.
+(P02BD Travel and tourism - answer key), joined box by box by hand. Its
+explanations are told again in Uzbek - every explanation box, the goals and
+the headings of the tables that explain - with the English examples kept;
+the reading, the texts to fill in and the exercises stay English.
 
 What a phone gets that paper does not:
   - taps for every choice: which story, A/B/C, stopped or continued,
@@ -81,7 +83,119 @@ for n in (1, 2, 3, 4):
     h.item_box("5.5", n, where="leader")
 h.grid_rows("5.6", [""])
 h.leaders("5.7", "CHECK BEFORE", [(20, "95%", "Write your blog entry here")])
-h.one_per_line("CHECK BEFORE", None, at="box")
+
+# ------------------------------------------ the explanations, told in Uzbek
+h.goals([
+    "*past continuous* ni fon uchun, *past simple* ni sodir boʻlgan voqea uchun ishlatishni",
+    "*when* va *while* dan toʻgʻrisini tanlashni",
+    "safardagi muammolarni tasvirlashni — kechikish, ish tashlash, buzilib qolish, adashib qolish",
+    "kuchsiz aytilgan *was* va *were* ni eshitishni — va inkor baland aytilishini bilishni",
+    "*and, but, so, because* va *when* bilan bogʻlangan sayohat blogini yozishni",
+])
+h.retell("KEY WORDS", "KALIT SOʻZLAR", [
+    "**a delay**  kechikish — rejadagidan kechroq sodir boʻlish",
+    "**to break down**  buzilib qolmoq (mashina, avtobus)",
+    "**a lift**  birovning mashinasida tekin olib borish",
+    "**a platform**  poyezdga chiqish uchun turiladigan joy, platforma",
+])
+h.retell("PRESENTATION", "TUSHUNTIRISH — PAST CONTINUOUS", [     # the first of the two
+    "**Past continuous** — oʻtmishdagi uzoqroq davom etgan harakat. Odatda uni *past simple* "
+    "dagi qisqaroq harakat boʻlib qoʻyadi.",
+    "[[SHAKLI]] *was / were* + feʼl + *-ing*. *It was raining. · All the other passengers were "
+    "waiting for me.* · Inkor: *It wasn't raining.* · Savol: *Was it raining?*",
+    "[[→]] **Uzun harakat birinchi boshlanadi.** *I was reading my book when a flight attendant "
+    "spoke to me.* Avval oʻqish boshlangan, gapirish uni boʻlgan.",
+    "[[A]] **Baʼzan uzun harakat qisqasi sababli TOʻXTAYDI.** *I was running for the bus when my "
+    "bag opened.* Yugurish toʻxtadi.",
+    "[[B]] **Baʼzan u keyin ham DAVOM ETADI.** *I was reading my book when she spoke to me.* U "
+    "gapirdi, oʻqish esa davom etdi.",
+    "[[!]] **Bir vaqtda ikkita uzun harakat — ikkalasi ham continuous.** *While I was waiting, he "
+    "was making tea.*",
+    "[[WHEN / WHILE]] *when* odatda *past simple* bilan, *while* esa odatda *past continuous* "
+    "bilan keladi. *…when the turbulence started. · While I was waiting…*",
+])
+h.retell("ERROR WARNING", "DIQQAT — KOʻP UCHRAYDIGAN XATOLAR", [
+    "Toʻrtta xato uchraydi, ularning koʻpchiligi — birinchi ikkitasi:",
+    "1 **Fon kerak boʻlgan joyda past simple.** ✗ *I read my book when she spoke to me.* → ✓ "
+    "*I was reading my book when she spoke to me.* Birinchi gap kitobni u gapirgandan *keyin* "
+    "oʻqiganingizni bildiradi.",
+    "2 **Qisqa harakat uchun past continuous.** ✗ *The coach was breaking down.* → ✓ *The coach "
+    "broke down.* Buzilib qolish bir soniyada sodir boʻladi, bir soat davom etmaydi.",
+    "3 **they bilan was, he bilan were.** ✗ *They was waiting* → ✓ *They were waiting* · ✗ "
+    "*He were driving* → ✓ *He was driving*",
+    "4 **Holat feʼllari.** ✗ *I was knowing the answer* → ✓ *I knew the answer*. *know · want · "
+    "like · understand · need* bu yerda ham continuous shaklda ishlatilmaydi.",
+])
+h.retell("PRESENTATION", "TUSHUNTIRISH — SAFAR IBORALARI", [
+    "[[SAFAR]] Boshidan oxirigacha: *set off* (yoʻlga chiqmoq) → *board a train or plane* (poyezd "
+    "yoki samolyotga chiqmoq) → *take off* (samolyot uchib ketmoq) → *land* (samolyot qoʻnmoq) → "
+    "*change* (bir poyezddan tushib, boshqasiga chiqmoq) → *get to a place* (yetib bormoq)",
+    "[[YANA]] *travel around a country* (mamlakatni aylanib chiqmoq) · *hitchhike* (yoʻl chetida "
+    "turib, tekin olib ketishlarini soʻramoq) · *give somebody a lift* (birovni mashinada "
+    "boradigan joyiga olib bormoq)",
+    "[[MUAMMOLAR]] Ish chappasiga ketganda: *miss a train · your car breaks down · there is "
+    "turbulence during the flight · you have an accident · you get stuck in a traffic jam · there "
+    "is something wrong with the plane · there is a strike · you get lost · there is a long queue · "
+    "there is a delay*",
+    "**Ehtiyot boʻling:** poyezdga ulgurmay qolsangiz, *miss a train* deysiz, *lose* emas. "
+    "*Take off* — samolyotning ishi, yoʻlovchining emas.",
+])
+h.retell("PRONUNCIATION — WAS AND WERE", "TALAFFUZ — WAS VA WERE", [
+    "**Tasdiq gap va savollarda ular kuchsiz aytiladi.** *It was raining* → /wəz/. · *We were "
+    "driving* → /wə/. · *Were we driving fast?* → /wə/. Ular deyarli eshitilmaydi.",
+    "**Inkorda ular kuchli aytiladi.** *It WASN'T raining* → /wɒznt/. · *We WEREN'T driving fast* "
+    "→ /wɜːnt/.",
+    "**Demak, baland aytilgani — inkor.** Bu oʻquvchilar kutganining aksi. U yerda aniq, urgʻuli "
+    "soʻzni eshitsangiz, bu deyarli har doim *wasn't* yoki *weren't*.",
+])
+h.retell("BEFORE YOU LISTEN", "TINGLASHDAN OLDIN", [
+    "Gazetadagi sarlavha: *WOMAN ANGRY AFTER FLIGHT IN TOILET* — “Parvozni hojatxonada "
+    "oʻtkazgan ayol gʻazabda”. Nima boʻlganini ayolning oʻzi aytib berishini eshitasiz.",
+    "Agar sinfingizda audio boʻlsa, bu 2B yozuvi. Boʻlmasa, oʻqituvchingiz matnni oʻqib beradi — "
+    "topshiriqlar bir xil.",
+])
+h.retell("WHY YOU DIDN'T HEAR IT", "NEGA ESHITMADINGIZ?", [
+    "**Was va were deyarli yoʻqolib ketadi.** *I was reading* → /aɪwəzriːdɪŋ/ — ikki urgʻuli "
+    "tovush orasida bitta kuchsiz tovush. Oʻquvchilar *reading* ni eshitib, hozirgi zamonni "
+    "yozib qoʻyadi.",
+    "**Was keyingi soʻzga qoʻshilib ketadi.** *was a* → /wəzə/ · *were all* → /wərɔːl/ · *was in* "
+    "→ /wəzɪn/. *-ing* ga quloq soling: yordamchi feʼl uning oldida baribir bor — eshitsangiz ham, "
+    "eshitmasangiz ham.",
+])
+h.retell("LISTENING INTO WRITING", "TINGLASHDAN YOZISHGA", [
+    "Avval Perudan Avstraliyaga olti oyga uchib ketayotgan **Lucila** ning Sidneyda yashaydigan "
+    "dugonasi **Katie** bilan suhbatini tinglang.",
+])
+h.retell("LINKING WORDS", "BOGʻLOVCHI SOʻZLAR", [
+    "Blogni beshta kichik soʻz bogʻlab turadi. Har birining oʻz vazifasi bor:",
+    "[[AND]] oʻxshash fikr qoʻshadi. *They were very friendly and welcoming.*",
+    "[[BUT]] boshqacha fikr qoʻshadi. *Some of them are expensive, but most are really cheap.*",
+    "[[SO]] natijani bildiradi. *I slept most of the way, so I'm not tired.*",
+    "[[BECAUSE]] sababni bildiradi. *You can't bring fresh fruit because it could carry diseases.*",
+    "[[WHEN]] ikki narsa bir vaqtda yoki biri ikkinchisidan keyin darhol sodir boʻladi. *When I got "
+    "off the plane, the first thing I noticed was how organised everything is.*",
+    "**So va because bir-biriga teskari.** *It was raining, so we stayed in.* · *We stayed in "
+    "because it was raining.* Faktlar bir xil, tartibi teskari. Ularni almashtirib qoʻyish — bu "
+    "darsdagi eng koʻp uchraydigan xato.",
+])
+h.retell("CHECK BEFORE YOU HAND IT IN", "TOPSHIRISHDAN OLDIN TEKSHIRING", [
+    "{box}  Toʻrtta xatboshi.   {box}  Beshala bogʻlovchi soʻz, har biri oʻz vazifasida.   "
+    "{box}  *so* va *because* toʻgʻri tartibda.",
+    "{box}  Fon uchun ikkita *past continuous* feʼl, sodir boʻlgan voqealar uchun *past simple*.   "
+    "{box}  U yerda boʻlmagan odam taxmin qila olmaydigan bitta tafsilot.",
+    "{box}  Shunchaki *that's all* bilan emas, oldinga qaraydigan gap bilan tugatdim.   "
+    "{box}  Soʻzlar soni: {box}",
+])
+h.one_per_line("TOPSHIRISHDAN OLDIN TEKSHIRING", None, at="box")
+h.retell_cells({
+    "Past simple — the short, finished action": "Past simple — qisqa, tugallangan harakat",
+    "Past continuous — the longer background": "Past continuous — uzoqroq davom etgan fon",
+    "What is written": "Yozilishi", "What you hear": "Eshitilishi", "Why": "Nega",
+    "was has no vowel of its own": "<i>was</i> ning oʻz unlisi yoʻq",
+    "were all becomes one sound": "<i>were all</i> bitta tovushga aylanadi",
+    "the negative is stressed": "inkor urgʻu oladi",
+    "four words, two beats": "toʻrt soʻz, ikki urgʻu",
+})
 
 # ------------------------------------------------------------------ the key
 K = {}
@@ -192,6 +306,7 @@ K[("5.7", 8, 1)] = own(control="number")          # Words: ...
 
 if __name__ == "__main__":
     data = h.build(K, "Pre-Intermediate", 2, "Unit 2B & 2D — Travel and tourism")
+    data["layout"] = data["layout"].replace('<div class="booklet">', '<div class="booklet" data-lang="uz">', 1)
     out = os.path.join(HERE, "p02bd.json")
     json.dump(data, open(out, "w"))
     report(data)
