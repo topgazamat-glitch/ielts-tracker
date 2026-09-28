@@ -45,6 +45,7 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 |---|---|---|---|---|
 | `p04bd_digital.py` | Pre-Intermediate | 4B + 4D Celebrations | 152 | 100 |
 | `p02ac_digital.py` | Pre-Intermediate | 2A + 2C Travel and tourism | 163 | 129 |
+| `p02bd_digital.py` | Pre-Intermediate | 2B + 2D Travel and tourism | 154 | 123 |
 | `b03b_digital.py` | Beginner | 3B Food and drink | 188 | 116 |
 | `e12ac_digital.py` | Elementary | 12A + 12C Travel | 155 | 110 |
 

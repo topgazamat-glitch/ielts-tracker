@@ -3063,7 +3063,7 @@ def _hx_panel(m):
         kind = "sound"
     elif "LISTEN" in t or "TINGLA" in t:
         kind = "listen"
-    elif "bk-blank" in body or re.match(r"(TWO EMAILS|REPLIES|A MESSAGE|AT THE )", t):
+    elif "bk-blank" in body or re.match(r"(TWO EMAILS|REPLIES|A MESSAGE|AT THE |MODEL)", t):
         kind = "text"
     else:
         kind = "learn"

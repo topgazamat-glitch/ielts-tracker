@@ -1,0 +1,198 @@
+"""P02BD Travel and tourism - Azamat's Pre-Intermediate booklet, done on a phone.
+
+His design is rendered as it is and this decides every box. The key is his
+(P02BD Travel and tourism - answer key), joined box by box by hand. Like the
+other Pre-Intermediate handouts, its explanations stay in English.
+
+What a phone gets that paper does not:
+  - taps for every choice: which story, A/B/C, stopped or continued,
+    when/while, weak or strong, the endings in 3.1, A/B, and the two
+    answers of 5.1 that paper asks to underline;
+  - the ▲ gaps of 5.2 become the five linking words to tap, where the ▲ is;
+  - a box for every exercise that paper leaves to ruled lines: 1.5, 1.6,
+    2.8, 3.4, 4.2, 5.5 and the blog itself, with a word count.
+
+    python3 handouts/p02bd_digital.py            # writes handouts/p02bd.json, lists every box
+"""
+import json
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from digital import (Handout, Q, choose, tick, own, write, fix, note, number, report,   # noqa: E402
+                     BLANK_TAG, plain)
+
+DOCX = ("~/Desktop/Handouts/B1 Pre-Intermediate/P02BD Travel and tourism/"
+        "P02BD Travel and tourism — handout (new design).docx")
+TF = ["T", "F"]
+
+h = Handout(DOCX)
+TAGS = {int(m.group(1)): m.group(0) for m in BLANK_TAG.finditer(h.html)}
+
+# ------------------------------------------------------------ 1 Reading
+h.options_on_lines("1.3")
+for n in (1, 2, 3, 4):
+    h.item_box("1.3", n, where="options")
+for n in (1, 2, 3):
+    h.item_box("1.4", n, width="170px", where="leader")
+h.leaders("1.5", "1.6  </span>", [(1, "95%", "Six past continuous verbs, and what interrupted each")])
+for n in (1, 2, 3):
+    h.item_box("1.6", n, where="leader")
+
+# ------------------------------------------------------------ 2 Grammar
+for n in range(2, 9):                            # 2.5: item 1 is the worked example
+    h.item_box("2.5", n)
+h.leaders("2.8", "3.1  </span>", [(1, "95%", "Three sentences - when once, while once")])
+
+# ------------------------------------------------------------ 3 Vocabulary
+ENDS = h.key_first("3.1")
+for n in (1, 2, 3, 4):
+    h.item_box("3.4", n, where="leader")
+h.leaders("3.6", "BEFORE YOU LISTEN", [])      # speaking: no lines to fill
+
+# ------------------------------------------------------------ 4 Listening
+h.leaders("4.1", "4.2  </span>", [])            # speaking
+h.grid_rows("4.2", [""])
+h.options_on_lines("4.7")
+for n in (1, 2, 3):
+    h.item_box("4.7", n)
+
+# ------------------------------------------------------------ 5 Writing
+# 5.1: paper asks to underline one of two; a phone taps it
+for n in range(1, 6):
+    h.item_box("5.1", n)
+# 5.2: the ▲ is where the word goes - so that is where the choice goes
+for m in reversed(list(h._items("5.2"))):
+    n = int(m.group(3))
+    if "▲" not in m.group(4):
+        continue
+    h.texts[("5.2", n)] = plain(m.group(4))
+    guts = m.group(4).replace("▲", "{{box:5.2:%d:60px:}}" % n, 1)
+    h.html = h.html[:m.start()] + m.group(1) + guts + "</p>" + h.html[m.end():]
+# 5.3: once with so, once with because - one box each, without the "/" between
+for i, j in ((94, 95), (96, 97)):
+    h.hints[i], h.hints[j] = "With so", "With because"
+    a = h.html.index(TAGS[i]) + len(TAGS[i])
+    b = h.html.index(TAGS[j], a)
+    h.html = h.html[:a] + re.sub(r"\s/\s", " ", h.html[a:b], count=1) + h.html[b:]
+for n in (1, 2, 3, 4):
+    h.item_box("5.5", n, where="leader")
+h.grid_rows("5.6", [""])
+h.leaders("5.7", "CHECK BEFORE", [(20, "95%", "Write your blog entry here")])
+h.one_per_line("CHECK BEFORE", None, at="box")
+
+# ------------------------------------------------------------------ the key
+K = {}
+STORY = {"P": "Platform", "S": "Stranger", "U": "The push"}
+for n, a in enumerate("SUPSUP", 1):
+    K[("1.2", n, 1)] = choose(["P", "S", "U"], a, labels=STORY)
+for n in (1, 2, 3, 4):
+    K[("1.3", n, 1)] = choose(["A", "B", "C"], "B")
+for n, a in enumerate(["break down/breaks down/broke down", "refuse/refused", "climb/climbing"], 1):
+    K[("1.4", n, 1)] = Q(a)
+K[("1.5", 1, 1)] = own()                          # any six, with the reason: his to read
+for n in (1, 2, 3):
+    K[("1.6", n, 1)] = own()
+for n, a in enumerate(["was raining", "were waiting", "was reading", "was sitting",
+                       "weren't driving/were not driving"], 1):
+    K[("2.1", n, 1)] = Q(a)
+K[("2.1", 6, 1)] = Q("Were")
+K[("2.1", 6, 2)] = Q("travelling/traveling")
+for n, parts in enumerate([
+        ["was leaving", "realised/realized"],
+        ["was travelling/was traveling", "lost"],
+        ["was running", "opened", "fell"],
+        ["was driving", "stopped"],
+        ["stole", "was standing"]], 1):
+    for k, a in enumerate(parts, 1):
+        K[("2.2", n, k)] = Q(a)
+DONE = {"S": "S · stopped", "C": "C · continued"}
+# as numbered: 1 running, 2 reading, 3 driving, 4 raining
+for n, a in enumerate("SCSC", 1):
+    K[("2.3", n, 1)] = choose(["S", "C"], a, labels=DONE)
+for n, a in enumerate(["while", "when", "when", "while"], 1):
+    K[("2.4", n, 1)] = choose(["when", "while"], a)
+TICKED = "✓/correct/tick"
+for n, a in zip(range(2, 9), [
+        "The coach broke down on the mountain road/The coach broke down/broke down",
+        "They were waiting for me at the station/They were waiting/were waiting",
+        "He was driving too fast/He was driving/was driving",
+        TICKED,
+        "I knew the answer immediately/I knew the answer/knew",
+        TICKED,
+        "We were travelling around Europe last year/We were traveling around Europe last year/"
+        "We were travelling/were travelling"]):
+    K[("2.5", n, 1)] = fix(a)
+for n, a in enumerate(["was", "was waiting", "weren't talking/were not talking", "were standing",
+                       "stopped", "asked", "didn't want/did not want", "knew", "got", "drove",
+                       "refused", "was driving", "told"], 1):
+    K[("2.6", n, 1)] = Q(a)
+for n in (1, 2, 3, 4):                            # any past simple action: his to read
+    K[("2.7", n, 1)] = own()
+K[("2.8", 1, 1)] = own()
+for n, a in enumerate("dcegfhab", 1):
+    K[("3.1", n, 1)] = choose(ENDS, a)
+for n, a in enumerate(["travelled around/traveled around", "set off", "took off", "landed",
+                       "hitchhiked", "gave us a lift", "boarded", "changed", "got to"], 1):
+    K[("3.2", n, 1)] = Q(a)
+for n, a in enumerate([
+        "turbulence/there was turbulence",
+        "a traffic jam/traffic jam/stuck in a traffic jam/we got stuck in a traffic jam/they got stuck in a traffic jam",
+        "the car broke down/car broke down/broke down/a breakdown/breakdown",
+        "they missed the train/we missed the train/missed the train",
+        "a strike/strike/there was a strike",
+        "they got lost/we got lost/got lost/lost"], 1):
+    K[("3.3", n, 1)] = Q(a)
+for n, a in enumerate([
+        "I missed my train this morning/I missed my train/missed my train/missed",
+        "The plane took off at six/Our plane took off at six/The plane took off",
+        "The car broke down on the motorway/The car broke down/broke down",
+        "There was a big queue at the ticket office, so we waited an hour/"
+        "There was a big queue at the ticket office/at the ticket office"], 1):
+    K[("3.4", n, 1)] = write(a)
+LOUD = {"W": "Weak", "S": "Strong"}
+# as numbered: 1 It was raining 2 It wasn't raining 3 Was it raining? 4 We were driving fast
+# 5 We weren't driving fast 6 Were we driving fast?
+for n, a in enumerate("WSWWSW", 1):
+    K[("3.5", n, 1)] = choose(["W", "S"], a, labels=LOUD)
+for n in range(1, 6):                             # notes while listening: his to read
+    K[("4.2", n, 1)] = own()
+for n, a in enumerate(["was raining", "was waiting/were waiting", "was reading", "was sitting",
+                       "applauded/clapped"], 1):
+    K[("4.3", n, 1)] = Q(a)
+# as numbered: 1 argued 2 applauded 3 toilet 4 raining 5 spoke 6 boarded - in the order they happened
+for n, a in enumerate("264153", 1):
+    K[("4.6", n, 1)] = number(a)
+for n in (1, 2, 3):
+    K[("4.7", n, 1)] = choose(["A", "B"], "B")
+for n, (opts, a) in enumerate([
+        (["at five", "after six o'clock"], "after six o'clock"),
+        (["the airport", "the train station"], "the airport"),
+        (["too tired to enjoy", "excited by"], "too tired to enjoy"),
+        (["similar to", "different from"], "different from"),
+        (["her whole trip", "a short time"], "a short time")], 1):
+    K[("5.1", n, 1)] = choose(opts, a)
+LINKS = ["and", "but", "so", "because", "when"]
+for n, a in enumerate(["so", "when", "so", "but", "because", "when", "because", "but"], 1):
+    K[("5.2", n, 1)] = choose(LINKS, a)
+K[("5.3", 1, 1)] = write("It was raining, so we stayed in the hotel")
+K[("5.3", 1, 2)] = write("We stayed in the hotel because it was raining")
+K[("5.3", 2, 1)] = write("The train was cancelled, so we took a taxi/The train was canceled, so we took a taxi")
+K[("5.3", 2, 2)] = write("We took a taxi because the train was cancelled/We took a taxi because the train was canceled")
+for n in (1, 2, 3, 4):
+    K[("5.5", n, 1)] = own()
+for n in (1, 2, 3, 4):                            # a plan: notes, not the work
+    K[("5.6", n, 1)] = note()
+K[("5.7", 20, 1)] = own(control="essay")
+for n in range(1, 8):                             # the checklist
+    K[("5.7", n, 1)] = tick()
+K[("5.7", 8, 1)] = own(control="number")          # Words: ...
+
+if __name__ == "__main__":
+    data = h.build(K, "Pre-Intermediate", 2, "Unit 2B & 2D — Travel and tourism")
+    out = os.path.join(HERE, "p02bd.json")
+    json.dump(data, open(out, "w"))
+    report(data)
+    print("layout bytes:", len(data["layout"]), "->", out)
