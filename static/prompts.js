@@ -131,11 +131,18 @@
         if (key !== where || !(dest.value || "").trim()) dest.value = plan.destination || "";
         where = key;
         if (typeof handoutsForLevel === "function") handoutsForLevel();
-        const pick = $("hwhandout");
+        const shelf = $("hwhandout");
         const book = plan.items.find((i) => i.kind === "booklet");
-        picked = !!(pick && book && book.test_id &&
-                    pick.querySelector('option[value="' + book.test_id + '"]:not(:disabled)'));
-        if (pick) pick.value = picked ? String(book.test_id) : "";
+        const box = shelf && book && book.test_id &&
+                    shelf.querySelector('fieldset:not([hidden]) input[value="' + book.test_id + '"]');
+        // the unit's handout is ticked; one ticked for the last unit chosen is let go,
+        // and any the teacher ticked by hand stay
+        if (shelf && shelf.dataset.auto && shelf.dataset.auto !== String(book && book.test_id)) {
+          const was = shelf.querySelector('input[value="' + shelf.dataset.auto + '"]');
+          if (was) was.checked = false;
+        }
+        picked = !!box;
+        if (box) { box.checked = true; shelf.dataset.auto = String(book.test_id); }
         write();
         const destOn = plan.items.some((i) => i.kind === "destination" && i.test_id);
         note.textContent = (picked
@@ -171,17 +178,16 @@
  * class changes the list.
  */
 function handoutsForLevel() {
-  const pick = document.getElementById("hwhandout");
-  if (!pick) return;
-  const group = pick.form.querySelector('select[name="group_id"]');
+  const box = document.getElementById("hwhandout");
+  if (!box) return;
+  const group = box.closest("form").querySelector('select[name="group_id"]');
   const lv = group.options[group.selectedIndex].getAttribute("data-level");
-  pick.querySelectorAll("optgroup").forEach((og) => {
-    const mine = !lv || og.getAttribute("data-level") === lv;
-    og.hidden = !mine;
-    og.disabled = !mine;
+  box.querySelectorAll("fieldset").forEach((fs) => {
+    const mine = !lv || fs.getAttribute("data-level") === lv;
+    fs.hidden = !mine;
+    // a handout of another level cannot be set to this class: untick it
+    if (!mine) fs.querySelectorAll("input:checked").forEach((c) => { c.checked = false; });
   });
-  const chosen = pick.selectedOptions[0];
-  if (chosen && chosen.parentNode.disabled) pick.value = "";
 }
 document.addEventListener("change", (e) => {
   if (e.target.name === "group_id") handoutsForLevel();

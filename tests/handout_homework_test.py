@@ -117,10 +117,10 @@ def post(path, fields):
 
 print("1. SETTING IT")
 pg = tget("/assignments")
-check("the form offers the handouts, under their level",
-      'name="handout"' in pg and '<optgroup label="Pre-Intermediate"' in pg)
+check("the form offers the handouts to tick, under their level",
+      'type="checkbox" name="handout"' in pg and "<legend>Pre-Intermediate</legend>" in pg)
 check("one not open as practice says it opens only for the class",
-      "Unit 2 — Homework version (opens only for this class)" in pg)
+      "Unit 2 — Homework version <em>(opens only for this class)</em>" in pg)
 due = core.local_day(core.now() + timedelta(days=2), cfg)
 teacher.open(base + "/assignments/list", urllib.parse.urlencode({
     "group_id": g1, "items": "Workbook unit 2 A & C", "handout": hid, "due": due,

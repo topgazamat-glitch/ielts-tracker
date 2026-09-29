@@ -76,6 +76,7 @@ db.execute("UPDATE word_lists SET active=1 WHERE id=?", (wl,))
 run = core.start_solo(db, st_row, wl)
 core.solo_state(db, run, sid)
 att = core.start_attempt(db, t, sid)
+core.set_excused(db, sid, t, True)                       # let off a handout
 core.submit_attempt(db, att, {dq: "A"})
 # a battle: this student hosts one, races a classmate, and is invited to another
 rival = core.add_student(db, "Rival", g)

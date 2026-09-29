@@ -1510,12 +1510,14 @@ def join_group_row(db, token, tid, name, g, lang):
     """Attach a student to a class we have already resolved."""
     existing = student_of(db, tid)
     if existing:
-        db.execute("UPDATE students SET name=?, group_id=?, active=1 WHERE id=?",
-                   (name, g["id"], existing["id"]))
+        # joining another class starts the clock on its homework again
+        core.set_group(db, existing["id"], g["id"])
+        db.execute("UPDATE students SET name=?, active=1 WHERE id=?", (name, existing["id"]))
     else:
         db.execute(
-            "INSERT INTO students (telegram_id, name, group_id, created_at) VALUES (?,?,?,?)",
-            (tid, name, g["id"], core.iso(core.now())))
+            "INSERT INTO students (telegram_id, name, group_id, created_at, group_since)"
+            " VALUES (?,?,?,?,?)",
+            (tid, name, g["id"], core.iso(core.now()), core.iso(core.now())))
     db.commit()
     if lang and lang != "en":
         db.execute("UPDATE students SET lang=? WHERE telegram_id=?", (lang, tid))
@@ -1542,12 +1544,14 @@ def join_group(db, token, tid, name, code, lang):
         return send(token, tid, t(lang, "bad_code"))
     existing = student_of(db, tid)
     if existing:
-        db.execute("UPDATE students SET name=?, group_id=?, active=1 WHERE id=?",
-                   (name, g["id"], existing["id"]))
+        # joining another class starts the clock on its homework again
+        core.set_group(db, existing["id"], g["id"])
+        db.execute("UPDATE students SET name=?, active=1 WHERE id=?", (name, existing["id"]))
     else:
         db.execute(
-            "INSERT INTO students (telegram_id, name, group_id, created_at) VALUES (?,?,?,?)",
-            (tid, name, g["id"], core.iso(core.now())),
+            "INSERT INTO students (telegram_id, name, group_id, created_at, group_since)"
+            " VALUES (?,?,?,?,?)",
+            (tid, name, g["id"], core.iso(core.now()), core.iso(core.now())),
         )
     db.commit()
     set_state(db, tid, None)

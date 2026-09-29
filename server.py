@@ -1565,6 +1565,74 @@ but keeps the scores; deleting keeps the students' work and detaches it.</p>
 {rows or '<tr><td colspan=5 class="sub">Nothing set yet.</td></tr>'}</table></div>"""
 
 
+def owed_card(db, s):
+    """Which of the class's handouts this student has to do: from when they
+    joined the class, and less any the teacher lets them off."""
+    cfg = core.load_config()
+    since = core.student_since(s)
+    day = core.local_day(core.parse(since), cfg) if since else ""
+    excused = core.excused_tests(db, s["id"])
+    rows = db.execute(
+        "SELECT a.*, t.title ttitle FROM assignments a JOIN dtests t ON t.id=a.test_id"
+        " WHERE a.group_id=? AND a.published=1 AND t.kind='handout'"
+        " ORDER BY COALESCE(a.due_at, a.created_at)", (s["group_id"],)).fetchall()
+    seen, lines = set(), ""
+    for a in rows:
+        if a["test_id"] in seen:
+            continue
+        seen.add(a["test_id"])
+        due = core.local_day(core.parse(a["due_at"]), cfg) if a["due_at"] else "no deadline"
+        hw = core.handout_homework(db, a, s["id"])
+        if a["test_id"] in excused:
+            state = '<span class="pill mute">let off</span>'
+            act = ("Make them do it", "0")
+        elif not core.owes(db, s, a, excused):
+            state = '<span class="pill mute">before they joined</span>'
+            act = None
+        else:
+            d = hw["digital"]
+            state = ('<span class="pill good">done</span>' if hw["handed"] else
+                     f'<span class="pill">{d["parts"]} of {d["total"]} parts</span>' if d["started"] else
+                     '<span class="pill risk">not started</span>')
+            act = ("Let them off", "1")
+        button = (f'<form method="post" action="/students/{s["id"]}/excuse" class="owed-act">'
+                  f'<input type="hidden" name="test_id" value="{a["test_id"]}">'
+                  f'<input type="hidden" name="on" value="{act[1]}">'
+                  f'<button class="ghost">{act[0]}</button></form>') if act else ""
+        lines += (f'<tr><td>{E(a["ttitle"])}</td><td class="sub">{E(due)}</td>'
+                  f'<td>{state}</td><td>{button}</td></tr>')
+    return f"""<h2>Handouts they have to do</h2>
+<div class="card owed">
+<form method="post" action="/students/{s["id"]}/since" class="inline owed-since">
+  <label class="f">Joined this class on<input type="date" name="since" value="{E(day)}"></label>
+  <button class="ghost">Save</button>
+</form>
+<p class="sub flush">Homework whose deadline had passed before this day does not count for them &mdash;
+not in the league, not as missed, and its handout does not hold up the next one. Leave it empty
+if they have been in the class from the start. A handout you let them off works the same way;
+they can still open it and practise.</p>
+<div class="tablewrap"><table><tr><th>Handout</th><th>Due</th><th></th><th></th></tr>
+{lines or '<tr><td colspan=4 class="sub">No handouts set to this class yet.</td></tr>'}</table></div>
+</div>"""
+
+
+def act_student_since(req, db, sid):
+    raw = (req["form"].get("since", [""])[0] or "").strip()
+    if raw and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        return redirect(f"/students/{sid}")
+    when = core.day_start(raw, core.load_config()) if raw else None
+    db.execute("UPDATE students SET group_since=? WHERE id=?", (when, sid))
+    db.commit()
+    return redirect(f"/students/{sid}")
+
+
+def act_student_excuse(req, db, sid):
+    tid = (req["form"].get("test_id", [""])[0] or "").strip()
+    if tid.isdigit():
+        core.set_excused(db, sid, int(tid), req["form"].get("on", [""])[0] == "1")
+    return redirect(f"/students/{sid}")
+
+
 def view_student(req, db, sid):
     s = db.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
     if not s:
@@ -1628,6 +1696,7 @@ def view_student(req, db, sid):
 <h2>History</h2>
 <div class="tablewrap"><table><tr><th>Assignment</th><th>Score</th><th>Feedback</th></tr>
 {hist or '<tr><td colspan=3 class="sub">No assignments yet.</td></tr>'}</table></div>
+{owed_card(db, s)}
 <h2>Report for parents</h2>
 <div class="card">
 <p class="sub gap-0">A read-only page you can send to a parent:
@@ -1725,8 +1794,10 @@ def view_assignments(req, db, error="", keep=None):
                    f' data-level-name="{E(core.level_name(db, g["level_id"]) or "")}"'
                    f'{" selected" if str(g["id"]) == kept("group_id") else ""}>{E(g["name"])}</option>'
                    for g in groups)
-    # every digital handout, under its level; one open only as a class's
-    # homework says so. An older version with the same title is left out.
+    # every digital handout of the course, under its level, to tick as many as
+    # the homework needs; one open only as a class's homework says so. An older
+    # version with the same title is left out.
+    chosen = set(keep.get("handout", [])) if keep else set()
     shelves = ""
     open_titles = {r["title"] for r in db.execute(
         "SELECT title FROM dtests WHERE kind='handout' AND published=1")}
@@ -1736,10 +1807,12 @@ def view_assignments(req, db, error="", keep=None):
             " AND series IS NULL ORDER BY id DESC", (lv["id"],))
             if b["published"] or b["title"] not in open_titles), key=core.lesson_order)
         if books:
-            shelves += (f'<optgroup label="{E(lv["name"])}" data-level="{lv["id"]}">'
-                        + "".join(f'<option value="{b["id"]}"{" selected" if str(b["id"]) == kept("handout") else ""}>{E(b["title"])}'
-                                  f'{"" if b["published"] else " (opens only for this class)"}'
-                                  f'</option>' for b in books) + "</optgroup>")
+            shelves += (f'<fieldset class="hwshelf" data-level="{lv["id"]}"><legend>{E(lv["name"])}</legend>'
+                        + "".join(f'<label class="hwbook"><input type="checkbox" name="handout" value="{b["id"]}"'
+                                  f'{" checked" if str(b["id"]) in chosen else ""}>'
+                                  f'<span>{E(b["title"])}'
+                                  f'{"" if b["published"] else " <em>(opens only for this class)</em>"}'
+                                  f'</span></label>' for b in books) + "</fieldset>")
     today = core.local_day(core.now(), core.load_config())
     warn = ('<div class="card bad gap-3"><strong>That deadline has already passed.</strong> '
             'Nothing was set: homework with a deadline in the past would close the moment it was '
@@ -1772,9 +1845,9 @@ page, where you see who has done it, change it or delete it.</p>
   unit and the handout fill in below. A Destination unit you type is remembered for next time.</p>
 </div>
 
-<label class="f">Digital handout<select name="handout" id="hwhandout">
-<option value="">none</option>{shelves}</select></label>
-<p class="sub flush">Students do it on the site &mdash; it marks itself, half for the parts done
+<div class="f">Digital handouts <span class="sub">&mdash; tick as many as this homework has</span>
+<div class="hwshelves" id="hwhandout">{shelves or '<p class="sub flush">None on the site yet.</p>'}</div></div>
+<p class="sub flush">Students do each on the site &mdash; it marks itself, half for the parts done
 by the deadline, half for the right answers &mdash; or send photos of the paper for your tick,
 {core.PAPER_TICK:g} out of 10. The better of the two counts.</p>
 
@@ -2438,6 +2511,11 @@ def portal_home(db, s, token, flash, pick=""):
         when = (f'{due_at[:10]} · {left}' if due_at else "no deadline")
         rows = ""
         for a in items:
+            if a["id"] in prog.get("excused_ids", ()):
+                # set before they joined the class, or they were let off it
+                rows += (f'<li class="done"><span class="box">&ndash;</span>{E(a["title"])}'
+                         f' <span class="pill mute">not needed</span></li>')
+                continue
             done = a["id"] in prog["done_ids"]
             link = ""
             tid = a["test_id"] if "test_id" in a.keys() else None
@@ -5850,6 +5928,9 @@ def view_homework_set(req, db):
     handouts = {a["id"]: a["test_id"] for a in items if core.is_handout(db, a["test_id"])}
 
     def cell(a, p):
+        if a["id"] in p.get("excused_ids", ()):
+            return ('<td class="tick"><span class="pill mute" title="before they joined, or let off it">'
+                    'not needed</span></td>')
         tid = handouts.get(a["id"])
         if tid:
             # a handout marks itself: its mark once the deadline has gone, the
@@ -10320,14 +10401,18 @@ def act_new_list(req, db):
     f = req["form"]
     gid = f.get("group_id", [None])[0]
     items = parse_list(f.get("items", [""])[0])
-    handout = (f.get("handout", [""])[0] or "").strip()
-    book = None
-    if handout.isdigit() and gid and gid.isdigit():
-        book = db.execute("SELECT id, title FROM dtests WHERE id=? AND kind='handout'"
-                          " AND level_id=(SELECT level_id FROM groups WHERE id=?)",
-                          (int(handout), int(gid))).fetchone()
-    if book and book["title"] not in items:
-        items.append(book["title"])       # the handout is one more piece of the set
+    # as many handouts as were ticked, each one more piece of the set
+    books = []
+    for handout in f.get("handout", []):
+        handout = (handout or "").strip()
+        if handout.isdigit() and gid and gid.isdigit():
+            book = db.execute("SELECT id, title FROM dtests WHERE id=? AND kind='handout'"
+                              " AND level_id=(SELECT level_id FROM groups WHERE id=?)",
+                              (int(handout), int(gid))).fetchone()
+            if book:
+                books.append(book)
+                if book["title"] not in items:
+                    items.append(book["title"])
     if (f.get("prompt", [""])[0] or "").strip() and len(items) > 1 and not any(
             t.lower().startswith("writing") for t in items):
         # a question among several pieces is a writing task of its own: it
@@ -10375,8 +10460,8 @@ def act_new_list(req, db):
                 "SELECT id, title FROM dtests WHERE level_id=? AND layout IS NOT NULL"
                 " ORDER BY published, id", (level_id,)):
             booklets[r["title"].replace(" (booklet)", "").strip().lower()] = r["id"]
-    if book:
-        booklets[book["title"].strip().lower()] = book["id"]   # the one chosen, exactly
+    for book in books:
+        booklets[book["title"].strip().lower()] = book["id"]   # the ones ticked, exactly
 
     created = []
     for i, title in enumerate(items):
@@ -10517,7 +10602,7 @@ def act_update_student(req, db, sid):
     if name:
         db.execute("UPDATE students SET name=? WHERE id=?", (name, sid))
     if gid:
-        db.execute("UPDATE students SET group_id=? WHERE id=?", (int(gid), sid))
+        core.set_group(db, sid, gid)
     db.commit()
     return redirect(f"/students/{sid}")
 
@@ -10566,6 +10651,8 @@ ROUTES = [
     ("GET",  r"^/reteach$", view_reteach),
     ("GET",  r"^/records$", view_records),
     ("GET",  r"^/kpi$", view_kpi),
+    ("POST", r"^/students/(\d+)/since$", act_student_since),
+    ("POST", r"^/students/(\d+)/excuse$", act_student_excuse),
     ("POST", r"^/demo/on$", act_demo_on),
     ("POST", r"^/demo/off$", act_demo_off),
     ("POST", r"^/demo/reset$", act_demo_reset),

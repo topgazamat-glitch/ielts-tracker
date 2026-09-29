@@ -2894,3 +2894,22 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
 /* Set homework: the Destination units that are on the site, a tap away */
 .destsite { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .destsite .chip .sub { margin: 0; font-size: 12px; }
+
+/* Set homework: the course's handouts, ticked as many as the homework has */
+.hwshelves { display: grid; gap: var(--sp-2); margin-top: var(--sp-1); max-height: 320px; overflow-y: auto;
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface); }
+.hwshelf { border: 0; margin: 0; padding: 0; display: grid; gap: 2px; }
+.hwshelf legend { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-3); padding: 0; margin-bottom: var(--sp-1); }
+.hwbook { display: flex; align-items: center; gap: var(--sp-2); font-size: 14px; font-weight: 400;
+  color: var(--ink); padding: 4px 0; cursor: pointer; }
+.hwbook input { width: 18px; height: 18px; flex: none; }
+.hwbook em { color: var(--ink-3); font-style: normal; font-size: 12px; }
+
+/* a student's page: which of the class's handouts they have to do */
+.owed { display: grid; gap: var(--sp-3); }
+.owed-since { margin: 0; align-items: flex-end; gap: var(--sp-2); }
+.owed-since .f { margin: 0; }
+.owed-act { margin: 0; }
+.owed-act button { min-height: 32px; padding: 4px 12px; font-size: 13px; }

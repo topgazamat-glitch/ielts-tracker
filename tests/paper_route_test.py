@@ -261,6 +261,15 @@ check("setting it makes each line a piece, the handout included",
       and any(r["test_id"] == h2 for r in set_now))
 check("a question gets a writing line of its own, not the workbook's",
       set_now[0]["prompt"] is None and any(r["title"] == "Writing" and r["prompt"] for r in set_now))
+due2 = core.local_day(core.now() + timedelta(days=4), cfg)
+teacher.open(base + "/assignments/list", urllib.parse.urlencode(
+    [("group_id", g), ("due", due2), ("due_time", "20:00"), ("publish", "1"),
+     ("handout", str(h1)), ("handout", str(h2)), ("items", "Workbook unit 6 A&C")]).encode(),
+    timeout=30).read()
+two = db.execute("SELECT title, test_id FROM assignments WHERE group_id=? AND due_at LIKE ? ORDER BY id",
+                 (g, due2 + "%")).fetchall()
+check("two handouts ticked are two pieces of one homework, each linked",
+      sorted(r["test_id"] for r in two if r["test_id"]) == sorted([h1, h2]) and len(two) == 3)
 check("and the Destination unit typed is remembered for that unit",
       core.destination_for(db, lvl, 5) == "Destination B1, Unit 9")
 srv.shutdown()

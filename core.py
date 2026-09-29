@@ -403,6 +403,11 @@ def migrate(db):
     cols = {r["name"] for r in db.execute("PRAGMA table_info(students)")}
     if "token" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN token TEXT")
+    if "group_since" not in cols:
+        # when the student joined the class they are in - homework whose
+        # deadline had passed before then was never theirs to miss. Empty
+        # means since they were first added, which is when most joined.
+        db.execute("ALTER TABLE students ADD COLUMN group_since TEXT")
     if "photo" not in cols:
         db.execute("ALTER TABLE students ADD COLUMN photo TEXT")
     if "avatar" not in cols:
@@ -868,6 +873,14 @@ def migrate(db):
         retention_override REAL,
         currency TEXT NOT NULL DEFAULT "so'm",
         updated_at TEXT
+    );
+    -- a handout the teacher has let one student off: it does not hold up the
+    -- next booklet for them, and is not a piece of homework they missed
+    CREATE TABLE IF NOT EXISTS handout_excused (
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        test_id INTEGER NOT NULL REFERENCES dtests(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (student_id, test_id)
     );
     CREATE TABLE IF NOT EXISTS parents (
         id INTEGER PRIMARY KEY,
@@ -1389,7 +1402,11 @@ def student_timeline(db, student_id):
         ).fetchall()
     }
     timeline = []
+    who = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    excused = excused_tests(db, student_id)
     for a in assignments:
+        if who and not owes(db, who, a, excused):
+            continue
         if a["test_id"] and is_handout(db, a["test_id"]):
             # handed in once a part is checked or the paper copy is ticked, and
             # marked once the deadline has passed, by the same rule as the league
@@ -3870,9 +3887,15 @@ def set_progress(db, student_id, items):
         [student_id] + ids,
     ).fetchall()
     done_ids = {r["assignment_id"] for r in rows}
+    # before the student joined, or let off it: nothing to do, and said so
+    who = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    excused = excused_tests(db, student_id)
+    not_owed = {a["id"] for a in items if who and not owes(db, who, a, excused)}
     # a booklet is handed in by sitting it, not by sending a photograph, so
     # its tick comes from the attempt; a handout, from checking every part
     for a in items:
+        if a["id"] in not_owed:
+            continue
         tid = a["test_id"] if "test_id" in a.keys() else None
         if tid and is_handout(db, tid):
             # every part checked, or the paper copy sent and not turned down
@@ -3886,13 +3909,16 @@ def set_progress(db, student_id, items):
                 " AND finished_at IS NOT NULL LIMIT 1",
                 (tid, student_id)).fetchone():
             done_ids.add(a["id"])
-    remaining = [a for a in items if a["id"] not in done_ids]
+    owed = [a for a in items if a["id"] not in not_owed]
+    done_ids = {i for i in done_ids if i not in not_owed}
+    remaining = [a for a in owed if a["id"] not in done_ids]
     return {
         "done": len(done_ids),
-        "total": len(items),
-        "percent": round(100 * len(done_ids) / len(items)),
+        "total": len(owed),
+        "percent": round(100 * len(done_ids) / len(owed)) if owed else 100,
         "remaining": remaining,
         "done_ids": done_ids,
+        "excused_ids": not_owed,
     }
 
 
@@ -3930,27 +3956,26 @@ def live_completion(db, student_id):
     who is falling behind, wrong for a live table, where a student should be
     able to climb by doing today's homework today.
     """
-    row = db.execute("SELECT group_id FROM students WHERE id=?", (student_id,)).fetchone()
+    row = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
     if not row or row["group_id"] is None:
         return None
-    total = db.execute(
-        "SELECT COUNT(*) c FROM assignments WHERE group_id=? AND published=1",
-        (row["group_id"],),
-    ).fetchone()["c"]
-    if not total:
+    excused = excused_tests(db, student_id)
+    owed = [a for a in db.execute(
+        "SELECT id, test_id, due_at FROM assignments WHERE group_id=? AND published=1",
+        (row["group_id"],)) if owes(db, row, a, excused)]
+    if not owed:
         return None
-    done = db.execute(
-        "SELECT COUNT(DISTINCT assignment_id) c FROM submissions WHERE student_id=?"
-        " AND assignment_id IS NOT NULL AND draft=0",
-        (student_id,),
-    ).fetchone()["c"]
-    for a in db.execute("SELECT id, test_id FROM assignments WHERE group_id=? AND published=1"
-                        " AND test_id IS NOT NULL", (row["group_id"],)):
-        # a paper copy is counted already, with the photographs
-        if (is_handout(db, a["test_id"]) and not paper_copy(db, student_id, a["id"])
-                and handout_status(db, a["test_id"], student_id)["started"]):
+    sent = {r["assignment_id"] for r in db.execute(
+        "SELECT DISTINCT assignment_id FROM submissions WHERE student_id=?"
+        " AND assignment_id IS NOT NULL AND draft=0", (student_id,))}
+    done = 0
+    for a in owed:
+        if a["id"] in sent:
+            done += 1                     # photographs, a typed answer, or a paper copy
+        elif (a["test_id"] and is_handout(db, a["test_id"])
+              and handout_status(db, a["test_id"], student_id)["started"]):
             done += 1
-    return round(100 * min(done, total) / total)
+    return round(100 * done / len(owed))
 
 
 def improvement(db, student_id, weeks=4):
@@ -4443,7 +4468,10 @@ def homework_marks(db, student, lo, hi, windows):
 
     scores, late, missing, waiting, pending = [], 0, 0, 0, 0
     batches = {}                      # (due_at) -> the marks from that set
+    excused = excused_tests(db, student["id"])
     for a in was_set:
+        if not owes(db, student, a, excused):
+            continue                      # before they joined, or let off it
         due = a["due_at"]
         if due and due > stamp:
             pending += 1                  # set, but the deadline has not arrived
@@ -5242,6 +5270,52 @@ def lesson_order(t):
     return (t["number"] or 0, rank, t["id"])
 
 
+# ------------------------------------------------ what a student owes
+#
+# A student who joins a class later cannot have missed homework whose
+# deadline had gone before they arrived, and the teacher can let a student
+# off a handout - the class did 1A-4D before they came, say. Such a piece is
+# not counted for them anywhere: not in the league, not as missed, not in
+# the average, and a handout of it does not hold up the next booklet.
+
+def student_since(student):
+    """When the student joined the class they are in now - recorded when they
+    join through the bot or are moved, or set by the teacher; None when not
+    known, and then every piece of the class's homework is theirs. (The date
+    they were added to the site is no guide: many were added all at once.)"""
+    return student["group_since"] if "group_since" in student.keys() else None
+
+
+def excused_tests(db, student_id):
+    return {r["test_id"] for r in db.execute(
+        "SELECT test_id FROM handout_excused WHERE student_id=?", (student_id,))}
+
+
+def owes(db, student, a, excused=None):
+    """Is this piece of homework one the student has to do?"""
+    tid = a["test_id"] if "test_id" in a.keys() else None
+    if tid and tid in (excused if excused is not None else excused_tests(db, student["id"])):
+        return False
+    since = student_since(student)
+    due = a["due_at"] if "due_at" in a.keys() else None
+    return not (due and since and due < since)
+
+
+def set_excused(db, student_id, test_id, excused):
+    if excused:
+        db.execute("INSERT OR IGNORE INTO handout_excused (student_id, test_id, created_at)"
+                   " VALUES (?,?,?)", (student_id, test_id, iso(now())))
+    else:
+        db.execute("DELETE FROM handout_excused WHERE student_id=? AND test_id=?", (student_id, test_id))
+    db.commit()
+
+
+def set_group(db, student_id, group_id):
+    """Move a student into a class, remembering when - only if it is a move."""
+    db.execute("UPDATE students SET group_since=CASE WHEN group_id IS ? THEN group_since ELSE ? END,"
+               " group_id=? WHERE id=?", (int(group_id), iso(now()), int(group_id), student_id))
+
+
 # A handout set as homework can be done on the site or on paper. The paper
 # copy comes in as photographs, and the teacher ticks it: done is worth half,
 # the "doing" half of a digital handout's mark, since nobody has checked the
@@ -5323,16 +5397,21 @@ def handout_shelf(db, student):
     """The booklets a student sees, in the order of the course, each with the
     booklet that has to be finished first (None when it is open)."""
     gid = student["group_id"]
-    set_ids = {r["test_id"] for r in db.execute(
-        "SELECT test_id FROM assignments WHERE group_id=? AND published=1"
-        " AND test_id IS NOT NULL", (gid,))}
+    set_rows = db.execute(
+        "SELECT id, test_id, due_at FROM assignments WHERE group_id=? AND published=1"
+        " AND test_id IS NOT NULL", (gid,)).fetchall()
+    set_ids = {r["test_id"] for r in set_rows}
+    excused = excused_tests(db, student["id"]) if "id" in student.keys() else set()
+    # a booklet holds the next back only if the student owes it - not one the
+    # class did before they came, nor one they have been let off
+    owed_ids = {r["test_id"] for r in set_rows if owes(db, student, r, excused)}
     books = [b for b in digital_tests(db, level_of(db, gid), kind="handout")
              if not b["series"] and (b["published"] or b["id"] in set_ids)]
     books.sort(key=lesson_order)
     out, first = [], None
     for b in books:
-        out.append((b, first))
-        if first is None and b["id"] in set_ids and not handout_finished(db, b["id"], student["id"]):
+        out.append((b, first if b["id"] not in excused else None))
+        if first is None and b["id"] in owed_ids and not handout_finished(db, b["id"], student["id"]):
             first = b
     # a unit from another book - Destination - opens for the class it is set
     # to, whatever its level, and neither waits for a booklet nor holds one up
@@ -6562,7 +6641,7 @@ def remove_student(db, student_id):
     db.execute("DELETE FROM solo_questions WHERE run_id IN"
                " (SELECT id FROM solo_runs WHERE student_id=?)", (student_id,))
     for table in ("submissions", "word_progress", "quiz_sessions", "questions",
-                  "parents", "lesson_marks", "goals", "game_players", "dattempts",
+                  "parents", "lesson_marks", "goals", "game_players", "dattempts", "handout_excused",
                   "solo_runs", "rating_tickets", "students"):
         db.execute(f"DELETE FROM {table} WHERE student_id=?"
                    if table != "students" else "DELETE FROM students WHERE id=?",
@@ -6600,7 +6679,7 @@ def add_student(db, name, group_id):
 
 
 def move_student(db, student_id, group_id):
-    db.execute("UPDATE students SET group_id=? WHERE id=?", (int(group_id), student_id))
+    set_group(db, student_id, group_id)
     db.commit()
 
 
