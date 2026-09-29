@@ -148,3 +148,20 @@ stay open as practice, so a class that starts using them at Unit 4 is not
 sent back to Unit 1, and a booklet never set holds nobody up. A written
 answer the teacher later marks as not counting lowers the mark but does not
 shut the student out again.
+
+## Destination units
+
+`dest_b1_digital.py` writes Destination B1 units as handouts from the scanned
+book (`~/Downloads/Destination B1.pdf`, pages rendered with `sips` to read
+them): units 12 and 23 so far, live as tests 126 and 127. They carry
+`"series": "destination"`, so a unit:
+
+- opens only for a class it is set to, whatever that class's level (upload
+  with `upload_live.py … --hidden`);
+- is linked from a homework line naming it - "Destination B1, Unit 12" -
+  by `core.destination_test`;
+- never joins the chain of course booklets, nor the handout list on Set homework.
+
+Each exercise keeps the book's letter (A, B, C …) beside its number, so paper
+and screen match. The answers are the book's key (PDF pages 232-254). The
+docstring lists where the key was put right.
