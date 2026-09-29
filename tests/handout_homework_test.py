@@ -145,10 +145,10 @@ print("\n3. ON THE STUDENT'S HOMEWORK")
 home = get("/s/%s?tab=home" % tok[ann])
 check("it is on the list, with a way in", "Unit 2 — Homework version" in home
       and "tab=handouts&h=%d" % hid in home and "0/2 parts" in home)
-check("it is not something to send a photograph for",
-      not re.search(r'<option value="%d">' % hw["id"], home)
-      and 'name="assignment_id" value="%d"' % hw["id"] not in home)
-check("nor in the bot", hw["id"] not in [a["id"] for a in bot.open_assignments(db, g1)])
+check("photographs of the paper copy can be sent for it, worth the tick",
+      (re.search(r'<option value="%d"[^>]*>[^<]*on paper \(5/10\)' % hw["id"], home)
+       or 'name="assignment_id" value="%d"' % hw["id"] in home) and "on paper (5/10)" in home)
+check("in the bot too", hw["id"] in [a["id"] for a in bot.open_assignments(db, g1)])
 page = get("/s/%s?tab=handouts&h=%d" % (tok[ann], hid))
 check("the handout says it is homework, and when it is due", "hwstrip" in page and "due " in page)
 

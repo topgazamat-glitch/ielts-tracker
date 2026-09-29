@@ -2421,7 +2421,9 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 .hwstrip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2);
   margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
   background: var(--accent-soft); border: 1px solid var(--accent-line); font-size: 14px; }
-.hwstrip .sub { margin-left: auto; }
+.hwstrip .sub { margin: 0 0 0 auto; }     /* .sub's paragraph gap does not belong in a strip */
+.hwstrip .hwpaper { flex-basis: 100%; margin: var(--sp-1) 0 0; font-size: 14px; color: var(--ink-2); }
+.hwstrip .hwsend { font-size: 14px; }
 
 .hx-parthead { margin: 0 0 var(--sp-3); }
 .hx-partno { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .12em;
@@ -2872,3 +2874,8 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
   margin-top: var(--sp-3); }
 .par-typed .f { flex: 1 1 220px; margin: 0; }
 .pill.ok { background: transparent; color: var(--ok); border-color: currentColor; }
+
+/* the paper copy of a handout: two big buttons, done or not complete */
+.tickpad { display: grid; gap: var(--sp-2); }
+.tickbtns { display: grid; grid-template-columns: 2fr 1fr; gap: var(--sp-2); }
+.tickbtns button { min-height: 56px; font-size: 17px; }

@@ -474,7 +474,25 @@ def grade_form(db, sub, student, assignment, regrade=False, gid=None, due=None):
 
     rubric = bool(assignment and assignment["rubric"])
     marks = core.criteria_for(db, sub["id"])
-    if rubric:
+    paper = bool(assignment and assignment["test_id"] and core.is_handout(db, assignment["test_id"]))
+    if paper:
+        # the paper copy of a digital handout: done or not done, and a real
+        # mark only when the teacher chooses to give one
+        tick = core.PAPER_TICK
+        scoring = f"""<div class="tickpad">
+  <p class="sub flush">The paper copy of a handout. Done is worth {tick:g} out of 10 &mdash;
+  the half of the digital one's mark that is for doing it.</p>
+  <div class="tickbtns">
+    <button name="tick" value="done" id="tick-y" class="tick-yes">&#10003; Done &middot; {tick:g}/10</button>
+    <button name="tick" value="not" id="tick-n" class="ghost danger">&#10007; Not complete</button>
+  </div>
+  <p class="sub flush">Keys <span class="kbd">y</span> and <span class="kbd">n</span>.</p>
+</div>
+<details class="gap-2"><summary>Mark it properly instead</summary>
+<input type="hidden" name="score" id="f_score"
+ value="{sub["score"] if sub["score"] is not None else ""}">{scorepad("score", sub["score"])}
+</details>"""
+    elif rubric:
         rows = ""
         for key, label, hint in core.CRITERIA:
             rows += (f'<div class="crit"><div><strong>{E(label)}</strong>'
@@ -1714,10 +1732,12 @@ Everything already set is on the <a class="linky" href="/homework">Homework</a> 
 where you see who has done it, change it or delete it.</p>
 <div class="card gap-3" id="unitbuild">
 <p style="margin-top:0"><strong>A unit\u2019s homework, in one go.</strong></p>
-<p class="sub">The workbook, the handout, the writing and an optional practice
-test &mdash; filled in below, ready to edit. The handout is found on this
-group\u2019s shelf and the question comes from the bank for that unit, so
-neither has to be typed twice.</p>
+<p class="sub">The workbook, the Destination unit that goes with it, the handout
+and, if you want them, a writing task and a practice test &mdash; filled in below,
+ready to edit. The handout is found on this group\u2019s shelf; the Destination unit
+is remembered once you have typed it for a unit; the question comes from the bank.
+Students can do the handout on the site, or send photos of the paper for your
+tick ({core.PAPER_TICK:g} out of 10).</p>
 <div class="inline gap-2">
 <label class="f">Group<select id="u_group">{opts}</select></label>
 <label class="f">Unit<input type="number" id="u_unit" min="1" max="20"
@@ -1725,7 +1745,9 @@ neither has to be typed twice.</p>
 <label class="f">Lessons<select id="u_pair">
 <option value="A&amp;C">A &amp; C</option><option value="B&amp;D">B &amp; D</option>
 <option value="ASRP">Academic Skills + Reading Plus</option></select></label>
-<label class="f">Writing<select id="u_kind">{sug_kinds}</select></label>
+<label class="f">Destination<input id="u_dest" placeholder="e.g. Destination B1, Unit 7"
+ style="width:230px"></label>
+<label class="f">Writing<select id="u_kind">{sug_kinds}<option value="none">No writing</option></select></label>
 <label class="f">Practice test<input id="u_practice" placeholder="optional"
  style="width:110px"></label>
 <label class="f pushed">&nbsp;<button type="button" id="u_build">Build it</button></label>
@@ -2371,22 +2393,31 @@ def student_shell(s, db, token, tab, body, top="", music=True):
     return html_response(student_page(s["name"], top + head + body, music=music))
 
 
-def portal_home(db, s, token, flash):
+def portal_home(db, s, token, flash, pick=""):
     st = core.student_stats(db, s["id"])
-    # a handout is done on the site, not photographed: it is not a thing to
-    # send pages for
+    # a handout can be sent as photographs of the paper too - worth the tick,
+    # half of what the digital one can reach
     opens = [a for a in db.execute(
         "SELECT * FROM assignments WHERE group_id=? AND closed=0 AND published=1"
         " ORDER BY COALESCE(due_at, created_at) DESC, id DESC",
         (s["group_id"],)).fetchall()
-        if core.still_open(a["due_at"]) and not core.is_handout(db, a["test_id"])]
+        if core.still_open(a["due_at"])]
+    if pick.isdigit() and any(str(a["id"]) == pick for a in opens):
+        # the handout page's "send photos instead" lands here with it chosen
+        opens.sort(key=lambda a: str(a["id"]) != pick)
+
+    def label(a):
+        if a["test_id"] and core.is_handout(db, a["test_id"]):
+            return "%s — on paper (%g/10)" % (a["title"], core.PAPER_TICK)
+        return a["title"]
     if opens:
-        opts = "".join(f'<option value="{a["id"]}">{E(a["title"])}</option>' for a in opens)
+        opts = "".join(f'<option value="{a["id"]}"{" selected" if str(a["id"]) == pick else ""}>'
+                       f'{E(label(a))}</option>' for a in opens)
         picker = (f'<label class="f">Which task?<select name="assignment_id">{opts}</select></label>'
                   if len(opens) > 1 else
                   f'<input type="hidden" name="assignment_id" value="{opens[0]["id"]}">'
                   f'<p class="sub" style="margin:0 0 10px">For: <strong>'
-                  f'{E(opens[0]["title"])}</strong></p>')
+                  f'{E(label(opens[0]))}</strong></p>')
     else:
         picker = '<p class="sub" style="margin:0 0 10px">No open task right now.</p>'
 
@@ -2401,16 +2432,31 @@ def portal_home(db, s, token, flash):
             link = ""
             tid = a["test_id"] if "test_id" in a.keys() else None
             if tid and core.is_handout(db, tid):
-                # a digital handout: open it, and see how many parts are done
-                state = core.handout_status(db, tid, s["id"])
-                done = state["done"]
+                # a handout: open it and see how many parts are done - or, sent
+                # on paper, where the photographs have got to
+                hw = core.handout_homework(db, a, s["id"])
+                state, paper = hw["digital"], hw["paper"]
+                done = hw["handed"]
                 first = None if done else core.handout_blocked_by(db, tid, s)
-                link = (f' <span class="pill good">{state["mark"]:g} / 10</span>' if done else
-                        f' <a class="linky" href="/s/{E(token)}?tab=handouts&amp;h={first["id"]}">'
-                        f'finish {E(short_title(first))} first &rarr;</a>' if first else
-                        f' <span class="pill">{state["parts"]}/{state["total"]} parts</span>'
-                        f' <a class="linky" href="/s/{E(token)}?tab=handouts&amp;h={tid}">'
-                        f'{"open it" if not state["started"] else "carry on"} &rarr;</a>')
+                here = f'/s/{E(token)}?tab=handouts&amp;h={tid}'
+                if paper and not state["done"]:
+                    tag = {"waiting": ('', "on paper &middot; sent"),
+                           "ticked": (' good', "on paper &#10003; %g/10" % (paper["mark"] or 0)),
+                           "late": (' risk', "on paper &middot; late"),
+                           "rejected": (' risk', "on paper &#10007; not complete")}[paper["state"]]
+                    link = (f' <span class="pill{tag[0]}">{tag[1]}</span>'
+                            f' <a class="linky" href="{here}">'
+                            f'{"do it here instead" if paper["state"] == "rejected" else "do it here for up to 10"}'
+                            f' &rarr;</a>')
+                elif state["done"]:
+                    link = f' <span class="pill good">{state["mark"]:g} / 10</span>'
+                elif first:
+                    link = (f' <a class="linky" href="/s/{E(token)}?tab=handouts&amp;h={first["id"]}">'
+                            f'finish {E(short_title(first))} first &rarr;</a>')
+                else:
+                    link = (f' <span class="pill">{state["parts"]}/{state["total"]} parts</span>'
+                            f' <a class="linky" href="{here}">'
+                            f'{"open it" if not state["started"] else "carry on"} &rarr;</a>')
             elif tid:
                 # the handout is on the site, so the homework opens it rather
                 # than telling the student to go and find it
@@ -3545,9 +3591,26 @@ def homework_strip(db, t, attempt):
             f"Not started &middot; {state['total']} parts")
     late = ("" if open_now else
             '<span class="pill risk">deadline passed &mdash; what you do now is practice</span> ')
+    token = core.student_token(db, attempt["student_id"])
+    paper = core.handout_homework(db, a, attempt["student_id"])["paper"]
+    send = f'/s/{E(token)}?tab=home&amp;a={a["id"]}'
+    if paper:
+        said = {"waiting": "You sent it on paper. Your teacher will tick it.",
+                "ticked": "Your paper copy was ticked: %g out of 10. Doing it here can reach 10."
+                          % (paper["mark"] or 0),
+                "late": "Your paper copy came after the deadline.",
+                "rejected": "Your teacher said the paper copy was not complete. Do it here, or "
+                            f'<a class="linky" href="{send}">send the photos again</a>.'}[paper["state"]]
+        onpaper = f'<p class="hwpaper">{said}</p>'
+    elif open_now:
+        onpaper = (f'<p class="hwpaper">Did it on paper? Send photos of the pages instead &mdash; '
+                   f'ticked by your teacher, it counts {core.PAPER_TICK:g} out of 10.</p>'
+                   f'<a class="btn ghost hwsend" href="{send}">Send photos of the pages</a>')
+    else:
+        onpaper = ""
     return (f'<div class="hwstrip"><span class="pill">Homework</span> '
             f'<span>due {E(when)}{(" &middot; " + E(rel)) if rel and open_now else ""}</span> '
-            f'{late}<span class="sub">{tail}</span></div>')
+            f'{late}<span class="sub">{tail}</span>{onpaper}</div>')
 
 
 def part_result(pname, r, onward):
@@ -5440,7 +5503,7 @@ def view_student_portal(req, db, token, flash=""):
         body = portal_profile(db, s, token, flash)
     else:
         tab = "home"
-        body = portal_home(db, s, token, flash)
+        body = portal_home(db, s, token, flash, query.get("a", [""])[0] or "")
     if core.practice_on():
         # the teacher, going through the page as a student: the strip that
         # does the work for them, except inside the all-screens view
@@ -5780,8 +5843,17 @@ def view_homework_set(req, db):
         tid = handouts.get(a["id"])
         if tid:
             # a handout marks itself: its mark once the deadline has gone, the
-            # parts done until then
-            st = core.handout_status(db, tid, p["student"]["id"], due)
+            # parts done until then - or, done on paper, where the tick stands
+            hw = core.handout_homework(db, a, p["student"]["id"])
+            st, paper = hw["digital"], hw["paper"]
+            if paper and hw["route"] != "digital":
+                shown, cls = {"waiting": ("paper", ""), "ticked": ("%g" % (paper["mark"] or 0), " good"),
+                              "late": ("late", " risk"), "rejected": ("&#10007;", " risk")}[paper["state"]]
+                what = {"waiting": "sent on paper, waiting for your tick",
+                        "ticked": "done on paper, ticked", "late": "sent on paper after the deadline",
+                        "rejected": "on paper, not complete"}[paper["state"]]
+                return (f'<td class="tick"><span class="pill{cls}" title="{what}">&#128196; {shown}'
+                        f'</span></td>')
             if not st["started"]:
                 return '<td class="tick"><span class="mute">&#11036;</span></td>'
             past = not core.still_open(due)
@@ -9737,12 +9809,29 @@ def view_material_file(req, db, mid):
 
 # ----------------------------------------------------------------- actions
 
+NOT_COMPLETE = {
+    "en": "Not complete. Do it on the site, or send photos of all the pages again.",
+    "uz": "Toʻliq emas. Saytda bajaring yoki barcha sahifalar rasmini qaytadan yuboring.",
+    "ru": "Не полностью. Сделайте на сайте или пришлите фото всех страниц ещё раз.",
+}
+
+
 def save_grade(db, sub, form):
     """Write one mark, from either the queue or a correction. Returns the score."""
     assignment = (db.execute("SELECT * FROM assignments WHERE id=?",
                              (sub["assignment_id"],)).fetchone()
                   if sub["assignment_id"] else None)
-    if assignment and assignment["rubric"]:
+    tick = (form.get("tick", [""])[0] or "").strip()
+    paper = bool(assignment and assignment["test_id"] and core.is_handout(db, assignment["test_id"]))
+    note = (form.get("note", [""])[0] or "").strip() or None
+    if paper and tick in ("done", "not"):
+        # the paper copy of a handout: done is the doing half, not complete a
+        # nought - said in the student's own language when nothing is written
+        score = core.PAPER_TICK if tick == "done" else 0.0
+        if tick == "not" and not note:
+            st = db.execute("SELECT lang FROM students WHERE id=?", (sub["student_id"],)).fetchone()
+            note = NOT_COMPLETE.get(st["lang"] if st else "en", NOT_COMPLETE["en"])
+    elif assignment and assignment["rubric"]:
         score = core.set_criteria(
             db, sub["id"],
             {k: form.get("c_" + k, [""])[0] for k in core.CRITERIA_KEYS})
@@ -9750,7 +9839,6 @@ def save_grade(db, sub, form):
         score = core.mark_score(form.get("score", [""])[0])
     if score is None:
         return None
-    note = (form.get("note", [""])[0] or "").strip() or None
     db.execute(
         "UPDATE submissions SET status='graded', score=?, note=?, graded_at=? WHERE id=?",
         (score, note, core.iso(core.now()), sub["id"]))
@@ -10113,12 +10201,18 @@ def unit_plan_json(req, db):
     unit = (q.get("unit", [""])[0] or "").strip()
     if not gid.isdigit() or not unit.isdigit():
         return json_response({"items": []})
+    if q.get("peek") == ["1"]:
+        # only the Destination unit remembered for this one, to fill the box in
+        return json_response({"destination": core.destination_for(
+            db, core.level_of(db, int(gid)), int(unit))})
     core.seed_prompts(db)
+    dest = q.get("destination")
     plan = core.unit_homework(
         db, int(gid), int(unit),
         pair=(q.get("pair", ["A&C"])[0] or "A&C"),
         kind=(q.get("kind", ["essay"])[0] or "essay"),
-        practice=(q.get("practice", [""])[0] or "").strip())
+        practice=(q.get("practice", [""])[0] or "").strip(),
+        destination=dest[0] if dest else None)
     return json_response(plan)
 
 

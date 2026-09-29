@@ -1385,15 +1385,17 @@ def student_timeline(db, student_id):
     timeline = []
     for a in assignments:
         if a["test_id"] and is_handout(db, a["test_id"]):
-            # no photograph: handed in once a part is checked, and marked once
-            # the deadline has passed, by the same rule as the league
-            state = handout_status(db, a["test_id"], student_id, a["due_at"])
+            # handed in once a part is checked or the paper copy is ticked, and
+            # marked once the deadline has passed, by the same rule as the league
+            hw = handout_homework(db, a, student_id)
             past = _is_past(a["due_at"]) or not a["due_at"]
+            waiting = hw["mark"] is None and hw["paper"] and hw["paper"]["state"] == "waiting"
             timeline.append({
                 "assignment_id": a["id"], "title": a["title"], "due_at": a["due_at"],
-                "submission_id": None, "handout": state,
-                "status": "handout" if state["started"] else "missing",
-                "score": state["mark"] if (state["started"] and past) else None})
+                "submission_id": hw["paper"]["sub"]["id"] if hw["paper"] else None,
+                "handout": hw["digital"],
+                "status": "handout" if hw["mark"] is not None else ("pending" if waiting else "missing"),
+                "score": hw["mark"] if (hw["mark"] is not None and past) else None})
             continue
         s = subs.get(a["id"])
         timeline.append(
@@ -3858,9 +3860,12 @@ def set_progress(db, student_id, items):
     # its tick comes from the attempt; a handout, from checking every part
     for a in items:
         tid = a["test_id"] if "test_id" in a.keys() else None
-        if tid and a["id"] not in done_ids and is_handout(db, tid):
-            if handout_status(db, tid, student_id)["done"]:
+        if tid and is_handout(db, tid):
+            # every part checked, or the paper copy sent and not turned down
+            if handout_homework(db, a, student_id)["handed"]:
                 done_ids.add(a["id"])
+            else:
+                done_ids.discard(a["id"])
             continue
         if tid and a["id"] not in done_ids and db.execute(
                 "SELECT 1 FROM dattempts WHERE test_id=? AND student_id=?"
@@ -3925,9 +3930,11 @@ def live_completion(db, student_id):
         " AND assignment_id IS NOT NULL AND draft=0",
         (student_id,),
     ).fetchone()["c"]
-    for a in db.execute("SELECT test_id FROM assignments WHERE group_id=? AND published=1"
+    for a in db.execute("SELECT id, test_id FROM assignments WHERE group_id=? AND published=1"
                         " AND test_id IS NOT NULL", (row["group_id"],)):
-        if is_handout(db, a["test_id"]) and handout_status(db, a["test_id"], student_id)["started"]:
+        # a paper copy is counted already, with the photographs
+        if (is_handout(db, a["test_id"]) and not paper_copy(db, student_id, a["id"])
+                and handout_status(db, a["test_id"], student_id)["started"]):
             done += 1
     return round(100 * min(done, total) / total)
 
@@ -4456,18 +4463,25 @@ def homework_marks(db, student, lo, hi, windows):
             continue
         if a["test_id"]:
             # a digital handout marks itself: half for the parts checked by the
-            # deadline, half for the right answers - averaged with the rest of
-            # the set, like any other piece of it
+            # deadline, half for the right answers. Done on paper instead, the
+            # teacher's tick is worth the first half. The better of the two is
+            # averaged with the rest of the set, like any other piece of it.
             key = due or "none"
-            state = handout_status(db, a["test_id"], student["id"], due)
-            if not state["started"]:
-                if due:
-                    scores.append(0.0)
-                    batches.setdefault(key, []).append(0.0)
-                    missing += 1
-                continue
-            scores.append(state["mark"])
-            batches.setdefault(key, []).append(state["mark"])
+            hw = handout_homework(db, a, student["id"])
+            paper = hw["paper"]
+            if hw["mark"] is not None:
+                scores.append(hw["mark"])
+                batches.setdefault(key, []).append(hw["mark"])
+            elif paper and paper["state"] == "waiting":
+                waiting += 1                  # photographs waiting for the tick
+            elif paper and paper["state"] == "late":
+                scores.append(0.0)
+                batches.setdefault(key, []).append(0.0)
+                late += 1
+            elif due:
+                scores.append(0.0)
+                batches.setdefault(key, []).append(0.0)
+                missing += 1
             continue
         sub = db.execute(
             "SELECT status, score, created_at FROM submissions WHERE student_id=?"
@@ -5213,10 +5227,73 @@ def lesson_order(t):
     return (t["number"] or 0, rank, t["id"])
 
 
+# A handout set as homework can be done on the site or on paper. The paper
+# copy comes in as photographs, and the teacher ticks it: done is worth half,
+# the "doing" half of a digital handout's mark, since nobody has checked the
+# answers - the teacher can give a higher mark by marking it properly. Not
+# complete is a nought. Whichever route went better is the one that counts.
+PAPER_TICK = 5.0
+
+
+def paper_copy(db, student_id, assignment_id):
+    """The newest photographs a student sent for this piece of homework."""
+    return db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND assignment_id=? AND draft=0"
+        " ORDER BY created_at DESC, id DESC LIMIT 1", (student_id, assignment_id)).fetchone()
+
+
+def handout_homework(db, a, student_id):
+    """A handout set as homework, done on the site, on paper, or both.
+
+    Returns {digital: handout_status, paper: None or {state, mark, sub},
+    mark: the better of the two once known, route: which one that was}.
+    The paper states: waiting (sent, not ticked yet), ticked, late (sent
+    after the deadline, a nought like any late homework), rejected (the
+    teacher said it was not complete).
+    """
+    due = a["due_at"]
+    h = handout_status(db, a["test_id"], student_id, due)
+    sub = paper_copy(db, student_id, a["id"])
+    paper = None
+    if sub:
+        if sub["status"] != "graded" or sub["score"] is None:
+            paper = {"state": "waiting", "mark": None}
+        elif due and sub["created_at"] > due:
+            paper = {"state": "late", "mark": 0.0}
+        elif sub["score"] <= 0:
+            paper = {"state": "rejected", "mark": 0.0}
+        else:
+            paper = {"state": "ticked", "mark": float(sub["score"])}
+        paper["sub"] = sub
+    digital = h["mark"] if h["started"] else None
+    ticked = paper["mark"] if paper and paper["state"] == "ticked" else None
+    marks = [m for m in (digital, ticked) if m is not None]
+    best = max(marks) if marks else None
+    route = None
+    if best is not None:
+        route = "paper" if ticked is not None and (digital is None or ticked > digital) else "digital"
+    return {"digital": h, "paper": paper, "mark": best, "route": route,
+            # handed in, one way or the other - what the homework list ticks
+            "handed": h["done"] or bool(paper and paper["state"] in ("waiting", "ticked", "late"))}
+
+
+def handout_on_paper(db, test_id, student_id):
+    """Did the student hand this booklet in on paper, and has it not been
+    turned down? Then it counts as finished for opening the next one."""
+    sub = db.execute(
+        "SELECT s.status, s.score FROM submissions s JOIN assignments a ON a.id = s.assignment_id"
+        " WHERE s.student_id=? AND a.test_id=? AND s.draft=0"
+        " ORDER BY s.created_at DESC, s.id DESC LIMIT 1", (student_id, test_id)).fetchone()
+    return bool(sub) and not (sub["status"] == "graded" and (sub["score"] or 0) <= 0)
+
+
 def handout_finished(db, test_id, student_id):
-    """Every part checked. A written answer the teacher later says does not
-    count lowers the mark, but it does not undo the work: the student cannot
-    check that part again, so it must not keep them out of the next booklet."""
+    """Every part checked - or the paper copy handed in. A written answer the
+    teacher later says does not count lowers the mark, but it does not undo the
+    work: the student cannot check that part again, so it must not keep them
+    out of the next booklet. Paper the teacher turns down does."""
+    if handout_on_paper(db, test_id, student_id):
+        return True
     parts = handout_info(db, test_id)["parts"]
     att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
                      " ORDER BY id DESC LIMIT 1", (test_id, student_id)).fetchone()
@@ -6123,7 +6200,24 @@ UNIT_PLAN = [
 ]
 
 
-def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice=""):
+def destination_for(db, level_id, unit, text=None):
+    """The Destination unit that goes with this coursebook unit at this level.
+    Given text, it is remembered for next time; given none, the remembered one
+    comes back (or "")."""
+    book = json.loads(meta_get(db, "destination_units", "{}") or "{}")
+    here = book.setdefault(str(level_id or 0), {})
+    if text is not None:
+        text = text.strip()[:120]
+        if text:
+            here[str(unit)] = text
+        else:
+            here.pop(str(unit), None)
+        meta_set(db, "destination_units", json.dumps(book))
+        return text
+    return here.get(str(unit), "")
+
+
+def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", destination=None):
     """Everything a unit's homework needs, found rather than retyped.
 
     The booklet and the writing question already exist in the system: one is a
@@ -6135,14 +6229,22 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice=""):
     level = level_name(db, level_id) if level_id else ""
     out = {"level": level, "unit": unit, "items": []}
 
+    # the workbook comes first; the Academic Skills and Reading Plus lessons
+    # come with the unit's review
+    asrp = (pair or "").upper() == "ASRP"
     out["items"].append({"kind": "workbook", "test_id": None,
-                         "title": "Workbook unit %s %s" % (unit, pair)})
+                         "title": ("Workbook unit %s — Academic Skills, Reading Plus and Review" % unit
+                                   if asrp else "Workbook unit %s %s" % (unit, pair))})
+    # then the Destination unit that goes with it, remembered once typed
+    dest = destination_for(db, level_id, unit, destination)
+    out["destination"] = dest
+    if dest:
+        out["items"].append({"kind": "destination", "test_id": None, "title": dest})
 
     booklet = None
     if level_id:
         # the digital handout for these two lessons first - 4B & 4D, not 4A & 4C,
         # and the Academic Skills + Reading Plus pack only when that is asked for
-        asrp = (pair or "").upper() == "ASRP"
         like = "%ASRP%" if asrp else "%%%s%s%%" % (unit, (pair or "A")[0].upper())
         booklet = db.execute(
             "SELECT id, title FROM dtests WHERE level_id=? AND number=?"
@@ -6155,6 +6257,11 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice=""):
         "title": (booklet["title"].replace(" (booklet)", "") if booklet
                   else "12-page handout \u2014 unit %s" % unit)})
 
+    if kind == "none":
+        if practice:
+            out["items"].append({"kind": "practice", "test_id": None,
+                                 "title": "Practice test %s" % practice})
+        return out
     row = suggest_prompt(db, level, kind, unit) if level else None
     out["items"].append({
         "kind": "writing", "test_id": None,

@@ -92,6 +92,20 @@
   if (!build) return;
   const $ = (id) => document.getElementById(id);
 
+  // the Destination unit typed once for a unit comes back by itself
+  async function peek() {
+    const unit = ($("u_unit").value || "").trim();
+    if (!unit) return;
+    try {
+      const q = new URLSearchParams({group_id: $("u_group").value, unit: unit, peek: "1"});
+      const r = await fetch("/assignments/unit.json?" + q.toString());
+      const got = await r.json();
+      $("u_dest").value = got.destination || "";
+    } catch (e) { /* the box just stays as it was */ }
+  }
+  $("u_unit").addEventListener("change", peek);
+  $("u_group").addEventListener("change", peek);
+
   build.addEventListener("click", async () => {
     const unit = ($("u_unit").value || "").trim();
     const note = $("u_note");
@@ -103,10 +117,12 @@
         group_id: $("u_group").value, unit: unit,
         pair: $("u_pair").value, kind: $("u_kind").value,
         practice: ($("u_practice").value || "").trim(),
+        destination: ($("u_dest").value || "").trim(),
       });
       const r = await fetch("/assignments/unit.json?" + q.toString());
       const plan = await r.json();
       const items = plan.items || [];
+      if (plan.destination !== undefined) $("u_dest").value = plan.destination;
       if (!items.length) { note.textContent = "Nothing found for that unit."; return; }
 
       const form = document.querySelector('form[action="/assignments/list"]');

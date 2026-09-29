@@ -191,11 +191,17 @@ def homework_items(db, st, lo, hi):
             else:
                 item["state"], item["mark"] = "marked", round(sat["score"] * 10.0 / sat["total"], 1)
         elif a["test_id"]:
-            h = core.handout_status(db, a["test_id"], st["id"], due)
-            if not h["started"]:
-                item["state"] = "missing" if due else None
+            # on the site or on paper: the better of the two, as the league has it
+            hw = core.handout_homework(db, a, st["id"])
+            paper = hw["paper"]
+            if hw["mark"] is not None:
+                item["state"], item["mark"] = "marked", round(hw["mark"], 1)
+                item["paper"] = hw["route"] == "paper"
+            elif paper and paper["state"] in ("waiting", "late"):
+                item["state"] = paper["state"]
+                item["mark"] = 0.0 if paper["state"] == "late" else None
             else:
-                item["state"], item["mark"] = "marked", round(h["mark"], 1)
+                item["state"] = "missing" if due else None
         else:
             sub = db.execute(
                 "SELECT status, score, created_at FROM submissions WHERE student_id=?"

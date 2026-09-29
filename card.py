@@ -492,6 +492,8 @@ def _homework_state(c, xr, y, it):
         c.write_right(xr, y + 6, "/10", "m28", INK3)
         if state == "late":
             c.write_right(xr, y + 44, "Kechikib · С опозданием", "r28", RED)
+        elif it.get("paper"):
+            c.write_right(xr, y + 44, "Qogʻozda · На бумаге", "r28", INK3)
         return
     uz, ru, col = {"missing": ("Topshirilmagan", "Не сдано", RED),
                    "waiting": ("Tekshirilmoqda", "Проверяется", INK2),

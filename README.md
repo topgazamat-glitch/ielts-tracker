@@ -49,23 +49,27 @@ Demo data to see the charts populated: `python3 seed_demo.py --reset`.
 
 ## A unit's homework, in one go
 
-Four things are set for every unit, in the same order every week:
+Every unit's homework is set in the same order:
 
-1. the workbook, unit N, A&C or B&D
-2. the 12-page handout for that unit
-3. a writing task, on that unit's topic
-4. a practice test, sometimes
+1. the workbook, unit N: A&C, B&D, or Academic Skills + Reading Plus with the review
+2. the Destination unit that goes with it - typed once for a unit and level,
+   then filled in by itself (`core.destination_for`)
+3. the 12-page handout for those lessons
+4. a writing task and a practice test, when wanted
 
-**Assignments → A unit's homework** asks for the group, the unit and which
-lessons, and fills the form in. It finds the handout on that group's level
-shelf and the writing question in the bank for that unit, so neither is typed
-twice - the writing task used to be written once in the homework list and
-again to make it digital.
+**Set homework → A unit's homework** asks for the group, the unit, the lessons and
+the Destination unit, and fills the form in. It finds the handout on that group's
+level shelf and the writing question in the bank for that unit.
 
-A line naming a booklet *is* that booklet: the student's homework list opens
-it, and sitting it ticks the item and scores it. That item is not counted as
-homework in the league as well - the test already scores on its own - and it
-cannot be "missed", because there is no photograph to wait for.
+**A handout can be done on the site or on paper.** On the site it marks itself:
+half for the parts checked by the deadline, half for the right answers. On paper
+the student sends photos of the pages (from the Send screen, the bot, or the
+handout's own "Send photos of the pages"), and the Grade screen shows two buttons
+instead of the keypad: ✓ Done is 5 out of 10 - the "doing" half - and ✗ Not
+complete is a nought, with a line to the student in their language. A proper
+mark can still be given. The better of the two routes counts (`core.handout_homework`),
+for the league, the homework list, the parents' reports and the booklet lock: paper
+sent opens the next booklet; paper turned down shuts it again.
 
 The question goes on the writing line only. It used to be handed to every item
 in the posting, so setting four things at once turned all four into the same

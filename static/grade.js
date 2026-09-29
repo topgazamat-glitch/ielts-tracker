@@ -94,6 +94,12 @@
       return;
     }
     if (typing) return;
+    // the paper copy of a handout: y ticks it done, n says it is not complete
+    if ((e.key === "y" || e.key === "n") && document.getElementById("tick-" + e.key)) {
+      e.preventDefault();
+      document.getElementById("tick-" + e.key).click();
+      return;
+    }
     // a single mark: digits go to the score, or to whichever criterion is next
     var n = null;
     if (e.key >= "1" && e.key <= "9") n = +e.key;
@@ -288,6 +294,7 @@
         }
         if (window.Nav.bar) window.Nav.bar(false);
         if (skipping) toast("Skipped " + name);
+        else if (sub && sub.name === "tick") toast((sub.value === "done" ? "Ticked \u00b7 " : "Not complete \u00b7 ") + name);
         else if (name) toast("Saved \u00b7 " + name + (score ? " \u00b7 " + score + "/10" : ""));
       })
       .catch(function () {
