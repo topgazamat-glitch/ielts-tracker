@@ -25,7 +25,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from digital import (Handout, Q, choose, tick, own, write, fix, note, pair, report,   # noqa: E402
-                     BLANK_TAG, LEADER_P, plain, ITEM_STYLE, NUM_SPAN, TEXT_SPAN)
+                     BLANK_TAG, LEADER_P, plain, told, ITEM_STYLE, NUM_SPAN, TEXT_SPAN)
 
 DOCX = "~/Desktop/Handouts/A1 Beginner/B02A All about me/B02A All about me — handout (new design).docx"
 W = "95%"
