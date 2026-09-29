@@ -3626,16 +3626,15 @@ def practice_telegram(method, params):
 
 
 def channel_seen(db, chat_id, title, username, admin):
-    """Remember a channel the bot can post in (or no longer can). The first
-    one it can post in becomes the parents' channel unless one is chosen."""
+    """Remember a channel the bot can post in (or no longer can). It is only
+    offered on the Parents page: anybody can make a channel and add the bot,
+    so the teacher chooses - there, or by forwarding a post to the bot."""
     seen = json.loads(meta_get(db, "channels_seen", "{}") or "{}")
     seen[str(chat_id)] = {"id": chat_id, "title": title, "username": username,
                           "admin": bool(admin), "at": iso(now())}
     meta_set(db, "channels_seen", json.dumps(seen))
     chosen = parents_channel(db)
-    if admin and not chosen:
-        meta_set(db, "parents_channel", json.dumps(seen[str(chat_id)]))
-    elif chosen and str(chosen["id"]) == str(chat_id):
+    if chosen and str(chosen["id"]) == str(chat_id):
         meta_set(db, "parents_channel", json.dumps(seen[str(chat_id)]) if admin else "")
 
 

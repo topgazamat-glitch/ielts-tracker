@@ -7248,18 +7248,25 @@ def view_parents(req, db):
         chan_html = (f'<p class="flush">Posting to <strong>{E(chan["title"] or "the channel")}</strong> '
                      f'<span class="sub">({where})</span></p>')
     else:
-        chan_html = """<p class="flush"><strong>No channel yet.</strong></p>
+        me = E(core.meta_get(db, "bot_username") or "your bot")
+        chan_html = f"""<p class="flush"><strong>No channel yet.</strong></p>
 <ol class="par-steps">
-  <li>In Telegram, make the channel for the parents.</li>
-  <li>Open the channel's settings &rarr; Administrators &rarr; Add administrator, and add
-  your bot. Let it post messages.</li>
-  <li>Post anything in the channel, then open this page again. The bot will have found it.</li>
+  <li>In Telegram, open the parents' channel and tap its name.</li>
+  <li>Edit &rarr; Administrators &rarr; Add Admin &rarr; <strong>@{me}</strong>. Keep
+  &ldquo;Post Messages&rdquo; on, and save.</li>
+  <li>Forward any post from the channel to <strong>@{me}</strong>, from your own Telegram
+  (the one that gets the homework). The bot answers straight away: connected, or what is
+  still missing.</li>
 </ol>"""
     others = [c for c in core.channels_seen(db)
               if c.get("admin") and (not chan or str(c["id"]) != str(chan["id"]))]
     pick = "".join(
         f'<form method="post" action="/parents/channel"><input type="hidden" name="id" value="{E(str(c["id"]))}">'
-        f'<button class="ghost">Use {E(c["title"] or str(c["id"]))} instead</button></form>' for c in others)
+        f'<button class="ghost">Use &laquo;{E(c["title"] or str(c["id"]))}&raquo;'
+        f'{" instead" if chan else ""}</button></form>' for c in others)
+    if others and not chan:
+        pick = ('<p class="sub flush">The bot has been made an administrator of these. '
+                'Choose the parents&rsquo; one:</p>' + pick)
 
     tabs = "".join(
         f'<a class="tab{" on" if k == kind else ""}" href="/parents?p={k}">{E(label)}</a>'

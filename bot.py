@@ -568,14 +568,64 @@ def grade_submission(db, token, sub_id, score):
 
 def note_channel(db, update):
     """The bot was made an administrator of a channel, or taken off one, or
-    saw a post in one it can post in. The parents' channel is found this way:
-    the teacher adds the bot to it, and the Parents page shows it."""
+    saw a post in one it can post in. Remembered so the Parents page can offer
+    it - never chosen by itself: anybody can make a channel and add the bot."""
     chat = update.get("chat") or {}
     if chat.get("type") != "channel":
         return
     member = (update.get("new_chat_member") or {}).get("status")
     admin = member in ("administrator", "creator") if member else True
     core.channel_seen(db, chat["id"], chat.get("title") or "", chat.get("username") or "", admin)
+
+
+_ME = {}
+
+
+def bot_id(token):
+    """The bot's own Telegram id, asked for once."""
+    if not _ME.get("id"):
+        _ME["id"] = (call(token, "getMe").get("result") or {}).get("id")
+    return _ME["id"]
+
+
+def forwarded_channel(msg):
+    """The channel a forwarded post came from, or None."""
+    origin = msg.get("forward_origin") or {}
+    if origin.get("type") == "channel":
+        return origin.get("chat")
+    chat = msg.get("forward_from_chat")
+    return chat if chat and chat.get("type") == "channel" else None
+
+
+def connect_channel(db, token, msg):
+    """The teacher forwarded a post from a channel: make it the parents'
+    channel if the bot may post there, and say plainly either way - a channel
+    the bot cannot post in otherwise just stays silent."""
+    chat = forwarded_channel(msg)
+    tid = msg["chat"]["id"]
+    if not is_teacher(db, tid):
+        return send(token, tid, "Only the teacher can connect a channel. "
+                                "Send /iamteacher and the site's password first.")
+    title = chat.get("title") or "the channel"
+    res = call(token, "getChatMember", chat_id=chat["id"], user_id=bot_id(token))
+    member = res.get("result") or {}
+    status = member.get("status")
+    can_post = status == "creator" or (status == "administrator"
+                                       and member.get("can_post_messages", True))
+    if not can_post:
+        why = ("I am an administrator there, but not allowed to post messages."
+               if status == "administrator" else "I am not an administrator of it.")
+        me = core.meta_get(db, "bot_username") or "the bot"
+        return send(token, tid,
+                    "I can see «%s», but I cannot post in it: %s\n\n"
+                    "Open the channel, tap its name, then Edit → Administrators → "
+                    "Add Admin → @%s. Keep “Post Messages” on and save. "
+                    "Then forward a post from the channel to me again." % (title, why, me))
+    info = {"id": chat["id"], "title": title, "username": chat.get("username") or ""}
+    core.channel_seen(db, chat["id"], title, info["username"], True)
+    core.meta_set(db, "parents_channel", json.dumps(info))
+    return send(token, tid, "✅ Connected: «%s». The Parents page on the site now posts "
+                            "the reports there." % title)
 
 
 def send_album(token, chat_id, pngs, caption="", captions=None):
@@ -2216,7 +2266,9 @@ def main():
                         handle_callback(db, token, upd["callback_query"])
                     elif "message" in upd:
                         msg = upd["message"]
-                        if "photo" in msg:
+                        if forwarded_channel(msg) and msg["chat"].get("type") == "private":
+                            connect_channel(db, token, msg)
+                        elif "photo" in msg:
                             handle_photo(db, token, msg)
                         elif "voice" in msg or "audio" in msg:
                             handle_voice(db, token, msg)

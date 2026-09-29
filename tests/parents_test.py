@@ -175,12 +175,59 @@ check("and a send is refused", "e=channel" in where and not posted)
 # the teacher adds the bot to the channel; Telegram tells the bot
 bot.note_channel(db, {"chat": {"id": -1001234, "type": "channel", "title": "Ota-onalar 114"},
                       "new_chat_member": {"status": "administrator"}})
-check("the bot remembers the channel it was made an admin of",
-      core.parents_channel(db)["id"] == -1001234)
+check("the bot remembers a channel it was made an admin of",
+      any(c["id"] == -1001234 for c in core.channels_seen(db)))
+check("but never chooses it by itself - anybody can add the bot to a channel",
+      core.parents_channel(db) is None)
 bot.note_channel(db, {"chat": {"id": 55, "type": "private"}, "text": "hi"})
-check("a private chat is not a channel", core.parents_channel(db)["id"] == -1001234)
+check("a private chat is not a channel", len(core.channels_seen(db)) == 1)
 pg = get("/parents")
-check("the page says where it will post", "Ota-onalar 114" in pg)
+check("the page offers it to choose", "Use «Ota-onalar 114»" in pg)
+
+# or: the teacher forwards a post from the channel to the bot
+core.meta_set(db, "teachers", '["777"]')
+member = {"status": "left"}
+said = []
+_real_call = bot.call
+
+
+def fake_call(token, method, **params):
+    if method == "getMe":
+        return {"ok": True, "result": {"id": 4242}}
+    if method == "getChatMember":
+        return {"ok": True, "result": dict(member)}
+    return {"ok": True, "result": {}}
+
+
+bot.call = fake_call
+bot.send = lambda token, chat_id, text, **k: said.append((chat_id, text)) or {"ok": True}
+fwd = {"chat": {"id": 777, "type": "private"}, "text": "Salom",
+       "forward_origin": {"type": "channel", "chat": {"id": -1009999, "type": "channel",
+                                                      "title": "Azamat English — Ota-onalar"}}}
+bot.connect_channel(db, "T", dict(fwd, chat={"id": 31, "type": "private"}))
+check("a student forwarding a channel post connects nothing",
+      core.parents_channel(db) is None and "Only the teacher" in said[-1][1])
+bot.connect_channel(db, "T", fwd)
+check("the teacher is told when the bot is not an admin there, and how to fix it",
+      core.parents_channel(db) is None and "not an administrator" in said[-1][1]
+      and "Add Admin" in said[-1][1])
+member = {"status": "administrator", "can_post_messages": False}
+bot.connect_channel(db, "T", fwd)
+check("or is an admin who may not post", core.parents_channel(db) is None
+      and "not allowed to post" in said[-1][1])
+member = {"status": "administrator", "can_post_messages": True}
+bot.connect_channel(db, "T", fwd)
+check("once it may post, the forward connects the channel",
+      core.parents_channel(db)["id"] == -1009999 and said[-1][1].startswith("✅ Connected"))
+check("an old-style forward is understood too", bot.forwarded_channel(
+    {"forward_from_chat": {"id": -1, "type": "channel"}}) == {"id": -1, "type": "channel"})
+bot.call = _real_call
+
+where, _pg = press("/parents/channel", {"id": "-1001234"})
+check("choosing on the page works as well", core.parents_channel(db)["id"] == -1001234)
+pg = get("/parents")
+check("the page says where it will post", "Posting to" in pg and "Ota-onalar 114" in pg)
+bot.send = fake_send
 
 session = next(c.value for c in jar if c.name == "ta_session")
 req = urllib.request.Request(base + "/parents/send", urllib.parse.urlencode(
