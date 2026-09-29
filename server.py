@@ -3624,7 +3624,7 @@ def handout_view(db, token, t, qs, attempt, query):
             "SELECT question_id, correct FROM dresponses WHERE attempt_id=?", (attempt["id"],))}
     layout = '<div class="booklet">' + hx_dress(markup) + "</div>"
     layout, _secs, exercises = handout_controls(layout, pqs, given, marks)
-    filled = fill_layout(layout, pqs, given, marks, level=level, who=token)
+    filled = fill_layout(layout, pqs, given, marks, level=audio_shelf(t, level), who=token)
     if locked:
         answer = {str(q["id"]): q["answer"] for q, _o in pqs}
         filled = re.sub(r'(<input class="bk-blank wrong" name="q(\d+)"[^>]*>)',
@@ -9239,6 +9239,13 @@ test's own page.</p></div>"""
     return html_response(page("Digital tests", body, "Tests"))
 
 
+def audio_shelf(t, level):
+    """Where a handout's recordings are: the class tracks of its level, or -
+    for a workbook unit - the workbook's own, numbered the same way."""
+    series = t["series"] if "series" in t.keys() else None
+    return (level + " Workbook") if (series == "workbook" and level) else level
+
+
 def handouts_list(db):
     """Every digital handout, so one can be found: another book's units
     (Destination) first, then the course's booklets by level - each with
@@ -9266,7 +9273,8 @@ def handouts_list(db):
                 f'<td class="sub">{E(where)}</td>'
                 f'<td><a class="linky" href="/tests/{t["id"]}/look">Look through</a> '
                 f'&middot; <a class="linky" href="/tests/{t["id"]}">Key</a></td></tr>')
-    dest = "".join(row(t) for t in rows if t["series"])
+    dest = "".join(row(t) for t in rows if t["series"] == "destination")
+    workbook = "".join(row(t) for t in rows if t["series"] == "workbook")
     course = ""
     level = None
     for t in rows:
@@ -9283,6 +9291,10 @@ def handouts_list(db):
 <h2>Destination</h2>
 <p class="sub">{how}</p>
 <div class="tablewrap"><table>{dest or '<tr><td class="sub">None yet.</td></tr>'}</table></div>
+<h2>Workbook</h2>
+<p class="sub">A workbook unit on the site is linked from its homework line by itself - <em>Workbook
+unit 1 A&amp;C</em> - for classes of its level. Students do it there, or send photos of the pages.</p>
+<div class="tablewrap"><table>{workbook or '<tr><td class="sub">None yet.</td></tr>'}</table></div>
 <details class="gap-3" style="margin-bottom:var(--sp-6)"><summary>The course booklets ({sum(1 for t in rows if not t["series"])})</summary>
 <div class="tablewrap"><table>{course}</table></div></details>"""
 
@@ -9310,7 +9322,7 @@ def view_handout_look(req, db, tid):
     layout = '<div class="booklet">' + hx_dress(markup) + "</div>"
     layout, _secs, _ex = handout_controls(layout, pqs, given, marks)
     level = core.level_name(db, t["level_id"]) or ""
-    sheet = fill_layout(layout, pqs, given, marks, level=level)
+    sheet = fill_layout(layout, pqs, given, marks, level=audio_shelf(t, level))
     here = f"/tests/{tid}/look?answers={'1' if show else '0'}"
     steps = "".join(
         f'<a class="tab{" on" if i == idx else ""}" href="{here}&amp;part={i + 1}">{i + 1} {E(p[1])}</a>'
@@ -10476,7 +10488,8 @@ def act_new_list(req, db):
              core.iso(core.now()), 1 if publish_now else 0,
              1 if f.get("rubric", [""])[0] == "1" else 0,
              mine, minutes if mine else None, min_words if mine else None,
-             booklets.get(title.strip().lower()) or core.destination_test(db, title)),
+             booklets.get(title.strip().lower()) or core.destination_test(db, title)
+             or core.workbook_test(db, title, level_id)),
         ).lastrowid)
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":

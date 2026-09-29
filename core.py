@@ -6316,6 +6316,28 @@ def destination_test(db, text):
     return row["id"] if row else None
 
 
+WORKBOOK_LINE = re.compile(r"workbook\s*unit\s*(\d+)\s*(?:[—–-]\s*)?(A\s*&\s*C|B\s*&\s*D|academic)?", re.I)
+
+
+def workbook_test(db, text, level_id):
+    """The digital workbook unit a line of homework names - "Workbook unit 1
+    A&C" - on this level, or None when there is none on the site."""
+    m = WORKBOOK_LINE.search(text or "")
+    if not m or not level_id:
+        return None
+    unit, pair = int(m.group(1)), (m.group(2) or "").upper().replace(" ", "")
+    if pair.startswith("ACADEMIC"):
+        like = "%%Unit %d ASRP%%" % unit
+    elif pair in ("A&C", "B&D"):
+        like = "%%Unit %d%s & %d%s%%" % (unit, pair[0], unit, pair[2])
+    else:
+        return None
+    row = db.execute(
+        "SELECT id FROM dtests WHERE series='workbook' AND kind='handout' AND level_id=? AND number=?"
+        " AND title LIKE ? ORDER BY id DESC LIMIT 1", (level_id, unit, like)).fetchone()
+    return row["id"] if row else None
+
+
 def destination_for(db, level_id, unit, text=None):
     """The Destination unit that goes with this coursebook unit at this level.
     Given text, it is remembered for next time; given none, the remembered one
@@ -6348,9 +6370,10 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
     # the workbook comes first; the Academic Skills and Reading Plus lessons
     # come with the unit's review
     asrp = (pair or "").upper() == "ASRP"
-    out["items"].append({"kind": "workbook", "test_id": None,
-                         "title": ("Workbook unit %s — Academic Skills, Reading Plus and Review" % unit
-                                   if asrp else "Workbook unit %s %s" % (unit, pair))})
+    wb_title = ("Workbook unit %s — Academic Skills, Reading Plus and Review" % unit
+                if asrp else "Workbook unit %s %s" % (unit, pair))
+    out["items"].append({"kind": "workbook", "title": wb_title,
+                         "test_id": workbook_test(db, wb_title, level_id)})
     # then the Destination unit that goes with it, remembered once typed
     dest = destination_for(db, level_id, unit, destination)
     out["destination"] = dest

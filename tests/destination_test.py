@@ -127,6 +127,27 @@ sh = teacher.open(base + "/assignments", timeout=30).read().decode()
 check("Set homework offers the units on the site, to type or to tap",
       '<datalist id="destlist">' in sh and 'data-dest="Destination B1, Unit 12"' in sh
       and 'data-dest="Destination B1, Unit 23"' in sh)
+
+print("\n7. A WORKBOOK UNIT IS LINKED FROM ITS LINE")
+wbu = core.load_test(db, json.load(open(os.path.join(ROOT, "handouts", "wb_pi_01ac.json"))))
+check("it is a workbook handout", db.execute("SELECT series FROM dtests WHERE id=?", (wbu,)).fetchone()[0] == "workbook")
+for text, level, want in [("Workbook unit 1 A&C", pre, wbu), ("workbook unit 1 A & C", pre, wbu),
+                          ("Workbook unit 1 B&D", pre, None), ("Workbook unit 1 A&C", inter, None),
+                          ("Workbook unit 2 A&C", pre, None)]:
+    check("%r at level %d -> %s" % (text, level, "the unit" if want else "nothing"),
+          core.workbook_test(db, text, level) == want)
+teacher.open(base + "/assignments/list", urllib.parse.urlencode({
+    "group_id": g1, "due": due, "due_time": "21:00", "publish": "1",
+    "items": "Workbook unit 1 A&C"}).encode(), timeout=30).read()
+check("setting the line links it", db.execute(
+    "SELECT test_id FROM assignments WHERE group_id=? AND title='Workbook unit 1 A&C' AND due_at LIKE '%T16:00%'",
+    (g1,)).fetchone()[0] == wbu)
+plan = json.loads(teacher.open(base + "/assignments/unit.json?" + urllib.parse.urlencode(
+    {"group_id": g1, "unit": 1, "pair": "A&C", "kind": "none"}), timeout=30).read())
+check("the Set homework form knows the workbook unit is on the site",
+      plan["items"][0]["kind"] == "workbook" and plan["items"][0]["test_id"] == wbu)
+check("the Tests page has a Workbook section with it", "Workbook · Unit 1A &amp; 1C" in
+      teacher.open(base + "/tests", timeout=30).read().decode())
 srv.shutdown()
 
 print()
