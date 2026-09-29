@@ -7,6 +7,7 @@ import json
 import math
 import time
 import os
+import random
 import re
 import secrets
 import traceback
@@ -68,7 +69,8 @@ SECTIONS = [
     ("Students", "/roster", [("/roster", "Students"), ("/groups", "Groups"),
                              ("/ratings", "Progress"), ("/reteach", "Reteach"),
                              ("/records", "Records"), ("/questions", "Questions"),
-                             ("/championship", "League")]),
+                             ("/championship", "League"),
+                             ("/practice", "As a student")]),
     ("Materials", "/materials", [("/materials", "Materials"), ("/vocab", "Vocabulary"),
                                  ("/tests", "Tests"), ("/play", "Play"),
                                  ("/music", "Music")]),
@@ -2332,7 +2334,7 @@ PORTAL = [
 ]
 
 
-def student_shell(s, db, token, tab, body):
+def student_shell(s, db, token, tab, body, top="", music=True):
     """One page, five sections, everything the bot can do."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
     section = next((key for key, _l, pages in PORTAL
@@ -2363,7 +2365,7 @@ def student_shell(s, db, token, tab, body):
 </div>
 <nav class="pnav" aria-label="Sections">{nav}</nav>
 {sub}"""
-    return html_response(student_page(s["name"], head + body))
+    return html_response(student_page(s["name"], top + head + body, music=music))
 
 
 def portal_home(db, s, token, flash):
@@ -5436,6 +5438,12 @@ def view_student_portal(req, db, token, flash=""):
     else:
         tab = "home"
         body = portal_home(db, s, token, flash)
+    if core.practice_on():
+        # the teacher, going through the page as a student: the strip that
+        # does the work for them, except inside the all-screens view
+        framed = query.get("frame", [""])[0] == "1"
+        return student_shell(s, db, token, tab, body, music=not framed,
+                             top="" if framed else practice_bar(db, s, token, tab, query))
     return student_shell(s, db, token, tab, body)
 
 
@@ -7178,6 +7186,277 @@ def act_demo_off(req, db):
 def act_demo_reset(req, db):
     core.demo_reset()
     return redirect("/insights")
+
+
+# ------------------------------------------------ the student page, as a student
+#
+# The teacher's way to go through the student page without joining a class
+# through the bot and doing every task to see what comes after it. A copy of
+# today's site gets one more student in the class the teacher picks; the
+# student page of that student opens from the teacher's own browser only, and
+# a strip at its top does the work - answers a part, finishes a booklet,
+# marks the homework - so the next screen is one tap away. Nothing reaches
+# the real site: the copy is a separate file, and the bot writes down what it
+# would have sent instead of sending it.
+
+PRACTICE_SCREENS = [(key, label, p, plabel) for key, label, pages in PORTAL
+                    for p, plabel in pages]
+
+
+def practice_when(stamp):
+    try:
+        return core.parse(stamp).strftime("%d %b, %H:%M")
+    except Exception:
+        return stamp or ""
+
+
+def view_practice(req, db):
+    info = core.practice_info()
+    q = req.get("query", {}) if isinstance(req, dict) else {}
+    note = ""
+    if q.get("e") == ["room"]:
+        note = ('<div class="flash err">There is not enough room on the server for a '
+                'second copy of the site. Free some space on the Settings page first.</div>')
+    now_card = ""
+    if info:
+        mb = info["bytes"] / 1048576
+        now_card = f"""<div class="card try-now">
+  <h3>Your practice student is in class {E(info["group"])}</h3>
+  <p class="sub">{E(info["level"] or "no level")} &middot; copy made {E(practice_when(info["made"]))}
+  &middot; {mb:.0f} MB</p>
+  <div class="row-actions">
+    <a class="btn" href="/s/{E(info["token"])}">Open the student page</a>
+    <a class="btn ghost" href="/practice/screens">Every screen at once</a>
+    <form method="post" action="/practice/end"><button class="ghost danger">Throw it away</button></form>
+  </div>
+</div>"""
+    groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    rows = ""
+    for g in groups:
+        n = db.execute("SELECT COUNT(*) n FROM students WHERE group_id=? AND active=1",
+                       (g["id"],)).fetchone()["n"]
+        level = core.level_name(db, core.level_of(db, g["id"])) or "no level"
+        here = info and info["group_id"] == g["id"]
+        rows += f"""<div class="try-class">
+  <div><strong>{E(g["name"])}</strong><div class="sub">{E(level)} &middot; {n} students</div></div>
+  <form method="post" action="/practice/start"><input type="hidden" name="group_id" value="{g["id"]}">
+  <button class="{"ghost" if info else ""}">{"Start again here" if here else "Be a new student here"}</button></form>
+</div>"""
+    body = f"""<h1>The student page, as a student</h1>
+{note}{now_card}
+<div class="card">
+  <h3>Pick a class</h3>
+  <p class="sub">You join it as a new student in a copy of today's site: the same handouts,
+  homework, tests and classmates. Buttons at the top of the page do each task for you, so the
+  next screen is one tap away. Your real students, their marks and the league are not touched,
+  and the bot sends nothing &mdash; what it would have said is shown on the page instead.
+  {"Picking a class makes a fresh copy and replaces the one you have." if info else ""}</p>
+  <div class="try-classes">{rows or '<p class="sub">No classes yet.</p>'}</div>
+</div>"""
+    return html_response(page("As a student", body, "As a student"))
+
+
+def act_practice_start(req, db):
+    gid = (req["form"].get("group_id", [""])[0] or "").strip()
+    if not gid.isdigit() or not db.execute("SELECT 1 FROM groups WHERE id=?", (int(gid),)).fetchone():
+        return redirect("/practice")
+    token = core.practice_start(int(gid))
+    if not token:
+        return redirect("/practice?e=room")
+    return redirect(f"/s/{token}")
+
+
+def act_practice_end(req, db):
+    core.practice_end()
+    return redirect("/practice")
+
+
+def view_practice_screens(req, db):
+    info = core.practice_info()
+    if not info:
+        return redirect("/practice")
+    tok = E(info["token"])
+    cells = "".join(f"""<figure class="try-screen">
+  <figcaption><span>{E(label)} &rsaquo; <strong>{E(plabel)}</strong></span>
+  <a class="linky" href="/s/{tok}?tab={p}">Open</a></figcaption>
+  <div class="try-phone"><iframe loading="lazy" title="{E(plabel)}"
+    src="/s/{tok}?tab={p}&amp;frame=1"></iframe></div>
+</figure>""" for _key, label, p, plabel in PRACTICE_SCREENS)
+    body = f"""<div class="try-strip"><strong>Class {E(info["group"])}</strong>
+<span class="sub">every screen of the student page, as your practice student sees it now</span>
+<a class="btn ghost" href="/practice">Back</a></div>
+<div class="try-screens">{cells}</div>"""
+    return html_response(page("Every screen", body, "As a student"))
+
+
+def practice_bar(db, s, token, tab, query):
+    """The strip at the top of the practice student's page: where this is,
+    and the buttons that do the task on screen."""
+    info = core.practice_info() or {}
+    here = f"/s/{E(token)}/practice"
+
+    def button(what, label, ghost=False, **fields):
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{E(str(v))}">'
+                         for k, v in fields.items())
+        return (f'<form method="post" action="{here}/{what}">{hidden}'
+                f'<button class="{"ghost" if ghost else ""}">{label}</button></form>')
+
+    doing = ""
+    hid = query.get("h", [""])[0]
+    tid = query.get("t", [""])[0]
+    if tab == "handouts" and hid.isdigit():
+        hid = int(hid)
+        blocker = core.handout_blocked_by(db, hid, s)
+        if blocker:
+            doing = button("finish", "Finish %s for me" % E(short_title(blocker)), h=blocker["id"])
+        else:
+            n = practice_current_part(db, s, hid)
+            if n is not None:
+                doing = (button("fill", "Answer part %d for me" % n, h=hid, part=n, how="right")
+                         + button("fill", "&hellip; with mistakes", True, h=hid, part=n, how="mistakes")
+                         + button("finish", "Finish the whole handout", True, h=hid))
+    elif tab == "tests" and tid.isdigit() and not core.sat_already(db, int(tid), s["id"]):
+        doing = (button("test", "Answer this test for me", t=tid, how="right")
+                 + button("test", "&hellip; with mistakes", True, t=tid, how="mistakes"))
+    if practice_waiting(db, s["id"]):
+        doing += button("mark", "Mark my homework as the teacher", tab == "handouts")
+
+    heard = core.practice_heard(db)
+    said = ""
+    if heard:
+        items = "".join(f'<li><span class="sub">{E(practice_when(h["at"]))} &middot; to '
+                        f'{E(h["to"])}</span><br>{E(h["text"]).replace(chr(10), "<br>")}</li>'
+                        for h in heard)
+        said = (f'<details class="try-heard"><summary>What Telegram would have sent '
+                f'({len(heard)})</summary><ol>{items}</ol></details>')
+    return f"""<div class="trybar" role="note">
+  <div class="try-where"><strong>Practice copy</strong> &middot; class {E(info.get("group", ""))}
+  <span class="sub">&mdash; nothing here reaches your students or the real site</span></div>
+  <div class="try-do">{doing}
+    <a class="btn ghost" href="/practice/screens">Every screen</a>
+    <a class="btn ghost" href="/practice">Leave</a></div>
+  {said}
+</div>"""
+
+
+def practice_current_part(db, s, hid):
+    """The part of this handout the practice student is on, or None."""
+    t = db.execute("SELECT layout FROM dtests WHERE id=?", (hid,)).fetchone()
+    if not t:
+        return None
+    _intro, parts = handout_parts(t["layout"] or "")
+    a = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                   " ORDER BY id DESC LIMIT 1", (hid, s["id"])).fetchone()
+    done = core.handout_parts_done(db, a["id"]) if a else {}
+    return next((n for n, *_r in parts if n not in done), None)
+
+
+def practice_waiting(db, sid):
+    """The practice student's newest piece of homework that nobody has marked."""
+    return db.execute(
+        "SELECT * FROM submissions WHERE student_id=? AND status='pending'"
+        " AND IFNULL(draft, 0)=0 ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
+
+
+PRACTICE_SENTENCE = ("I think this is true for me because I do it every day "
+                     "with my family and friends.")
+
+
+def practice_answer(q, letters, rnd, mistakes, others):
+    """What a student might have put in one box: the key's answer, and now
+    and then - when asked for mistakes - something else."""
+    kind = q["control"] if "control" in q.keys() else None
+    answer = (q["answer"] or "").split("/")[0].strip()
+    slip = mistakes and rnd.random() < 0.2
+    if kind in OPTIONAL_BOXES:
+        return answer if kind == "tick" else ""      # a partner's answer stays empty at home
+    if letters:
+        right = next((l for l in letters if q["answer"] and core.answer_matches(l, q["answer"])),
+                     letters[0])
+        wrong = [l for l in letters if l != right]
+        return rnd.choice(wrong) if (slip and wrong) else right
+    if q["kind"] == "open" or not q["answer"]:
+        return PRACTICE_SENTENCE if core.is_writing(q) else "my own answer"
+    if slip:
+        wrong = [o for o in others if o and not core.answer_matches(o, q["answer"])]
+        return rnd.choice(wrong) if wrong else "no idea"
+    return answer
+
+
+def practice_fill(db, test_id, nums, mistakes, seed):
+    """{question id: answer} for the boxes numbered `nums` (all of them when
+    None), and the questions themselves."""
+    qs = {q["id"]: q for q in db.execute(
+        "SELECT id, num, kind, answer, control FROM dquestions WHERE test_id=?", (test_id,))}
+    letters = {}
+    for o in db.execute("SELECT o.question_id, o.letter FROM doptions o JOIN dquestions q"
+                        " ON q.id=o.question_id WHERE q.test_id=? ORDER BY o.id", (test_id,)):
+        letters.setdefault(o["question_id"], []).append(o["letter"])
+    mine = [q for q in qs.values() if nums is None or q["num"] in nums]
+    others = [(q["answer"] or "").split("/")[0].strip() for q in mine
+              if q["answer"] and q["id"] not in letters]
+    rnd = random.Random(seed)
+    return qs, {q["id"]: practice_answer(q, letters.get(q["id"]), rnd, mistakes, others)
+                for q in mine}
+
+
+def practice_check_part(db, token, s, hid, part, mistakes):
+    """Answer one part of a handout and check it, the way the page would."""
+    t = db.execute("SELECT layout FROM dtests WHERE id=?", (hid,)).fetchone()
+    markup = {n: m for n, _a, _b, m in handout_parts(t["layout"] or "")[1]}.get(part)
+    if markup is None:
+        return None
+    a = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                   " ORDER BY id DESC LIMIT 1", (hid, s["id"])).fetchone()
+    aid = a["id"] if a else core.start_attempt(db, hid, s["id"])
+    qs, typed = practice_fill(db, hid, set(part_keys(markup)), mistakes, hid * 100 + part)
+    _status, _headers, blob = check_part(db, token, hid, aid, part, qs, typed)
+    return json.loads(blob.decode("utf-8")).get("go")
+
+
+def act_practice(req, db, token, what):
+    """One of the practice strip's buttons."""
+    s = core.student_by_token(db, token)
+    if not s or not core.practice_on():
+        return not_found()
+    f = req["form"]
+    mistakes = f.get("how", [""])[0] == "mistakes"
+    hid = f.get("h", [""])[0]
+    if what in ("fill", "finish") and hid.isdigit():
+        hid = int(hid)
+        if not core.handout_open_to(db, hid, s["group_id"]):
+            return redirect(f"/s/{token}?tab=handouts")
+        if what == "fill":
+            part = f.get("part", [""])[0]
+            go = practice_check_part(db, token, s, hid, int(part), mistakes) if part.isdigit() else None
+            return redirect(go or f"/s/{token}?tab=handouts&h={hid}")
+        go = None
+        for _i in range(100):
+            n = practice_current_part(db, s, hid)
+            if n is None:
+                break
+            go = practice_check_part(db, token, s, hid, n, True)
+            if go is None:
+                break
+        return redirect(f"/s/{token}?tab=handouts&h={hid}&part=end")
+    tid = f.get("t", [""])[0]
+    if what == "test" and tid.isdigit():
+        tid = int(tid)
+        ok = db.execute("SELECT id FROM dtests WHERE id=? AND published=1", (tid,)).fetchone()
+        if ok and not core.sat_already(db, tid, s["id"]):
+            _qs, given = practice_fill(db, tid, None, mistakes, tid)
+            core.submit_attempt(db, core.start_attempt(db, tid, s["id"]), given)
+        return redirect(f"/s/{token}?tab=tests&t={tid}")
+    if what == "mark":
+        sub = practice_waiting(db, s["id"])
+        if sub:
+            form = {"score": ["7"], "note": ["Good work. Check your articles and "
+                                             "past tenses again."]}
+            form.update({"c_" + k: ["6"] for k in core.CRITERIA_KEYS})
+            if save_grade(db, sub, form) is not None:
+                notify_graded(db, sub["id"])
+        return redirect(f"/s/{token}?tab=feedback")
+    return redirect(f"/s/{token}")
 
 
 
@@ -9829,6 +10108,10 @@ ROUTES = [
     ("POST", r"^/demo/on$", act_demo_on),
     ("POST", r"^/demo/off$", act_demo_off),
     ("POST", r"^/demo/reset$", act_demo_reset),
+    ("GET",  r"^/practice$", view_practice),
+    ("GET",  r"^/practice/screens$", view_practice_screens),
+    ("POST", r"^/practice/start$", act_practice_start),
+    ("POST", r"^/practice/end$", act_practice_end),
     ("POST", r"^/kpi/level/(\d+)$", act_save_kpi_level),
     ("POST", r"^/kpi/profile$", act_save_kpi_profile),
     ("POST", r"^/records/test/new$", act_new_class_test),
@@ -9970,6 +10253,13 @@ class Handler(BaseHTTPRequestHandler):
         and cannot see this at all.
         """
         core.demo_on(False)
+        core.practice_on(False)
+        if path.startswith("/s/try-"):
+            # the practice student: read from the practice copy, and only
+            # when it is the teacher asking - to anyone else it is no link
+            if self._session() and core.is_practice_token(path.split("/")[2]):
+                core.practice_on(True)
+            return
         if path.startswith(("/s/", "/p/", "/static/", "/login", "/demo/")):
             return
         if self._cookie("ta_demo") == "1" and self._session():
@@ -10113,6 +10403,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(status)
             for k, v in self.SECURITY_HEADERS:
+                if k == "X-Frame-Options" and core.practice_on():
+                    v = "SAMEORIGIN"    # the practice pages, framed on "Every screen"
                 self.send_header(k, v)
             for k, v in headers:
                 self.send_header(k, v)
@@ -10134,6 +10426,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(status)
             for k, v in self.SECURITY_HEADERS:
+                if k == "X-Frame-Options" and core.practice_on():
+                    v = "SAMEORIGIN"    # the practice pages, framed on "Every screen"
                 self.send_header(k, v)
             for k, v in headers:
                 self.send_header(k, v)
@@ -10162,6 +10456,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._do_GET_inner()
         finally:
             core.demo_on(False)
+            core.practice_on(False)
 
     def _do_GET_inner(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -10298,6 +10593,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._do_POST_inner()
         finally:
             core.demo_on(False)
+            core.practice_on(False)
 
     def _do_POST_inner(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -10461,6 +10757,16 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_student_test(
                     {"query": {}, "form": form}, db, m.group(1), int(m.group(2))))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/practice/(fill|finish|test|mark)$", path)
+        if m:
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace"),
+                                         keep_blank_values=True)
+            db = core.connect()
+            try:
+                return self._send(*act_practice({"form": form}, db, m.group(1), m.group(2)))
             finally:
                 db.close()
 

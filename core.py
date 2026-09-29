@@ -221,6 +221,11 @@ def local_day(dt, cfg):
 # it, and the bot and the scheduled jobs - which run on their own threads -
 # never see it, so nothing invented can be sent to a real student's phone.
 DEMO_PATH = os.path.join(DATA_DIR, "demo.db")
+# The teacher's practice copy: today's site copied whole, with one more
+# student in it, so the student page can be gone through as a student would
+# go through it. Switched on per thread the same way, and only for that one
+# student's link, opened by the signed-in teacher.
+PRACTICE_PATH = os.path.join(DATA_DIR, "practice.db")
 _thread = __import__("threading").local()
 
 
@@ -231,11 +236,23 @@ def demo_on(flag=None):
     return bool(getattr(_thread, "demo", False))
 
 
+def practice_on(flag=None):
+    """Read, or set, whether this thread is looking at the practice copy."""
+    if flag is not None:
+        _thread.practice = bool(flag)
+    return bool(getattr(_thread, "practice", False))
+
+
 def connect(real=False):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(MATERIAL_DIR, exist_ok=True)
     os.makedirs(MUSIC_DIR, exist_ok=True)
-    path = DEMO_PATH if (demo_on() and not real) else DB_PATH
+    if real:
+        path = DB_PATH
+    elif practice_on():
+        path = PRACTICE_PATH
+    else:
+        path = DEMO_PATH if demo_on() else DB_PATH
     db = sqlite3.connect(path, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
@@ -3458,6 +3475,173 @@ def demo_reset():
         except FileNotFoundError:
             pass
     return demo_ready()
+
+
+# The practice student's Telegram "chat": no such chat exists, and nothing
+# is sent while the practice copy is open - the bot only notes what it
+# would have said, so the teacher can read it beside the page.
+PRACTICE_CHAT = -1
+PRACTICE_NAME = "Practice student"
+
+
+def _drop_file_set(path):
+    for ext in ("", "-wal", "-shm"):
+        try:
+            os.remove(path + ext)
+        except FileNotFoundError:
+            pass
+
+
+def practice_start(group_id):
+    """Copy today's site and put a new student into class `group_id` of the
+    copy. Returns the student's link token, or None when the disk has no
+    room for a second copy of the database.
+
+    A copy rather than a student in the real file: whatever the practice
+    student does - a checked part, a place in the league, a message to the
+    teacher - happens to the copy, and nobody real ever sees it.
+    """
+    practice_end()
+    free, _total = disk_room()
+    size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    if free is not None and free < 2 * size + 100 * 1048576:
+        return None
+    tmp = PRACTICE_PATH + ".building"
+    _drop_file_set(tmp)
+    real = connect(real=True)
+    copy = sqlite3.connect(tmp, timeout=30)
+    try:
+        real.backup(copy)            # a consistent copy, even while the bot writes
+    finally:
+        real.close()
+    try:
+        copy.row_factory = sqlite3.Row
+        copy.execute("PRAGMA journal_mode=DELETE")    # one file, nothing beside it to move
+        token = "try-" + secrets.token_urlsafe(16)
+        sid = copy.execute(
+            "INSERT INTO students (telegram_id, name, group_id, lang, active, created_at, token)"
+            " VALUES (?,?,?,?,1,?,?)",
+            (PRACTICE_CHAT, PRACTICE_NAME, int(group_id), "en", iso(now()), token)).lastrowid
+        copy.execute("CREATE TABLE IF NOT EXISTS practice_heard ("
+                     " id INTEGER PRIMARY KEY, at TEXT NOT NULL, chat_id TEXT, text TEXT)")
+        meta_set(copy, "practice_student", str(sid))
+        meta_set(copy, "practice_token", token)
+        meta_set(copy, "practice_made", iso(now()))
+        copy.commit()
+    finally:
+        copy.close()
+    os.replace(tmp, PRACTICE_PATH)
+    return token
+
+
+def practice_info():
+    """What the practice copy holds, or None when there is none:
+    {token, student_id, group_id, group, level, made, bytes}."""
+    if not os.path.exists(PRACTICE_PATH):
+        return None
+    try:
+        db = sqlite3.connect(PRACTICE_PATH, timeout=30)
+        db.row_factory = sqlite3.Row
+        try:
+            token = meta_get(db, "practice_token")
+            sid = meta_get(db, "practice_student")
+            st = db.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone() if sid else None
+            if not token or not st:
+                return None
+            g = db.execute("SELECT name FROM groups WHERE id=?", (st["group_id"],)).fetchone()
+            return {"token": token, "student_id": st["id"], "group_id": st["group_id"],
+                    "group": g["name"] if g else "",
+                    "level": level_name(db, level_of(db, st["group_id"])) or "",
+                    "made": meta_get(db, "practice_made"),
+                    "bytes": os.path.getsize(PRACTICE_PATH)}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+
+
+def is_practice_token(token):
+    """Is this the practice student's link? Only then may a student page
+    read the practice copy - every other link reads the real file."""
+    info = practice_info() if token and token.startswith("try-") else None
+    return bool(info) and secrets.compare_digest(info["token"], token)
+
+
+def practice_end():
+    """Throw the practice copy away, with the photos its student sent."""
+    names = []
+    if os.path.exists(PRACTICE_PATH):
+        try:
+            db = sqlite3.connect(PRACTICE_PATH, timeout=30)
+            db.row_factory = sqlite3.Row
+            try:
+                sid = meta_get(db, "practice_student")
+                names = [r["filename"] for r in db.execute(
+                    "SELECT f.filename FROM files f JOIN submissions s ON s.id=f.submission_id"
+                    " WHERE s.student_id=?", (sid,))]
+                st = db.execute("SELECT photo FROM students WHERE id=?", (sid,)).fetchone()
+                if st and st["photo"]:
+                    names.append(st["photo"])
+            finally:
+                db.close()
+        except sqlite3.Error:
+            names = []
+    if names:
+        real = connect(real=True)
+        try:
+            # never a file the real site knows about, whatever the copy says
+            for name in names:
+                used = real.execute(
+                    "SELECT 1 FROM files WHERE filename=? UNION ALL"
+                    " SELECT 1 FROM students WHERE photo=?", (name, name)).fetchone()
+                if not used and name and os.path.basename(name) == name:
+                    try:
+                        os.remove(os.path.join(UPLOAD_DIR, name))
+                    except OSError:
+                        pass
+        finally:
+            real.close()
+    _drop_file_set(PRACTICE_PATH)
+
+
+def practice_telegram(method, params):
+    """What the bot does instead of calling Telegram while the practice copy
+    is open: a message is written down for the teacher to read, and nothing
+    leaves the server."""
+    if not method.startswith(("send", "copy", "forward")):
+        return {"ok": False, "description": "not in the practice copy"}
+    text = params.get("text") or params.get("caption") or ""
+    kind = {"sendPhoto": "a picture", "sendVoice": "a voice message",
+            "sendAudio": "a recording", "sendDocument": "a file"}.get(method)
+    if kind:
+        text = ("[%s] %s" % (kind, text)).strip()
+    db = connect()
+    try:
+        db.execute("INSERT INTO practice_heard (at, chat_id, text) VALUES (?,?,?)",
+                   (iso(now()), str(params.get("chat_id", "")), text))
+        db.commit()
+    finally:
+        db.close()
+    return {"ok": True, "result": {"message_id": 0}}
+
+
+def practice_heard(db):
+    """What the bot would have sent while the practice copy was open,
+    newest first, with who it was for."""
+    if not table_exists(db, "practice_heard"):
+        return []
+    teachers = {str(meta_get(db, "teacher_chat_id") or "")} | {
+        str(c) for c in json.loads(meta_get(db, "teachers", "[]") or "[]")}
+    names = {str(r["telegram_id"]): r["name"] for r in db.execute(
+        "SELECT telegram_id, name FROM students WHERE telegram_id IS NOT NULL")}
+    out = []
+    for r in db.execute("SELECT * FROM practice_heard ORDER BY id DESC LIMIT 30"):
+        chat = r["chat_id"] or ""
+        who = ("the practice student" if chat == str(PRACTICE_CHAT)
+               else "you, the teacher" if chat in teachers
+               else names.get(chat, "someone else"))
+        out.append({"at": r["at"], "to": who, "text": r["text"] or ""})
+    return out
 
 
 def vocab_stats(db, student_id):

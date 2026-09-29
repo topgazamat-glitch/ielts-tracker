@@ -2805,3 +2805,39 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
   .demobar { padding: var(--sp-2) var(--sp-4); }
   .demobar form:first-of-type { margin-left: 0; }
 }
+
+/* The teacher's practice strip, on the practice student's page only: what
+   this copy is, and the buttons that do the task on screen. */
+.trybar {
+  display: grid; gap: var(--sp-2);
+  margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4);
+  background: var(--gold-soft); color: var(--ink);
+  border: 1px solid var(--gold); border-radius: 12px; font-size: 14px;
+}
+.trybar .try-do { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.trybar form { margin: 0; }
+.trybar button, .trybar a.btn { min-height: 36px; padding: 6px 14px; font-size: 14px; }
+.try-heard summary { cursor: pointer; font-weight: 600; }
+.try-heard ol { margin: var(--sp-2) 0 0; padding-left: 20px; display: grid; gap: var(--sp-2); }
+.try-heard li { background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: 10px; padding: var(--sp-2) var(--sp-3); overflow-wrap: anywhere; }
+
+/* the teacher's page for it: a class to join, and every screen at once */
+.try-classes { display: grid; margin-top: var(--sp-3); }
+.try-class { display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+.try-class form, .try-now form { margin: 0; }
+.try-now .row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.try-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3);
+  margin-bottom: var(--sp-4); }
+.try-strip .btn { margin-left: auto; }
+.try-screens { display: grid; gap: var(--sp-5) var(--sp-4);
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.try-screen { margin: 0; }
+.try-screen figcaption { display: flex; justify-content: space-between; gap: var(--sp-2);
+  font-size: 13px; margin-bottom: var(--sp-2); }
+/* a phone of 390 x 812, drawn at 250 wide */
+.try-phone { width: 250px; height: 520px; overflow: hidden; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 18px; }
+.try-phone iframe { width: 390px; height: 812px; border: 0;
+  transform: scale(.641); transform-origin: 0 0; }

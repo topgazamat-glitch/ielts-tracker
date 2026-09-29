@@ -362,6 +362,8 @@ def t(lang, key, **kw):
 # ------------------------------------------------------------- telegram api
 
 def call(token, method, _retries=2, **params):
+    if core.practice_on():
+        return core.practice_telegram(method, params)      # never leaves the server
     data = urllib.parse.urlencode(
         {k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
          for k, v in params.items() if v is not None}
@@ -435,6 +437,8 @@ def send_voice(token, chat_id, path):
     ext = os.path.splitext(path)[1].lower()
     voice_ok = ext in (".ogg", ".oga", ".mp3", ".m4a")
     method, field = ("sendVoice", "voice") if voice_ok else ("sendDocument", "document")
+    if core.practice_on():
+        return core.practice_telegram(method, {"chat_id": chat_id})
     boundary = "----ta" + os.urandom(8).hex()
     with open(path, "rb") as fh:
         blob = fh.read()
@@ -479,6 +483,8 @@ def standing_sentence(lang, student_id):
 
 def send_photo(token, chat_id, png_bytes, caption=""):
     """Telegram needs multipart/form-data for uploads; built by hand here."""
+    if core.practice_on():
+        return core.practice_telegram("sendPhoto", {"chat_id": chat_id, "caption": caption})
     boundary = "----ta" + os.urandom(8).hex()
     parts = []
     for name, value in (("chat_id", str(chat_id)), ("caption", caption[:1000])):
@@ -567,6 +573,9 @@ def send_document(token, chat_id, path, filename, caption="", file_id=None, mime
     """
     method, field = ("sendAudio", "audio") if (mime or "").startswith("audio") \
         else ("sendDocument", "document")
+    if core.practice_on():
+        core.practice_telegram(method, {"chat_id": chat_id, "caption": caption or filename})
+        return file_id
     if file_id:
         res = call(token, method, chat_id=chat_id, caption=caption,
                    **{field: file_id, "chat_id": chat_id})

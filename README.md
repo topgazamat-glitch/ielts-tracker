@@ -94,6 +94,13 @@ writing paper.
   advances, `s` skips to the back of the queue. Tap feedback chips instead of typing.
   Saving pushes the score to the student in Telegram automatically.
 - **Overview** → who is at risk (two consecutive misses, or a falling trend).
+- **Students → As a student** → join a class as a practice student and go through
+  the student page. It is a copy of today's site (`/data/practice.db`) that only the
+  signed-in teacher's browser can open. Buttons at the top of the page answer a
+  handout part, finish a booklet, answer a test or mark the homework, so the next
+  screen is one tap away. "Every screen" shows all thirteen screens side by side.
+  The bot sends nothing from the copy. What it would have sent is listed on the
+  page instead.
 
 ## Design decisions worth keeping
 
