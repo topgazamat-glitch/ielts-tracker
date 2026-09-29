@@ -24,10 +24,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def opener():
+    """Signed in as the teacher. A push to main restarts the site for about a
+    minute, so a 502 is waited out rather than taken as an answer."""
     pw = json.load(open(os.path.join(ROOT, "config.json")))["teacher_password"]
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-    op.open(SITE + "/login", urllib.parse.urlencode({"password": pw}).encode(), timeout=30).read()
-    return op
+    for _try in range(30):
+        try:
+            op.open(SITE + "/login", urllib.parse.urlencode({"password": pw}).encode(), timeout=30).read()
+            return op
+        except urllib.error.HTTPError as e:
+            if e.code not in (502, 503):
+                raise
+            time.sleep(10)
+    sys.exit("the site has not come back after five minutes")
 
 
 def menu(op):
