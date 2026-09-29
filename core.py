@@ -5867,13 +5867,15 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice=""):
 
     booklet = None
     if level_id:
-        # the digital handout for these two lessons first - 4B & 4D, not 4A & 4C
-        letter = (pair or "A")[0].upper()
+        # the digital handout for these two lessons first - 4B & 4D, not 4A & 4C,
+        # and the Academic Skills + Reading Plus pack only when that is asked for
+        asrp = (pair or "").upper() == "ASRP"
+        like = "%ASRP%" if asrp else "%%%s%s%%" % (unit, (pair or "A")[0].upper())
         booklet = db.execute(
             "SELECT id, title FROM dtests WHERE level_id=? AND number=?"
             " AND layout IS NOT NULL ORDER BY IFNULL(kind,'test')='handout' DESC,"
-            " title LIKE ? DESC, published DESC, id DESC LIMIT 1",
-            (level_id, unit, "%%%s%s%%" % (unit, letter))).fetchone()
+            " title LIKE ? DESC, (title LIKE '%ASRP%')=? DESC, published DESC, id DESC LIMIT 1",
+            (level_id, unit, like, 1 if asrp else 0)).fetchone()
     out["items"].append({
         "kind": "booklet",
         "test_id": booklet["id"] if booklet else None,

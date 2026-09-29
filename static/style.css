@@ -2457,7 +2457,7 @@ main.portal:has(.booksheet.handout), main.portal:has(.hx-hero) { max-width: 980p
 .booklet .hx-body .hx-sub { padding-left: var(--sp-4); border-left: 2px solid var(--hx-line); }
 
 /* a rule and its name: DECIDE, OFFER, PROMISE... */
-.booklet .hx-rule { display: grid; grid-template-columns: 7.5em 1fr; gap: var(--sp-3);
+.booklet .hx-rule { display: grid; grid-template-columns: minmax(7.5em, max-content) 1fr; gap: var(--sp-3);
   align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--hx-line); margin: 0; }
 .booklet .hx-rule + p:not(.hx-rule) { margin-top: var(--sp-3); }
 .booklet .hx-tag { justify-self: start; padding: 3px 10px; border-radius: 999px; background: var(--hx-deep);
