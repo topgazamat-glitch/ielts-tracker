@@ -2939,6 +2939,8 @@ def handout_controls(layout, qs, given=None, marks=None):
                     state += " is-key"           # the one they should have tapped
                 chips += (f'<label class="bk-chip{state}"><input type="radio" '
                           f'name="q{q["id"]}" value="{E(value)}"{" checked" if on else ""}'
+                          # a partner's answer, tapped in class: it may stay empty at home
+                          f'{" data-optional" if kind in OPTIONAL_BOXES else ""}'
                           f'{" disabled" if lock else ""}><span>{E(label)}</span></label>')
             return f'<span class="bk-chips" data-q="{num}" role="radiogroup">{chips}</span>'
         if kind == "tick":

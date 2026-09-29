@@ -190,6 +190,12 @@ check("the list says it is finished", "Finished" in lst and "1 of 3 right" in ls
 print("\n5. A REBUILT HANDOUT KEEPS WHAT STUDENTS TYPED")
 check("a backtick is an apostrophe", core.answer_matches("won`t", "won't"))
 check("a comma needs no space after it", core.answer_matches("yes,let's", "Yes, let's"))
+_chip = '<p><input class="bk-blank" data-q="1" style="width:60px"></p>'
+_opts = [{"letter": "always", "text": ""}, {"letter": "never", "text": ""}]
+_q = {"id": 7, "num": 1, "control": "pair", "answer": None, "kind": "open"}
+check("chips for a partner's answer, tapped in class, may stay empty at home",
+      "data-optional" in server.handout_controls(_chip, [(_q, _opts)])[0]
+      and "data-optional" not in server.handout_controls(_chip, [(dict(_q, control=None), _opts)])[0])
 check("a dash on its own is an answer: no article",
       core.answer_matches("–", "–") and core.answer_matches("-", "the/–")
       and not core.answer_matches("–", "a") and not core.answer_matches("the", "–"))
