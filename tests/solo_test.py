@@ -148,7 +148,7 @@ print("   Farida is in another class and is not on 114's table")
 
 print("\n4. IT STAYS OUT OF THE LEAGUE")
 src = open(os.path.join(ROOT, "core.py")).read()
-league = src[src.index("def test_marks"):src.index("def test_marks") + 4000]
+league = src[src.index("def homework_marks"):src.index("def championship") + 4000]
 assert "solo_" not in league
 print("   the league's scoring never reads solo rounds")
 

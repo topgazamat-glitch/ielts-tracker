@@ -8598,22 +8598,15 @@ type, never a blank page.</p>{busy}</div>"""
 
     pub = ""
     if ready:
-        counts = t["in_league"] if "in_league" in t.keys() else 1
-        # a test marks itself, so a sat test is a piece of homework in the
-        # league - unless this is practice, and the teacher says otherwise
-        league = (f'<form method="post" action="/tests/{tid}/league"'
-                  f' style="display:inline">'
-                  f'<button class="ghost">'
-                  f'{"Leave out of the league" if counts else "Count in the league"}'
-                  f'</button></form>')
-        note = ('It counts towards the league: a sat test is worth up to '
-                f'{core.HOMEWORK_PER_SET:g} points, like a set of homework. '
-                'Only the first sitting counts.' if counts else
-                'It does not count towards the league.')
+        # only homework and the lesson count in the league: a test sat for
+        # practice earns nothing, and one set as homework counts as homework
+        note = ('Published, it is practice: students can sit it as often as they like and it '
+                'earns no league points. Set it as homework, with a deadline, and it counts like '
+                'any homework &mdash; the first sitting before the deadline, out of ten.')
         pub = (f'<form method="post" action="/tests/{tid}/publish"'
                f' style="display:inline">'
                f'<button>{"Unpublish" if t["published"] else "Publish to students"}'
-               f'</button></form> {league}'
+               f'</button></form>'
                f'<p class="sub gap-3" style="margin-bottom:0">{note}</p>')
     else:
         pub = ('<p class="sub">Set every answer before publishing.</p>')
@@ -8769,17 +8762,6 @@ def act_test_timing(req, db, tid):
     once = 1 if req["form"].get("once", ["0"])[0] == "1" else 0
     db.execute("UPDATE dtests SET minutes=?, strict=?, once=? WHERE id=?",
                (minutes, strict, once, tid))
-    db.commit()
-    return redirect(f"/tests/{tid}")
-
-
-def act_test_league(req, db, tid):
-    """In or out of the league, without touching whether students can see it."""
-    row = db.execute("SELECT in_league FROM dtests WHERE id=?", (tid,)).fetchone()
-    if not row:
-        return not_found()
-    db.execute("UPDATE dtests SET in_league=? WHERE id=?",
-               (0 if row["in_league"] else 1, tid))
     db.commit()
     return redirect(f"/tests/{tid}")
 
@@ -9826,7 +9808,6 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),
     ("POST", r"^/tests/(\d+)/carry$", act_test_carry),
     ("POST", r"^/tests/(\d+)/void$", act_test_void),
-    ("POST", r"^/tests/(\d+)/league$", act_test_league),
     ("POST", r"^/tests/(\d+)/timing$", act_test_timing),
     ("GET",  r"^/tests/(\d+)/writing$", view_test_writing),
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),

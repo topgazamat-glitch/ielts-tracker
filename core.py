@@ -4205,8 +4205,7 @@ def homework_marks(db, student, lo, hi, windows):
     # the homework was written
     was_set = db.execute(
         "SELECT id, due_at, test_id FROM assignments WHERE group_id=? AND published=1"
-        " AND in_league=1 AND (test_id IS NULL OR test_id IN"
-        " (SELECT id FROM dtests WHERE kind='handout'))"
+        " AND in_league=1"
         " AND created_at < ? AND (created_at >= ? OR (due_at IS NOT NULL AND due_at >= ?))"
         " ORDER BY due_at IS NULL, due_at",
         (student["group_id"], hi, lo, lo)).fetchall()
@@ -4220,6 +4219,31 @@ def homework_marks(db, student, lo, hi, windows):
             continue
         if due and paused_at(due, windows):
             continue                      # the league was off when this fell due
+        if a["test_id"] and not is_handout(db, a["test_id"]):
+            # a digital test set as homework is homework: its first sitting,
+            # out of ten, if it was finished by the deadline - averaged with
+            # the rest of the set. Not sat by then is a nought, like a missing
+            # piece; sat afterwards is late, and late is a nought too.
+            if not db.execute("SELECT 1 FROM dtests WHERE id=?", (a["test_id"],)).fetchone():
+                continue                  # the test was deleted: nothing to sit
+            key = due or "none"
+            sat = db.execute(
+                "SELECT score, total, finished_at FROM dattempts WHERE test_id=? AND student_id=?"
+                " AND finished_at IS NOT NULL ORDER BY finished_at LIMIT 1",
+                (a["test_id"], student["id"])).fetchone()
+            if not sat or not sat["total"]:
+                if due:
+                    scores.append(0.0)
+                    batches.setdefault(key, []).append(0.0)
+                    missing += 1
+                continue
+            if paused_at(sat["finished_at"], windows):
+                continue
+            mark = 0.0 if (due and sat["finished_at"] > due) else round(sat["score"] * 10.0 / sat["total"], 2)
+            late += 1 if (due and sat["finished_at"] > due) else 0
+            scores.append(mark)
+            batches.setdefault(key, []).append(mark)
+            continue
         if a["test_id"]:
             # a digital handout marks itself: half for the parts checked by the
             # deadline, half for the right answers - averaged with the rest of
@@ -4262,43 +4286,6 @@ def homework_marks(db, student, lo, hi, windows):
     return scores, late, missing, waiting, pending, batches
 
 
-def test_marks(db, student, lo, hi, windows):
-    """Digital tests sat this season, each one its own fixture.
-
-    A test is homework that marks itself, so it earns its points the same way
-    a marked set does: the score out of ten, worth up to three points, added to
-    the running total.
-
-    Only the *first* finished attempt counts. Students may sit a test again as
-    often as they like - that is what it is for - but if the best of nine tries
-    decided the table, the table would measure persistence at retaking rather
-    than what anyone knows, which is the fault that took the vocabulary streak
-    out of the scoring.
-
-    A test carries no deadline, so a student who never sat one is not given a
-    nought: in a table where points accumulate, the missed points are the loss.
-    """
-    level_id = level_of(db, student["group_id"])
-    if level_id is None:
-        return {}
-    rows = db.execute(
-        "SELECT a.test_id, a.score, a.total, a.finished_at"
-        "  FROM dattempts a JOIN dtests t ON t.id = a.test_id"
-        " WHERE a.student_id=? AND a.finished_at IS NOT NULL"
-        "   AND t.published=1 AND t.in_league=1 AND t.level_id=?"
-        "   AND a.finished_at >= ? AND a.finished_at < ?"
-        " ORDER BY a.finished_at",
-        (student["id"], level_id, lo, hi)).fetchall()
-    first = {}
-    for r in rows:
-        if r["test_id"] in first or not r["total"]:
-            continue                      # a later retake, or a test with no questions
-        if paused_at(r["finished_at"], windows):
-            continue                      # the league was off when they sat it
-        first[r["test_id"]] = [round(r["score"] * 10.0 / r["total"], 2)]
-    return first
-
-
 def championship(db, cfg=None):
     """Everyone's standing for the running season, best first."""
     cfg = cfg or load_config()
@@ -4313,14 +4300,11 @@ def championship(db, cfg=None):
     for st in db.execute("SELECT * FROM students WHERE active=1 ORDER BY name"):
         hi, lessons, closed = season_window(db, st["id"], lo, cfg)
 
+        # only homework and the lesson count. A test counts when it was set
+        # as homework, inside homework_marks; one sat for practice earns
+        # nothing, however well it went - it is practice.
         counted, late, missing, waiting, pending, batches = homework_marks(
             db, st, lo, hi, windows)
-        # a test that marks itself is a piece of homework like any other, and
-        # is keyed so it can never collide with a set of handed-in work
-        sat = test_marks(db, st, lo, hi, windows)
-        for test_id, marks in sat.items():
-            batches["test:%d" % test_id] = marks
-            counted.extend(marks)
         graded = len(counted)
         parts = {}
         # each set of homework is its own fixture: the average of the marks in

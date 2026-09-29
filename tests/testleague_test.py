@@ -1,4 +1,10 @@
-"""A test that marks itself earns league points, once.
+"""Tests and the league: practice earns nothing; a test set as homework is homework.
+
+Only homework and the lesson count. A test a student sits on their own -
+a mock, a practice paper - earns no points however well it goes. A test
+the teacher sets as homework, with a deadline, counts like any piece of
+homework: its first sitting before the deadline, out of ten, averaged with
+the rest of that set.
 
 Run me with:  python3 run_tests.py testleague
 """
@@ -28,123 +34,103 @@ def student(name):
                       (name, g, core.iso(core.now()))).lastrowid
 
 
-def a_test(title, marks=10, published=1, in_league=1, level=None):
+def a_test(title, marks=10, published=1):
     data = {"level": "Intermediate", "number": 1, "title": title,
             "passages": {}, "questions": [
                 {"num": i + 1, "prompt": "q%d" % i, "answer": "yes",
                  "kind": "typed", "options": []} for i in range(marks)]}
     tid = core.load_test(db, data)
-    db.execute("UPDATE dtests SET published=?, in_league=?, level_id=? WHERE id=?",
-               (published, in_league, level if level is not None else lvl, tid))
+    db.execute("UPDATE dtests SET published=?, level_id=? WHERE id=?", (published, lvl, tid))
     return tid
 
 
-def sit(sid, tid, right, when=None):
-    """Sit a test getting `right` of its questions correct."""
+def set_as_homework(tid, due, title="Test", also=None):
+    """Set a test as homework, due at `due`; `also` is a photo item in the same set."""
+    made = core.iso(start + timedelta(days=1))
+    db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at, test_id)"
+               " VALUES (?,?,?,1,?,?)", (g, title, made, core.iso(due), tid))
+    if also:
+        return db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at)"
+                          " VALUES (?,?,?,1,?)", (g, also, made, core.iso(due))).lastrowid
+
+
+def sit(sid, tid, right, when):
+    """Sit a test getting `right` of its questions correct, finished at `when`."""
     qs = core.test_questions(db, tid)
     att = core.start_attempt(db, tid, sid)
     core.submit_attempt(db, att, {q["id"]: ("yes" if i < right else "no")
                                   for i, (q, _o) in enumerate(qs)})
-    if when:
-        db.execute("UPDATE dattempts SET finished_at=? WHERE id=?",
-                   (core.iso(when), att))
+    db.execute("UPDATE dattempts SET finished_at=? WHERE id=?", (core.iso(when), att))
     db.commit()
     return att
 
 
 def points(name):
     rows = {r["student"]["name"]: r for r in core.championship(db)["rows"]}
-    return rows[name]["points"]["homework"]
+    return rows[name]["points"].get("homework", 0.0)
 
 
-print("1. A SAT TEST IS WORTH POINTS")
-t1 = a_test("Unit 1", marks=10)
+print("1. A TEST SAT FOR PRACTICE EARNS NOTHING")
+mock = a_test("A2 Mock 4", marks=10)
 a = student("Ali")
-sit(a, t1, 10, start + timedelta(days=1))
-db.commit()
-print("   10 of 10 on one test -> homework %s" % points("Ali"))
-assert points("Ali") == core.HOMEWORK_PER_SET, points("Ali")
+for day in (1, 2, 3):
+    sit(a, mock, 10, start + timedelta(days=day))
+print("   three perfect sittings of a published mock -> homework %s" % points("Ali"))
+assert points("Ali") == 0.0
 
+print("\n2. A TEST SET AS HOMEWORK IS HOMEWORK")
+unit = a_test("Unit 1 test", marks=10)
+due = start + timedelta(days=5)
+wb = set_as_homework(unit, due, "Unit 1 test", also="Workbook unit 1")
 b = student("Bek")
-sit(b, t1, 5, start + timedelta(days=1))
+sit(b, unit, 6, due - timedelta(days=1))
+db.execute("INSERT INTO submissions (student_id, assignment_id, status, score, created_at, kind)"
+           " VALUES (?,?,'graded',10,?,'photo')", (b, wb, core.iso(due - timedelta(days=1))))
 db.commit()
-print("    5 of 10 on one test -> homework %s" % points("Bek"))
-assert points("Bek") == round(core.HOMEWORK_PER_SET / 2, 2)
+print("   test 6/10, workbook 10/10 -> average 8 -> homework %s" % points("Bek"))
+assert points("Bek") == round(8 / 10 * core.HOMEWORK_PER_SET, 2)
 
-print("\n2. TESTS ADD UP LIKE FIXTURES")
-t2 = a_test("Unit 2", marks=10)
-sit(a, t2, 10, start + timedelta(days=2))
-db.commit()
-print("   a second perfect test -> homework %s" % points("Ali"))
-assert points("Ali") == core.HOMEWORK_PER_SET * 2
-
-print("\n3. RETAKING DOES NOT RAISE THE SCORE")
-before = points("Bek")
-sit(b, t1, 10, start + timedelta(days=3))       # a perfect retake
-db.commit()
-print("   Bek retakes 5/10 and gets 10/10 -> homework %s (was %s)"
-      % (points("Bek"), before))
-assert points("Bek") == before, "only the first sitting counts"
-
-print("\n4. A TEST LEFT OUT OF THE LEAGUE SCORES NOTHING")
-t3 = a_test("Practice only", marks=10, in_league=0)
+print("\n3. ONLY THE FIRST SITTING BEFORE THE DEADLINE")
+sit(b, unit, 10, due - timedelta(hours=12))          # a perfect retake
+print("   a perfect retake changes nothing -> homework %s" % points("Bek"))
+assert points("Bek") == round(8 / 10 * core.HOMEWORK_PER_SET, 2)
 c = student("Dil")
-sit(c, t3, 10, start + timedelta(days=2))
-db.commit()
-print("   10 of 10 on an excluded test -> homework %s" % points("Dil"))
+sit(c, unit, 10, due + timedelta(hours=2))
+print("   sat perfectly two hours late -> homework %s" % points("Dil"))
 assert points("Dil") == 0.0
+rows = {r["student"]["name"]: r for r in core.championship(db)["rows"]}
+assert rows["Dil"]["late"] >= 1
 
-print("\n5. AN UNPUBLISHED TEST SCORES NOTHING")
-t4 = a_test("Draft", marks=10, published=0)
-d = student("Eva")
-sit(d, t4, 10, start + timedelta(days=2))
+print("\n4. NOT SAT BY THE DEADLINE IS A NOUGHT, LIKE MISSING HOMEWORK")
+e = student("Eva")
 db.commit()
-print("   10 of 10 on a draft -> homework %s" % points("Eva"))
-assert points("Eva") == 0.0
+rows = {r["student"]["name"]: r for r in core.championship(db)["rows"]}
+print("   sat nothing -> homework %s, not handed %s" % (points("Eva"), rows["Eva"]["not_handed"]))
+assert points("Eva") == 0.0 and rows["Eva"]["not_handed"] == 2
 
-print("\n6. NOT SITTING A TEST IS NOT A NOUGHT, IT IS NO POINTS")
-e = student("Fara")
+print("\n5. BEFORE ITS DEADLINE IT IS STILL TO COME")
+soon = a_test("Unit 2 test", marks=10)
+set_as_homework(soon, core.now() + timedelta(days=2), "Unit 2 test")
 db.commit()
-print("   sat nothing -> homework %s" % points("Fara"))
-assert points("Fara") == 0.0
-# and it does not drag down someone who did sit one
-sit(e, t1, 10, start + timedelta(days=4))
-db.commit()
-print("   then sits one perfectly -> homework %s" % points("Fara"))
-assert points("Fara") == core.HOMEWORK_PER_SET
+rows = {r["student"]["name"]: r for r in core.championship(db)["rows"]}
+print("   pending for Eva:", rows["Eva"]["pending"])
+assert rows["Eva"]["pending"] == 1
 
-print("\n7. A PAUSED STRETCH DOES NOT COUNT")
-core.pause_season(db, start + timedelta(days=6))
-core.resume_season(db, start + timedelta(days=8))
-t5 = a_test("Unit 3", marks=10)
-sit(a, t5, 10, start + timedelta(days=7))
-db.commit()
-print("   a perfect test sat while paused -> homework %s" % points("Ali"))
-assert points("Ali") == core.HOMEWORK_PER_SET * 2, "the pause should swallow it"
-
-
-
-print("\n8. A TRIAL SITTING CAN BE RUBBED OUT")
-gid = student("Gul")
-att = sit(gid, t1, 10, start + timedelta(days=5))  # before the pause
-db.commit()
+print("\n6. A TRIAL SITTING CAN BE RUBBED OUT")
+gul = student("Gul")
+att = sit(gul, unit, 10, due - timedelta(days=2))
 print("   sat it perfectly -> homework %s" % points("Gul"))
-assert points("Gul") == core.HOMEWORK_PER_SET
-left = db.execute("SELECT COUNT(*) c FROM dresponses WHERE attempt_id=?",
-                  (att,)).fetchone()["c"]
+assert points("Gul") == round(5 / 10 * core.HOMEWORK_PER_SET, 2)     # 10 and a missing 0
 core.drop_attempt(db, att)
-after = db.execute("SELECT COUNT(*) c FROM dresponses WHERE attempt_id=?",
-                   (att,)).fetchone()["c"]
 db.commit()
-print("   removed: %d answers before, %d after -> homework %s"
-      % (left, after, points("Gul")))
-assert after == 0, "the answers go with the sitting"
-assert points("Gul") == 0.0, "the league forgets it"
+print("   removed -> homework %s" % points("Gul"))
+assert points("Gul") == 0.0
 
-# and the first-sitting rule now applies to whatever they do next
-sit(gid, t1, 5, start + timedelta(days=9))   # after the pause of step 7
-db.commit()
-print("   sits it again, 5 of 10 -> homework %s" % points("Gul"))
-assert points("Gul") == round(core.HOMEWORK_PER_SET / 2, 2)
+print("\n7. THE TEST'S PAGE SAYS SO")
+import server
+src = open(os.path.join(ROOT, "server.py")).read()
+assert "Count in the league" not in src.split("def view_test(")[1].split("def view_test_writing")[0]
+assert "earns no league points" in src
+print("   no switch to put practice in the league; the page says practice earns nothing")
 
 print("\nALL GOOD")

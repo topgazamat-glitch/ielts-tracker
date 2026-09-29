@@ -72,12 +72,18 @@ after = core.set_progress(db, sid, items)
 print("   after sitting it:  %d of %d" % (after["done"], after["total"]))
 assert after["done"] == 1, "the booklet counts as handed in"
 
-print("\n4. THE BOOKLET IS NOT SCORED TWICE")
+print("\n4. THE BOOKLET IS SCORED ONCE, AS PART OF ITS HOMEWORK")
 core.start_season(db, core.now() - timedelta(days=2))
 row = {r["student"]["name"]: r for r in core.championship(db)["rows"]}["Aziza"]
-print("   homework points:", row["points"]["homework"])
-# the sat test scores; the assignment pointing at it must not also count as
-# a missed piece of homework
-assert row["points"]["homework"] == core.HOMEWORK_PER_SET, row["points"]
+print("   before the deadline: homework %s, still to come %s" % (row["points"]["homework"], row["pending"]))
+assert row["points"]["homework"] == 0.0 and row["pending"] == 3
+# the deadline passes, an hour after she sat it: the set is one fixture -
+# the booklet 10/10, the workbook and the writing not handed in
+db.execute("UPDATE dattempts SET finished_at=? WHERE id=?", (core.iso(core.now() - timedelta(hours=2)), att))
+db.execute("UPDATE assignments SET due_at=? WHERE group_id=?", (core.iso(core.now() - timedelta(hours=1)), g))
+db.commit()
+row = {r["student"]["name"]: r for r in core.championship(db)["rows"]}["Aziza"]
+print("   after it: homework %s (10, 0, 0 averaged)" % row["points"]["homework"])
+assert row["points"]["homework"] == round(10 / 3 / 10 * core.HOMEWORK_PER_SET, 2), row["points"]
 
 print("\nALL GOOD")
