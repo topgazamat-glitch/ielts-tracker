@@ -578,17 +578,20 @@ def note_channel(db, update):
     core.channel_seen(db, chat["id"], chat.get("title") or "", chat.get("username") or "", admin)
 
 
-def send_album(token, chat_id, pngs, caption=""):
-    """Pictures as one post - an album - with the caption under the first.
-    One picture goes as a plain photo, which Telegram shows larger."""
+def send_album(token, chat_id, pngs, caption="", captions=None):
+    """Pictures as one post - an album. `captions` gives each picture its own
+    (a student's name under their report, so a parent can search for it);
+    `caption` alone goes under the first. One picture goes as a plain photo."""
+    captions = list(captions or [caption] + [""] * (len(pngs) - 1))
     if len(pngs) == 1:
-        return send_photo(token, chat_id, pngs[0], caption)
+        return send_photo(token, chat_id, pngs[0], captions[0])
     if core.practice_on():
-        return core.practice_telegram("sendPhoto", {"chat_id": chat_id, "caption": caption})
+        return core.practice_telegram("sendPhoto", {"chat_id": chat_id, "caption": captions[0]})
     boundary = "----ta" + os.urandom(8).hex()
     media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(pngs))]
-    if caption:
-        media[0]["caption"] = caption[:1000]
+    for m, text in zip(media, captions):
+        if text:
+            m["caption"] = text[:1000]
     parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"'
              f"\r\n\r\n{chat_id}\r\n".encode(),
              f'--{boundary}\r\nContent-Disposition: form-data; name="media"'

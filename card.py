@@ -1,16 +1,19 @@
-"""The pictures in the parents' channel, drawn with real letters.
+"""The pictures in the parents' channel, drawn with real letters, big enough
+to read on a phone.
 
 png.py draws charts in block capitals, which cannot write Азиза or oʻrtacha.
 This draws with Roboto, letter by letter, from fonts/card.atlas (made once by
 make_font.py): each letter is a small map of how dark its pixels are, laid
 onto the picture in the colour asked for. Shapes are smoothed at the edges the
-same way, so a bar or a badge does not look cut out with scissors.
+same way, so a bar or a dot does not look cut out with scissors.
 
-Two pictures, both 1080 wide - the width a phone shows without shrinking:
-  class_table  the class, one row a student: place, homework, mark, lesson,
-               words, and the league points as a bar
-  trend        the last weeks, a row each: how much homework was done, the
-               average mark and the lesson marks, as bars with the figure
+The pictures are 1080 wide and a phone shows them about 390 wide, so nothing
+is written smaller than 28 - about 10 on the phone.
+
+  league   a class's league: each student's points, and what they gained
+  student  one student's week: place, points, the marks from each lesson with
+           the teacher's note, homework, points week by week, and a few
+           sentences in Uzbek and Russian
 """
 import base64
 import json
@@ -24,21 +27,28 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 ATLAS_PATH = os.path.join(ROOT, "fonts", "card.atlas")
 
 W = 1080
+M = 48                      # the picture's margin
+PAD = 40                    # inside a white panel
 BG = (244, 243, 249)
 SURFACE = (255, 255, 255)
 INK = (28, 15, 34)
 INK2 = (92, 60, 101)
-INK3 = (133, 122, 140)
+INK3 = (128, 117, 136)
 LINE = (230, 224, 235)
-TRACK = (238, 232, 242)
+TRACK = (236, 230, 241)
 BRAND = (112, 21, 137)
 DEEP = (50, 10, 62)
-LIFT = (144, 73, 163)
-SOFT = (238, 227, 241)
-OK = (3, 150, 80)
-RED = (214, 45, 52)
+PALE = (214, 190, 224)
+SOFT = (246, 240, 249)
+OK = (3, 145, 78)
+RED = (212, 43, 50)
 WHITE = (255, 255, 255)
-MEDALS = {1: (246, 190, 30), 2: (184, 184, 198), 3: (212, 141, 76)}
+ON_BRAND = (236, 220, 242)
+MEDALS = {1: (240, 180, 20), 2: (170, 170, 186), 3: (205, 132, 70)}
+# the three lesson marks, each in its own colour, named above its column
+CRITERIA = [("Vaqtida kelish", "Пунктуальность", (12, 128, 214)),
+            ("Xulq", "Поведение", BRAND),
+            ("Faollik", "Активность", OK)]
 
 _ATLAS = None
 
@@ -52,9 +62,7 @@ def atlas():
 
 def _glyph(font, ch):
     f = atlas()[font]
-    g = f["glyphs"].get(ch)
-    if g is None:
-        g = f["glyphs"].get("?")
+    g = f["glyphs"].get(ch) or f["glyphs"].get("?") or f["glyphs"][" "]
     if isinstance(g[5], str):
         g[5] = base64.b64decode(g[5]) if g[5] else b""
     return g
@@ -120,17 +128,33 @@ class Card(png.Canvas):
     def disc(self, cx, cy, r, c):
         for yy in range(int(cy - r - 1), int(cy + r + 2)):
             for xx in range(int(cx - r - 1), int(cx + r + 2)):
-                d = math.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
-                cov = r + 0.5 - d
+                cov = r + 0.5 - math.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
                 if cov > 0:
                     self.blend(xx, yy, c, int(255 * min(1.0, cov)))
+
+    def ring(self, cx, cy, r, thick, share, c, track):
+        """A doughnut: `share` of it (from the top, clockwise) in c."""
+        inner = r - thick
+        for yy in range(int(cy - r - 1), int(cy + r + 2)):
+            for xx in range(int(cx - r - 1), int(cx + r + 2)):
+                dx, dy = xx + 0.5 - cx, yy + 0.5 - cy
+                d = math.hypot(dx, dy)
+                cov = min(r + 0.5 - d, d - inner + 0.5, 1.0)
+                if cov <= 0:
+                    continue
+                turn = (math.atan2(dx, -dy) / (2 * math.pi)) % 1.0
+                self.blend(xx, yy, c if turn <= share else track, int(255 * cov))
+
+    def crop(self, h):
+        self.buf = self.buf[:h * self.w * 3]
+        self.h = h
 
     # -- letters
 
     def measure(self, s, font):
         return sum(_glyph(font, ch)[0] for ch in s)
 
-    def line_height(self, font):
+    def line_h(self, font):
         f = atlas()[font]
         return f["ascent"] + f["descent"]
 
@@ -166,6 +190,21 @@ class Card(png.Canvas):
             s = s[:-1]
         return s.rstrip() + "…"
 
+    def wrap(self, text, font, width):
+        """The lines `text` breaks into at `width`."""
+        lines = []
+        for para in (text or "").split("\n"):
+            line = ""
+            for word in para.split():
+                trial = (line + " " + word).strip()
+                if self.measure(trial, font) <= width or not line:
+                    line = trial
+                else:
+                    lines.append(line)
+                    line = word
+            lines.append(line)
+        return lines
+
 
 def _n(x):
     if x is None:
@@ -173,194 +212,289 @@ def _n(x):
     return ("%g" % round(x, 1)).replace(".", ",")
 
 
-def _header(c, title, what, days, level, h):
-    c.gradient(0, 0, W, h, DEEP, BRAND)
-    c.write(48, 34, title, "b44", WHITE)
-    c.write(48, 34 + 62, what, "m22", (236, 220, 242))
-    c.write_right(W - 48, 38, days, "b30", WHITE)
-    if level:
-        c.write_right(W - 48, 38 + 46, level, "r18", (222, 200, 230))
+def _days(p):
+    return "%s–%s" % (p["first"].strftime("%d.%m"), p["last"].strftime("%d.%m"))
 
 
-def _footer(c, y, left):
-    c.write(48, y, left, "r18", INK3)
-    c.write_right(W - 48, y, "OlimovAzamat", "m18", INK2)
+def _panel_title(c, y, uz, ru):
+    """A panel's heading, Uzbek then Russian on one line. Returns the y below."""
+    end = c.write(M + PAD, y, uz, "b40", INK)
+    c.write(end + 16, y + 8, ru, "r32", INK3)
+    return y + 64
 
 
-# ------------------------------------------------ the class, a row a student
+# ------------------------------------------------ the class's league
 
-COLS = [  # key, centre x, uzbek, russian
-    ("homework", 500, "Vazifa", "Д/з"),
-    ("average", 610, "Baho", "Оценка"),
-    ("conduct", 714, "Dars", "Урок"),
-    ("extra", 812, "", ""),
-]
-ROW_H = 62
-
-# the fourth figure: words learnt where the class does vocabulary, else the
-# handout parts checked, else the lessons - never a column of dashes
-EXTRAS = [("words", "Soʻz", "Слова", "Yangi soʻzlar", "Новые слова"),
-          ("parts", "Qism", "Части", "Qoʻllanma qismlari", "Части буклетов"),
-          ("lessons", "Dars soni", "Уроков", "Darslar", "Уроков")]
+LEAGUE_ROW = 112
 
 
-def extra_of(rep):
-    for key, *labels in EXTRAS:
-        if any(r[key] for r in rep["rows"]):
-            return (key, *labels)
-    return EXTRAS[-1]
-
-
-def class_table(rep, rows=None):
-    """The class table as a PNG. `rows` narrows it to a slice of the class,
-    for a class too long for one picture."""
+def league(rep, rows=None, first=0):
+    """A class's league as a PNG: each student's points and the week's gain.
+    `rows`/`first` draw a slice of a long class, numbered on from `first`."""
     p = rep["period"]
     rows = rep["rows"] if rows is None else rows
-    t, b = rep["totals"], rep["before"]
-    head_h, tiles_y, tile_h = 176, 204, 136
-    table_y = tiles_y + tile_h + 24
-    body_y = table_y + 84
-    h = body_y + max(1, len(rows)) * ROW_H + 24 + 70
-    c = Card(W, h, BG)
     g = rep["group"]["name"]
-    _header(c, "%s-guruh · Группа %s" % (g, g),
-            "Oylik hisobot · Месячный отчёт" if p["monthly"] else "Haftalik hisobot · Недельный отчёт",
-            "%s–%s" % (p["first"].strftime("%d.%m"), p["last"].strftime("%d.%m")),
-            rep["level"], head_h)
-
-    # four figures for the whole class, each against the stretch before
-    def tile(i, value, change, uz, ru):
-        tw = (W - 96 - 3 * 16) / 4
-        x = 48 + i * (tw + 16)
-        c.round_rect(x, tiles_y, tw, tile_h, 18, SURFACE)
-        end = c.write(x + 22, tiles_y + 16, value, "b44", INK)
-        if change:
-            text, col = change
-            c.write(end + 10, tiles_y + 36, text, "m18", col)
-        c.write(x + 22, tiles_y + 80, uz, "m18", INK2)
-        c.write(x + 22, tiles_y + 104, ru, "r18", INK3)
-
-    def change(now, was, unit=""):
-        if now is None or was is None:
-            return None
-        d = round(now - was, 1)
-        if abs(d) < 0.05:
-            return ("=", INK3)
-        return (("▲ " if d > 0 else "▼ ") + _n(abs(d)) + unit, OK if d > 0 else RED)
-
-    tile(0, "%d%%" % t["done_pct"] if t["done_pct"] is not None else "–",
-         change(t["done_pct"], b["done_pct"]), "Vazifa bajarildi", "Д/з выполнено")
-    tile(1, _n(t["average"]), change(t["average"], b["average"]), "Oʻrtacha baho", "Средняя оценка")
-    tile(2, "%d%%" % t["conduct"] if t["conduct"] is not None else "–",
-         change(t["conduct"], b["conduct"]), "Darsdagi faollik", "Работа на уроке")
-    ex_key, ex_uz, ex_ru, ex_tile_uz, ex_tile_ru = extra_of(rep)
-    total = (t["lessons"] if ex_key == "lessons"
-             else sum(r[ex_key] for r in rep["rows"]))
-    tile(3, str(total), None, ex_tile_uz, ex_tile_ru)
-
-    # the table
-    c.round_rect(48, table_y, W - 96, h - table_y - 70, 20, SURFACE)
-    hy = table_y + 22
-    c.write(76, hy, "Oʻrin · Ism", "m18", INK2)
-    c.write(76, hy + 24, "Место · Имя", "r18", INK3)
-    for key, cx, uz, ru in COLS:
-        if key == "extra":
-            uz, ru = ex_uz, ex_ru
-        c.write_center(cx, hy, uz, "m18", INK2)
-        c.write_center(cx, hy + 24, ru, "r18", INK3)
-    pts_x, pts_w = 876, W - 48 - 28 - 876
-    c.write(pts_x, hy, "Liga ballari" if rep["league"] else "Ball", "m18", INK2)
-    c.write(pts_x, hy + 24, "Очки лиги" if rep["league"] else "Очки", "r18", INK3)
-    c.fill(72, body_y - 10, W - 144, 2, LINE)
-
-    top = max([r["season"] if rep["league"] else r["gained"] for r in rep["rows"]] + [0]) or 1
-    for i, r in enumerate(rows):
-        y = body_y + i * ROW_H
-        if i:
-            c.fill(72, y - 1, W - 144, 1, LINE)
-        mid = y + ROW_H // 2 - 4
-        rank = r["rank"]
-        if rank:
-            c.disc(96, mid, 19, MEDALS.get(rank, SOFT))
-            c.write_center(96, mid - 14, str(rank), "b22",
-                           WHITE if rank in MEDALS else INK2)
-        else:
-            c.write_center(96, mid - 14, "–", "b22", INK3)
-        name = c.fit(r["student"]["name"], "m22", 300)
-        c.write(132, mid - 15, name, "m22", INK)
-
-        cells = {
-            "homework": ("%d/%d" % (r["done"], r["set"]) if r["set"] else "–",
-                         RED if r["missing"] else (OK if r["set"] else INK3)),
-            "average": (_n(r["average"]), INK if r["average"] is not None else INK3),
-            "conduct": ("%d%%" % r["conduct"] if r["conduct"] is not None else "–",
-                        INK if r["conduct"] is not None else INK3),
-            "extra": (str(r[ex_key]) if r[ex_key] else "–", INK if r[ex_key] else INK3),
-        }
-        for key, cx, _uz, _ru in COLS:
-            text, col = cells[key]
-            c.write_center(cx, mid - 15, text, "r22" if key != "homework" else "m22", col)
-
-        value = r["season"] if rep["league"] else r["gained"]
-        if value is not None:
-            end = c.write(pts_x, mid - 22, _n(value), "b22", INK)
-            if rep["league"] and r["gained"]:
-                c.write(end + 8, mid - 18, "+" + _n(r["gained"]), "m18", OK)
-            c.round_rect(pts_x, mid + 10, pts_w, 10, 5, TRACK)
-            fill = int(pts_w * max(0.0, value) / top)
-            if fill >= 10:
-                c.round_rect(pts_x, mid + 10, fill, 10, 5, BRAND)
-        else:
-            c.write(pts_x, mid - 15, "–", "r22", INK3)
-
-    _footer(c, h - 52, ("Oʻrin — liga boʻyicha, yashil + shu davrda olingan ball · "
-                        "Место — по лиге, + очки за период") if rep["league"] else
-            "Oʻrin — shu davrda olingan ball boʻyicha · Место — по очкам за период")
-    return c.to_png()
-
-
-# ------------------------------------------------ the last weeks
-
-def trend(rep):
-    weeks = rep["weeks"]
-    sections = [("done_pct", "Vazifa bajarildi", "Д/з выполнено", 100, "%d%%", BRAND),
-                ("average", "Oʻrtacha baho", "Средняя оценка", 10, None, LIFT),
-                ("conduct", "Darsdagi faollik", "Работа на уроке", 100, "%d%%", OK)]
-    sections = [s for s in sections if any(w[s[0]] is not None for w in weeks)]
-    head_h = 150
-    row_h, sec_head = 52, 76
-    h = head_h + 28 + sum(sec_head + len(weeks) * row_h + 28 for _s in sections) + 60
-    h = max(h, head_h + 200)
+    head_h = 236
+    table_y = head_h + 28
+    body_y = table_y + PAD + 76
+    h = body_y + max(1, len(rows)) * LEAGUE_ROW + 24 + 96
     c = Card(W, h, BG)
-    g = rep["group"]["name"]
     c.gradient(0, 0, W, head_h, DEEP, BRAND)
-    c.write(48, 30, "%s-guruh · Группа %s" % (g, g), "b44", WHITE)
-    c.write(48, 92, "Haftalar boʻyicha · По неделям", "m22", (236, 220, 242))
-    p = rep["period"]
-    y = head_h + 28
-    if not sections:
-        c.write(48, y + 20, "Bu haftalarda hali baho yoʻq · Оценок пока нет", "r26", INK3)
-    for key, uz, ru, most, fmt, col in sections:
-        c.round_rect(48, y, W - 96, sec_head + len(weeks) * row_h + 8, 20, SURFACE)
-        end = c.write(76, y + 22, uz, "b30", INK)
-        c.write(end + 14, y + 30, ru, "r22", INK3)
-        yy = y + sec_head
-        for w in weeks:
-            now = p["first"] <= w["first"] <= p["last"] or p["first"] <= w["last"] <= p["last"]
-            label = "%s–%s" % (w["first"].strftime("%d.%m"), w["last"].strftime("%d.%m"))
-            c.write(76, yy + 8, label, "m22" if now else "r22", INK if now else INK2)
-            bx, bw = 250, W - 48 - 28 - 250 - 110
-            c.round_rect(bx, yy + 12, bw, 22, 11, TRACK)
-            v = w[key]
-            if v is not None:
-                fill = int(bw * max(0.0, min(1.0, v / float(most))))
-                if fill >= 22:
-                    c.round_rect(bx, yy + 12, fill, 22, 11, col)
-                c.write_right(W - 76, yy + 4, fmt % v if fmt else _n(v), "b30", INK)
-            else:
-                c.write_right(W - 76, yy + 8, "–", "r22", INK3)
-            yy += row_h
-        y += sec_head + len(weeks) * row_h + 8 + 20
-    _footer(c, h - 48, "Oy haftalari · Недели месяца" if p["monthly"] else
-            "Qalin — shu hafta · Жирным — эта неделя")
+    c.write(M + 8, 44, "%s-guruh · Liga" % g, "b56", WHITE)
+    c.write(M + 8, 124, "Группа %s · Лига" % g, "m32", ON_BRAND)
+    c.write_right(W - M - 8, 52, _days(p), "b40", WHITE)
+    c.write_right(W - M - 8, 112, "Oylik · Месяц" if p["monthly"] else "Hafta · Неделя",
+                  "r28", ON_BRAND)
+
+    c.round_rect(M, table_y, W - 2 * M, h - table_y - 96, 32, SURFACE)
+    league_on = rep["league"]
+    total_x, gain_x = 800, W - M - PAD            # the two figures' right edges
+    hy = table_y + PAD - 6
+    c.write(M + PAD, hy, "Oʻrin · Ism", "m28", INK2)
+    c.write(M + PAD, hy + 34, "Место · Имя", "r28", INK3)
+    if league_on:
+        c.write_right(total_x, hy, "Jami", "m28", INK2)
+        c.write_right(total_x, hy + 34, "Всего", "r28", INK3)
+    c.write_right(gain_x, hy, "Shu hafta" if not p["monthly"] else "Shu oy", "m28", OK)
+    c.write_right(gain_x, hy + 34, "За неделю" if not p["monthly"] else "За месяц", "r28", INK3)
+    c.fill(M + PAD - 8, body_y - 12, W - 2 * M - 2 * PAD + 16, 2, LINE)
+
+    top = max([(r["season"] if league_on else r["gained"]) or 0 for r in rep["rows"]] + [0]) or 1
+    bar_x, bar_w = M + PAD + 84, (total_x - 150) - (M + PAD + 84) if league_on else 620
+    for i, r in enumerate(rows):
+        y = body_y + i * LEAGUE_ROW
+        if i:
+            c.fill(M + PAD - 8, y - 1, W - 2 * M - 2 * PAD + 16, 1, LINE)
+        mid = y + LEAGUE_ROW // 2 - 6
+        rank = r["rank"]
+        cx = M + PAD + 30
+        if rank:
+            c.disc(cx, mid, 30, MEDALS.get(rank, TRACK))
+            c.write_center(cx, mid - 20, str(rank), "b32", WHITE if rank in MEDALS else INK2)
+        else:
+            c.write_center(cx, mid - 20, "–", "b32", INK3)
+        name = c.fit(r["student"]["name"], "m32", bar_w)
+        c.write(bar_x, mid - 36, name, "m32", INK)
+        value = (r["season"] if league_on else r["gained"]) or 0
+        c.round_rect(bar_x, mid + 16, bar_w, 16, 8, TRACK)
+        fill = int(bar_w * max(0.0, value) / top)
+        if fill >= 16:
+            c.round_rect(bar_x, mid + 16, fill, 16, 8, BRAND)
+        if league_on:
+            c.write_right(total_x, mid - 26, _n(r["season"]) if r["season"] is not None else "–",
+                          "b40", INK)
+        gained = r["gained"]
+        c.write_right(gain_x, mid - 26, ("+" + _n(gained)) if gained else "0", "b40",
+                      OK if gained else INK3)
+
+    c.write(M + 8, h - 70, "Ball: uy vazifasi va darsdagi baholar · Очки: домашка и оценки на уроке",
+            "r28", INK3)
     return c.to_png()
+
+
+# ------------------------------------------------ one student
+
+def student(r, rep):
+    """One student's week (or month) as a PNG."""
+    import parents
+    p = rep["period"]
+    g = rep["group"]["name"]
+    c = Card(W, 6000, BG)
+    inner_l, inner_r = M + PAD, W - M - PAD
+
+    # the heading
+    head_h = 250
+    c.gradient(0, 0, W, head_h, DEEP, BRAND)
+    c.write(M + 8, 40, c.fit(r["student"]["name"], "b56", W - 2 * M - 250), "b56", WHITE)
+    c.write(M + 8, 122, "%s-guruh · Группа %s%s" % (g, g, (" · " + rep["level"]) if rep["level"] else ""),
+            "m28", ON_BRAND)
+    c.write(M + 8, 170, "Oylik hisobot · Месячный отчёт" if p["monthly"]
+            else "Haftalik hisobot · Недельный отчёт", "r28", ON_BRAND)
+    c.write_right(W - M - 8, 48, _days(p), "b40", WHITE)
+
+    # three figures: place, points, homework
+    y = head_h + 32
+    tile_w, tile_h = (W - 2 * M - 2 * 20) / 3.0, 300
+    labels = [("Guruhda oʻrin", "Место в группе"),
+              ("Shu oy ball" if p["monthly"] else "Shu hafta ball",
+               "Очки за месяц" if p["monthly"] else "Очки за неделю"),
+              ("Uy vazifasi", "Домашка")]
+    for i, (uz, ru) in enumerate(labels):
+        x = M + i * (tile_w + 20)
+        c.round_rect(x, y, tile_w, tile_h, 32, SURFACE)
+        c.write_center(x + tile_w / 2, y + tile_h - 92, uz, "m28", INK2)
+        c.write_center(x + tile_w / 2, y + tile_h - 56, ru, "r28", INK3)
+        cx = x + tile_w / 2
+        if i == 0:
+            if r["rank"]:
+                big, small = str(r["rank"]), "/%d" % rep["size"]
+                wb, ws = c.measure(big, "b88"), c.measure(small, "m32")
+                left = cx - (wb + ws) / 2
+                end = c.write(left, y + 36, big, "b88", INK)
+                c.write(end + 4, y + 88, small, "m32", INK3)
+            else:
+                c.write_center(cx, y + 36, "–", "b88", INK3)
+        elif i == 1:
+            gained = r["gained"]
+            text = ("+" + _n(gained)) if gained else "0"
+            font = "b88" if c.measure(text, "b88") <= tile_w - 40 else "b56"
+            c.write_center(cx, y + (36 if font == "b88" else 58), text, font, OK if gained else INK3)
+            if rep["league"] and r["season"] is not None:
+                c.write_center(cx, y + 146, "Jami · Всего %s" % _n(r["season"]), "r28", INK3)
+        else:
+            share = (r["done"] / float(r["set"])) if r["set"] else 0.0
+            c.ring(cx, y + 100, 72, 20, share, BRAND if r["missing"] == 0 else RED, TRACK)
+            text = "%d/%d" % (r["done"], r["set"]) if r["set"] else "–"
+            c.write_center(cx, y + 76, text, "b40", INK if r["set"] else INK3)
+    y += tile_h + 28
+
+    # the lessons: three marks as five dots each, and the teacher's note
+    ls = r["lessons"]
+    top = _panel_open(c, y)
+    y = _panel_title(c, y + PAD, "Darsdagi baholar", "Оценки на уроке")
+    cols = [440, 670, 900]
+    if ls:
+        c.write(inner_l, y, "Kun", "m28", INK2)
+        c.write(inner_l, y + 34, "День", "r28", INK3)
+        for (uz, ru, col), cx in zip(CRITERIA, cols):
+            c.write_center(cx, y, uz, "m28", col)
+            c.write_center(cx, y + 34, ru, "r28", INK3)
+        y += 84
+        for i, l in enumerate(ls):
+            c.fill(inner_l, y, inner_r - inner_l, 1, LINE)
+            y += 18
+            wd = l["day"].weekday()
+            c.write(inner_l, y, l["day"].strftime("%d.%m"), "m32", INK)
+            c.write(inner_l, y + 40, "%s · %s" % (parents.UZ_DAY[wd], parents.RU_DAY[wd]), "r28", INK3)
+            for (uz, ru, col), cx, v in zip(CRITERIA, cols, l["marks"]):
+                if v is None:
+                    c.write_center(cx, y + 14, "–", "m32", INK3)
+                    continue
+                for k in range(5):
+                    c.disc(cx - 72 + k * 36, y + 36, 13, col if k < v else TRACK)
+            y += 84
+            if l["note"]:
+                lines = c.wrap(l["note"], "r28", inner_r - inner_l - 48)
+                box_h = 24 + 36 + len(lines) * 40 + 16
+                c.round_rect(inner_l, y, inner_r - inner_l, box_h, 20, SOFT)
+                c.write(inner_l + 24, y + 18, "Oʻqituvchi izohi · Заметка учителя", "m28", INK2)
+                for j, line in enumerate(lines):
+                    c.write(inner_l + 24, y + 60 + j * 40, line, "r28", INK)
+                y += box_h + 16
+        c.fill(inner_l, y, inner_r - inner_l, 1, LINE)
+        y += 20
+        c.write(inner_l, y, "Oʻrtacha · Среднее", "m28", INK2)
+        c.write_right(inner_r, y - 4, "%s / 5" % _n(r["conduct"]), "b40", INK)
+        y += 60
+    else:
+        c.write(inner_l, y, "Darsda baho qoʻyilmagan", "r32", INK3)
+        c.write(inner_l, y + 42, "Оценок за урок нет", "r28", INK3)
+        y += 92
+    _panel_close(c, top, y + PAD - 20)
+    y += PAD - 20 + 28
+
+    # homework, a row a piece
+    top = _panel_open(c, y)
+    y = _panel_title(c, y + PAD, "Uy vazifalari", "Домашние задания")
+    items = r["items"]
+    if items:
+        for i, it in enumerate(items):
+            if i:
+                c.fill(inner_l, y, inner_r - inner_l, 1, LINE)
+            y += 16
+            c.write(inner_l, y, c.fit(it["title"], "m32", 560), "m32", INK)
+            due = core_day(it["due"])
+            if due:
+                c.write(inner_l, y + 42, "Muddat · Срок %s" % due, "r28", INK3)
+            _homework_state(c, inner_r, y, it)
+            y += 92
+    else:
+        c.write(inner_l, y, "Uy vazifasi yoʻq", "r32", INK3)
+        c.write(inner_l, y + 42, "Заданий не было", "r28", INK3)
+        y += 92
+    _panel_close(c, top, y + PAD - 20)
+    y += PAD - 20 + 28
+
+    # points, week by week
+    top = _panel_open(c, y)
+    y = _panel_title(c, y + PAD, "Haftalar boʻyicha ball", "Очки по неделям")
+    weekly = r["weekly"]
+    chart_h = 220
+    slot = (inner_r - inner_l) / float(max(1, len(weekly)))
+    most = max([v for _w, v in weekly] + [1])
+    base = y + 52 + chart_h
+    for i, (w, v) in enumerate(weekly):
+        now = w["first"] <= p["last"] and w["last"] >= p["first"]
+        cx = inner_l + slot * (i + 0.5)
+        col_h = max(8, int(chart_h * (v or 0) / most))
+        c.round_rect(cx - 40, base - col_h, 80, col_h, 14, BRAND if now else PALE)
+        c.write_center(cx, base - col_h - 46, _n(v) if v else "0", "b32", INK if now else INK2)
+        c.write_center(cx, base + 14, w["first"].strftime("%d.%m"), "m28" if now else "r28",
+                       INK if now else INK3)
+    c.fill(inner_l, base, inner_r - inner_l, 2, LINE)
+    y = base + 62
+    _panel_close(c, top, y + PAD - 20)
+    y += PAD - 20 + 28
+
+    # in words
+    top = _panel_open(c, y)
+    y = _panel_title(c, y + PAD, "Xulosa", "Итог")
+    for text, col in ((parents.summary_uz(r, rep), INK), (parents.summary_ru(r, rep), INK2)):
+        for line in c.wrap(text, "r32", inner_r - inner_l):
+            c.write(inner_l, y, line, "r32", col)
+            y += 46
+        y += 20
+    _panel_close(c, top, y + PAD - 40)
+    y += PAD - 40 + 28
+
+    c.write(M + 8, y + 8, "%s · %s" % (parents.span_uz(p["first"], p["last"]),
+                                       parents.span_ru(p["first"], p["last"])), "r28", INK3)
+    c.write_right(W - M - 8, y + 8, "OlimovAzamat", "m28", INK2)
+    c.crop(y + 72)
+    return c.to_png()
+
+
+def _panel_open(c, top):
+    """A white panel from `top` down, its height not yet known: everything
+    below turns white, and _panel_close gives back what is past its end."""
+    c.fill(M, top, W - 2 * M, c.h - top, SURFACE)
+    return top
+
+
+def _panel_close(c, top, bottom, r=32):
+    c.fill(M, bottom, W - 2 * M, c.h - bottom, BG)
+    for cy, rows in ((top + r, range(top, top + r)), (bottom - r, range(bottom - r, bottom))):
+        for cx in (M + r, W - M - r):
+            for yy in rows:
+                for xx in (range(M, M + r) if cx < W / 2 else range(W - M - r, W - M)):
+                    cov = r + 0.5 - math.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
+                    if cov < 1:
+                        c.blend(xx, yy, BG, int(255 * min(1.0, 1 - max(0.0, cov))))
+
+
+def core_day(stamp):
+    """'24.09' in the teacher's timezone, from a stored stamp."""
+    if not stamp:
+        return ""
+    import core
+    from datetime import timedelta
+    return (core.parse(stamp) + timedelta(hours=core.load_config()["timezone_offset_hours"])
+            ).strftime("%d.%m")
+
+
+def _homework_state(c, xr, y, it):
+    state = it["state"]
+    if state in ("marked", "late"):
+        mark = it["mark"]
+        col = OK if mark is not None and mark >= 8 else (RED if mark is not None and mark < 5 else INK)
+        end_w = c.measure("/10", "m28")
+        c.write_right(xr - end_w - 4, y - 6, _n(mark), "b40", col)
+        c.write_right(xr, y + 6, "/10", "m28", INK3)
+        if state == "late":
+            c.write_right(xr, y + 44, "Kechikib · С опозданием", "r28", RED)
+        return
+    uz, ru, col = {"missing": ("Topshirilmagan", "Не сдано", RED),
+                   "waiting": ("Tekshirilmoqda", "Проверяется", INK2),
+                   "pending": ("Muddati kelmagan", "Ещё не срок", INK2)}[state]
+    c.write_right(xr, y, uz, "m28", col)
+    c.write_right(xr, y + 36, ru, "r28", INK3 if state != "missing" else col)

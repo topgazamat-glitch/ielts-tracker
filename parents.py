@@ -1,13 +1,15 @@
-"""The parents' channel: one class's week or month, in numbers and in words.
+"""The parents' channel: each week, a class's league and a report on every
+student, as pictures a parent can read on a phone.
 
-Every class gets one post: a picture of the class table, a picture of how the
-last weeks went, and a written report in Uzbek and then in Russian. The
-numbers are the league's own - the same homework marks and lesson marks the
-students see on their Class page - cut to the week or the month, so what a
-parent reads and what their child says agree.
+A class's post is its league table - everyone's points and what they gained
+that week - and then one picture per student: their place, the marks the
+teacher gave in each lesson with the notes written in it, their homework and
+its marks, their points week by week, and a few sentences in Uzbek and in
+Russian. The numbers are the league's own, cut to the week, so what a parent
+reads and what the child sees on their Class page agree.
 
-The pictures are drawn by card.py; the teacher's page and the sending live in
-server.py; this file only works the figures out and writes them down.
+card.py draws the pictures; server.py has the teacher's page and starts the
+sending; this file works the figures out, writes the sentences and posts.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -108,108 +110,17 @@ def short_days(first, last):
 
 # ------------------------------------------------ the figures
 
+UZ_DAYS = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"]
+RU_DAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+UZ_DAY = ["Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya"]
+RU_DAY = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+WEEKS_SHOWN = 6
+
+
 def _mean(xs):
     xs = [x for x in xs if x is not None]
     return sum(xs) / len(xs) if xs else None
 
-
-def student_period(db, st, lo, hi, cfg):
-    """One student over [lo, hi): what the league would have counted."""
-    scores, late, missing, waiting, _pending, batches = core.homework_marks(db, st, lo, hi, [])
-    set_n = len(scores) + waiting
-    # the league scores a missing or late piece as a nought; a parent wants
-    # the marks of the work that was handed in, and the misses said apart
-    marks = sorted(scores)
-    drop = missing + late
-    while drop and marks and marks[0] == 0:
-        marks.pop(0)
-        drop -= 1
-    homework_points = sum(sum(m) / len(m) / 10.0 * core.HOMEWORK_PER_SET
-                          for m in batches.values())
-    lessons = [((r["punctuality"] or 0) + (r["behaviour"] or 0) + (r["participation"] or 0)) / 15.0
-               for r in db.execute(
-                   "SELECT punctuality, behaviour, participation FROM lesson_marks"
-                   " WHERE student_id=? AND day >= ? AND day < ?",
-                   (st["id"], core.local_day(core.parse(lo), cfg), core.local_day(core.parse(hi), cfg)))]
-    # a lesson is worth up to two points: its three marks out of fifteen
-    conduct_points = sum(v * core.CONDUCT_PER_LESSON for v in lessons)
-    words = db.execute(
-        "SELECT COUNT(*) FROM word_progress WHERE student_id=? AND streak >= 3"
-        " AND last_seen >= ? AND last_seen < ?", (st["id"], lo, hi)).fetchone()[0]
-    parts = db.execute(
-        "SELECT COUNT(*) FROM dparts p JOIN dattempts a ON a.id = p.attempt_id"
-        " WHERE a.student_id=? AND p.checked_at >= ? AND p.checked_at < ?",
-        (st["id"], lo, hi)).fetchone()[0]
-    return {"student": st, "set": set_n, "done": set_n - missing, "late": late,
-            "missing": missing, "waiting": waiting,
-            "average": round(_mean(marks), 1) if marks else None,
-            "lessons": len(lessons),
-            "conduct": round(100 * _mean(lessons)) if lessons else None,
-            "words": words, "parts": parts,
-            "gained": round(homework_points + conduct_points, 1)}
-
-
-def class_report(db, group_id, p, cfg=None):
-    """Everything one class's post says, for period p (from period())."""
-    cfg = cfg or core.load_config()
-    g = db.execute("SELECT * FROM groups WHERE id=?", (group_id,)).fetchone()
-    students = db.execute("SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name",
-                          (group_id,)).fetchall()
-    rows = [student_period(db, st, p["lo"], p["hi"], cfg) for st in students]
-    before = {r["student"]["id"]: r for r in
-              (student_period(db, st, p["before"]["lo"], p["before"]["hi"], cfg) for st in students)}
-
-    # the class's place in the league: the table the students see
-    champ = core.championship(db, cfg)
-    league = {}
-    if champ["started"]:
-        for r in core.scope_standing(champ, group_id)["rows"]:
-            league[r["student"]["id"]] = r
-    for r in rows:
-        lr = league.get(r["student"]["id"])
-        r["rank"] = lr["rank"] if lr else None
-        r["season"] = lr["total"] if lr else None
-        r["before"] = before.get(r["student"]["id"])
-    if league:
-        rows.sort(key=lambda r: (r["rank"] is None, r["rank"] or 0, -r["gained"],
-                                 r["student"]["name"]))
-    else:
-        # no season running: the class is ranked on this stretch alone
-        rows.sort(key=lambda r: (-r["gained"], r["student"]["name"]))
-        for i, r in enumerate(rows, 1):
-            r["rank"] = i if r["gained"] > 0 else None
-
-    def totals(rs):
-        set_n = sum(r["set"] for r in rs)
-        return {"set": set_n, "done": sum(r["done"] for r in rs),
-                "done_pct": round(100 * sum(r["done"] for r in rs) / set_n) if set_n else None,
-                "average": round(_mean([r["average"] for r in rs]), 1)
-                if any(r["average"] is not None for r in rs) else None,
-                "conduct": round(_mean([r["conduct"] for r in rs]))
-                if any(r["conduct"] is not None for r in rs) else None,
-                "lessons": max([r["lessons"] for r in rs] or [0]),
-                "words": sum(r["words"] for r in rs)}
-
-    # the pieces of homework whose deadline fell in the stretch
-    tasks = db.execute(
-        "SELECT COUNT(*) FROM assignments WHERE group_id=? AND published=1 AND in_league=1"
-        " AND due_at >= ? AND due_at < ?", (group_id, p["lo"], p["hi"])).fetchone()[0]
-    upcoming = db.execute(
-        "SELECT title, due_at, test_id FROM assignments WHERE group_id=? AND published=1"
-        " AND closed=0 AND due_at > ? ORDER BY due_at LIMIT 2",
-        (group_id, core.iso(core.now()))).fetchall()
-    weeks = []
-    for w in weeks_back(p, 5 if p["monthly"] else 4, cfg):
-        wr = [student_period(db, st, w["lo"], w["hi"], cfg) for st in students]
-        weeks.append(dict(w, **totals(wr)))
-    return {"group": g, "level": core.level_name(db, core.level_of(db, group_id)) or "",
-            "period": p, "rows": rows, "league": bool(league),
-            "totals": totals(rows), "before": totals(list(before.values())),
-            "tasks": tasks, "upcoming": upcoming, "weeks": weeks,
-            "made": core.now()}
-
-
-# ------------------------------------------------ the words
 
 def _n(x):
     """7.4 as the region writes it: 7,4 - and 8 not 8,0."""
@@ -227,157 +138,236 @@ def ru_plural(n, one, few, many):
     return many
 
 
-def highlights(rep):
-    """The few things worth a sentence: the best of the stretch, the one who
-    grew most, and who has work missing."""
-    rows = rep["rows"]
-    stars = [r for r in sorted(rows, key=lambda r: -r["gained"]) if r["gained"] > 0][:3]
-    grown = None
+def points_ru(x):
+    """очко / очка / очков - and 10,9 очка, since a fraction takes the genitive."""
+    if round(x, 1) != int(round(x, 1)):
+        return "очка"
+    return ru_plural(int(round(x)), "очко", "очка", "очков")
+
+
+# ------------------------------------------------ one student, one stretch
+
+def lessons(db, student_id, lo, hi, cfg):
+    """The lessons marked in [lo, hi): the three marks out of five, and the
+    teacher's note, oldest first."""
+    from datetime import date
+    out = []
+    for r in db.execute(
+            "SELECT day, punctuality, behaviour, participation, note FROM lesson_marks"
+            " WHERE student_id=? AND day >= ? AND day < ? ORDER BY day",
+            (student_id, core.local_day(core.parse(lo), cfg), core.local_day(core.parse(hi), cfg))):
+        marks = [r["punctuality"], r["behaviour"], r["participation"]]
+        out.append({"day": date.fromisoformat(r["day"]), "marks": marks,
+                    "note": (r["note"] or "").strip(),
+                    "average": _mean(marks)})
+    return out
+
+
+def homework_items(db, st, lo, hi):
+    """Each piece of homework the stretch holds, and how it went - the same
+    pieces, judged the same way, as core.homework_marks."""
+    stamp = core.iso(core.now())
+    out = []
+    for a in db.execute(
+            "SELECT id, title, due_at, test_id FROM assignments WHERE group_id=? AND published=1"
+            " AND in_league=1 AND created_at < ?"
+            " AND (created_at >= ? OR (due_at IS NOT NULL AND due_at >= ?))"
+            " ORDER BY due_at IS NULL, due_at", (st["group_id"], hi, lo, lo)).fetchall():
+        due = a["due_at"]
+        item = {"title": a["title"], "due": due, "mark": None, "state": None}
+        if due and due > stamp:
+            item["state"] = "pending"
+        elif a["test_id"] and not core.is_handout(db, a["test_id"]):
+            if not db.execute("SELECT 1 FROM dtests WHERE id=?", (a["test_id"],)).fetchone():
+                continue
+            sat = db.execute(
+                "SELECT score, total, finished_at FROM dattempts WHERE test_id=? AND student_id=?"
+                " AND finished_at IS NOT NULL ORDER BY finished_at LIMIT 1",
+                (a["test_id"], st["id"])).fetchone()
+            if not sat or not sat["total"]:
+                item["state"] = "missing" if due else None
+            elif due and sat["finished_at"] > due:
+                item["state"] = "late"
+            else:
+                item["state"], item["mark"] = "marked", round(sat["score"] * 10.0 / sat["total"], 1)
+        elif a["test_id"]:
+            h = core.handout_status(db, a["test_id"], st["id"], due)
+            if not h["started"]:
+                item["state"] = "missing" if due else None
+            else:
+                item["state"], item["mark"] = "marked", round(h["mark"], 1)
+        else:
+            sub = db.execute(
+                "SELECT status, score, created_at FROM submissions WHERE student_id=?"
+                " AND assignment_id=? AND draft=0 ORDER BY status='graded' DESC,"
+                " created_at LIMIT 1", (st["id"], a["id"])).fetchone()
+            if not sub:
+                item["state"] = "missing" if due else None
+            elif sub["status"] != "graded" or sub["score"] is None:
+                item["state"] = "waiting"
+            elif due and sub["created_at"] > due:
+                item["state"], item["mark"] = "late", sub["score"]
+            else:
+                item["state"], item["mark"] = "marked", sub["score"]
+        if item["state"]:
+            out.append(item)
+    return out
+
+
+def student_period(db, st, lo, hi, cfg):
+    """One student over [lo, hi): what the league would have counted."""
+    scores, late, missing, waiting, _pending, batches = core.homework_marks(db, st, lo, hi, [])
+    set_n = len(scores) + waiting
+    # the league scores a missing or late piece as a nought; a parent wants
+    # the marks of the work that was handed in, and the misses said apart
+    marks = sorted(scores)
+    drop = missing + late
+    while drop and marks and marks[0] == 0:
+        marks.pop(0)
+        drop -= 1
+    homework_points = sum(sum(m) / len(m) / 10.0 * core.HOMEWORK_PER_SET
+                          for m in batches.values())
+    ls = lessons(db, st["id"], lo, hi, cfg)
+    # a lesson is worth up to two points: its three marks out of fifteen
+    conduct_points = sum(sum(v or 0 for v in l["marks"]) / 15.0 * core.CONDUCT_PER_LESSON
+                         for l in ls)
+    return {"student": st, "set": set_n, "done": set_n - missing, "late": late,
+            "missing": missing, "waiting": waiting,
+            "average": round(_mean(marks), 1) if marks else None,
+            "lessons": ls,
+            "conduct": round(_mean([l["average"] for l in ls]), 1) if ls else None,
+            "gained": round(homework_points + conduct_points, 1)}
+
+
+def class_report(db, group_id, p, cfg=None):
+    """Everything one class's post shows, for period p (from period())."""
+    cfg = cfg or core.load_config()
+    g = db.execute("SELECT * FROM groups WHERE id=?", (group_id,)).fetchone()
+    students = db.execute("SELECT * FROM students WHERE group_id=? AND active=1 ORDER BY name",
+                          (group_id,)).fetchall()
+    rows = []
+    weeks = weeks_back(p, WEEKS_SHOWN, cfg) if not p["monthly"] else weeks_back(p, 5, cfg)
+    for st in students:
+        r = student_period(db, st, p["lo"], p["hi"], cfg)
+        r["items"] = homework_items(db, st, p["lo"], p["hi"])
+        r["weekly"] = [(w, student_period(db, st, w["lo"], w["hi"], cfg)["gained"]) for w in weeks]
+        rows.append(r)
+
+    # the class's own league: the table the students see on their Class page
+    champ = core.championship(db, cfg)
+    league = {}
+    if champ["started"]:
+        for lr in core.scope_standing(champ, group_id)["rows"]:
+            league[lr["student"]["id"]] = lr
     for r in rows:
-        b = r["before"]
-        if b and b["average"] is not None and r["average"] is not None:
-            gain = r["average"] - b["average"]
-            if gain >= 0.5 and (grown is None or gain > grown[1]):
-                grown = (r, gain, b["average"])
-    missing = sorted((r for r in rows if r["missing"]), key=lambda r: -r["missing"])
-    return stars, grown, missing
-
-
-def _names(rows, more, most=8):
-    """'Kamola (2), Nodir (1)' - the count is how many pieces are missing."""
-    shown = ", ".join("%s (%d)" % (r["student"]["name"], r["missing"]) for r in rows[:most])
-    if len(rows) > most:
-        shown += ", " + more % (len(rows) - most)
-    return shown
-
-
-def _upcoming_date(a, cfg):
-    d = core.parse(a["due_at"]) + timedelta(hours=cfg["timezone_offset_hours"])
-    return d.date()
-
-
-def text_uz(rep, cfg=None):
-    cfg = cfg or core.load_config()
-    p, t, b = rep["period"], rep["totals"], rep["before"]
-    g = rep["group"]["name"]
-    when = (("%s oyi" % UZ_MONTHS[p["first"].month - 1]).capitalize() if p["monthly"]
-            else "%s haftasi" % span_uz(p["first"], p["last"]))
-    was = "oʻtgan oy" if p["monthly"] else "oʻtgan hafta"
-    out = ["🇺🇿 %s-guruh · %s hisoboti" % (g, when), ""]
-    if t["set"]:
-        line = "📝 Uy vazifalari: %d ta vazifa berildi, guruh ularning %d foizini bajardi" % (
-            rep["tasks"] or 1, t["done_pct"])
-        if b["done_pct"] is not None:
-            line += " (%s %d foiz)" % (was, b["done_pct"])
-        out.append(line + ".")
+        lr = league.get(r["student"]["id"])
+        r["rank"] = lr["rank"] if lr else None
+        r["season"] = lr["total"] if lr else None
+    if league:
+        rows.sort(key=lambda r: (r["rank"] is None, r["rank"] or 0, -r["gained"],
+                                 r["student"]["name"]))
     else:
-        out.append("📝 Bu davrda muddati tugagan uy vazifasi boʻlmadi.")
-    if t["average"] is not None:
-        line = "⭐ Oʻrtacha baho: %s / 10" % _n(t["average"])
-        if b["average"] is not None:
-            line += " (%s %s)" % (was, _n(b["average"]))
-        out.append(line + ".")
-    if t["conduct"] is not None:
-        out.append("🎓 Darsdagi faollik: %d foiz." % t["conduct"])
-    if t["words"]:
-        out.append("📚 Yangi soʻzlar: guruh %d ta soʻz yodladi." % t["words"])
-    stars, grown, missing = highlights(rep)
-    if stars or grown or missing:
-        out.append("")
-    if stars:
-        out.append("🏆 %s eng yaxshilari: " % ("Oyning" if p["monthly"] else "Haftaning") + ", ".join(
-            "%s (+%s ball)" % (r["student"]["name"], _n(r["gained"])) for r in stars) + ".")
-    if grown:
-        r, _gain, old = grown
-        out.append("📈 Eng katta oʻsish: %s — oʻrtacha baho %s dan %s ga koʻtarildi." % (
-            r["student"]["name"], _n(old), _n(r["average"])))
-    if missing:
-        out.append("⚠️ Vazifa topshirmaganlar: " + _names(missing, "va yana %d kishi") + ".")
-    for a in rep["upcoming"][:1]:
-        d = _upcoming_date(a, cfg)
-        out.append("⏰ Keyingi muddat: %s — %s." % (span_uz(d, d), a["title"]))
-    return "\n".join(out)
+        # no season running: the class is ranked on this stretch alone
+        rows.sort(key=lambda r: (-r["gained"], r["student"]["name"]))
+        for i, r in enumerate(rows, 1):
+            r["rank"] = i if r["gained"] > 0 else None
+    return {"group": g, "level": core.level_name(db, core.level_of(db, group_id)) or "",
+            "period": p, "rows": rows, "league": bool(league), "size": len(rows),
+            "weeks": weeks}
 
 
-def text_ru(rep, cfg=None):
-    cfg = cfg or core.load_config()
-    p, t, b = rep["period"], rep["totals"], rep["before"]
-    g = rep["group"]["name"]
-    when = ("за %s" % RU_MONTHS[p["first"].month - 1] if p["monthly"]
-            else "за неделю %s" % span_ru(p["first"], p["last"]))
-    was = "в прошлом месяце" if p["monthly"] else "на прошлой неделе"
-    out = ["🇷🇺 Группа %s · отчёт %s" % (g, when), ""]
-    if t["set"]:
-        line = "📝 Домашние задания: задано %d, группа выполнила %d%%" % (
-            rep["tasks"] or 1, t["done_pct"])
-        if b["done_pct"] is not None:
-            line += " (%s %d%%)" % (was, b["done_pct"])
-        out.append(line + ".")
-    else:
-        out.append("📝 В этот период сроков сдачи домашних заданий не было.")
-    if t["average"] is not None:
-        line = "⭐ Средняя оценка: %s из 10" % _n(t["average"])
-        if b["average"] is not None:
-            line += " (%s %s)" % (was, _n(b["average"]))
-        out.append(line + ".")
-    if t["conduct"] is not None:
-        out.append("🎓 Работа на уроках: %d%%." % t["conduct"])
-    if t["words"]:
-        out.append("📚 Новые слова: группа выучила %d %s." % (
-            t["words"], ru_plural(t["words"], "слово", "слова", "слов")))
-    stars, grown, missing = highlights(rep)
-    if stars or grown or missing:
-        out.append("")
-    if stars:
-        out.append("🏆 Лучшие за %s: " % ("месяц" if p["monthly"] else "неделю") + ", ".join(
-            "%s (+%s)" % (r["student"]["name"], _n(r["gained"])) for r in stars) + ".")
-    if grown:
-        r, _gain, old = grown
-        out.append("📈 Самый большой рост: %s — средняя оценка выросла с %s до %s." % (
-            r["student"]["name"], _n(old), _n(r["average"])))
-    if missing:
-        out.append("⚠️ Не сдали задания: " + _names(missing, "и ещё %d") + ".")
-    for a in rep["upcoming"][:1]:
-        d = _upcoming_date(a, cfg)
-        out.append("⏰ Ближайший срок: %s — %s." % (span_ru(d, d), a["title"]))
-    return "\n".join(out)
+# ------------------------------------------------ what is said about a student
+
+def _first(name):
+    return (name or "").split()[0] if name else ""
 
 
-def post_text(rep, note="", cfg=None):
-    """The written report: the teacher's own words first, if any, then Uzbek,
-    then Russian - one message, well inside Telegram's 4096 letters."""
-    parts = []
-    if note.strip():
-        parts.append("✍️ " + note.strip())
-    parts += [text_uz(rep, cfg), text_ru(rep, cfg)]
-    return "\n\n".join(parts)[:4000]
-
-
-def caption(rep):
+def summary_uz(r, rep):
     p = rep["period"]
-    what = "Oylik hisobot · Месячный отчёт" if p["monthly"] else "Haftalik hisobot · Недельный отчёт"
-    return "%s-guruh · Группа %s\n%s · %s" % (rep["group"]["name"], rep["group"]["name"], what,
-                                              short_days(p["first"], p["last"]))
+    name = _first(r["student"]["name"])
+    when = "Bu oy" if p["monthly"] else "Bu hafta"
+    out = []
+    ls = r["lessons"]
+    if ls:
+        out.append("%s %s %d ta darsda baho oldi, oʻrtacha %s / 5." % (
+            when, name, len(ls), _n(r["conduct"])))
+    else:
+        out.append("%s %s darsda baho olmadi." % (when, name))
+    if r["set"]:
+        line = "Uy vazifalari: %d tadan %d tasi topshirildi" % (r["set"], r["done"])
+        if r["average"] is not None:
+            line += ", oʻrtacha baho %s / 10" % _n(r["average"])
+        out.append(line + ".")
+        if r["missing"]:
+            out.append("%d ta vazifa topshirilmagan." % r["missing"])
+    if r["gained"]:
+        out.append("Ligada %s ball toʻpladi%s." % (
+            _n(r["gained"]), (" va guruhda %d-oʻrinda turibdi" % r["rank"]) if r["rank"] else ""))
+    return " ".join(out)
+
+
+def summary_ru(r, rep):
+    p = rep["period"]
+    when = "за месяц" if p["monthly"] else "за неделю"
+    out = []
+    ls = r["lessons"]
+    if ls:
+        out.append("Оценки на уроках %s: %d %s, в среднем %s из 5." % (
+            when, len(ls), ru_plural(len(ls), "урок", "урока", "уроков"), _n(r["conduct"])))
+    else:
+        out.append("Оценок на уроках %s нет." % when)
+    if r["set"]:
+        line = "Домашние задания: сдано %d из %d" % (r["done"], r["set"])
+        if r["average"] is not None:
+            line += ", средняя оценка %s из 10" % _n(r["average"])
+        out.append(line + ".")
+        if r["missing"]:
+            out.append("Не сдано: %d." % r["missing"])
+    if r["gained"]:
+        out.append("В лиге %s: +%s %s%s." % (
+            when, _n(r["gained"]), points_ru(r["gained"]),
+            (", %d-е место в группе" % r["rank"]) if r["rank"] else ""))
+    return " ".join(out)
+
+
+def caption_for(r, rep):
+    """Under a student's picture: the name, so a parent can search for it."""
+    g = rep["group"]["name"]
+    return "%s · %s-guruh · Группа %s" % (r["student"]["name"], g, g)
+
+
+def league_caption(rep):
+    p = rep["period"]
+    g = rep["group"]["name"]
+    return "%s-guruh · Группа %s\n%s · %s" % (
+        g, g, "Liga, oy · Лига, месяц" if p["monthly"] else "Liga, hafta · Лига, неделя",
+        short_days(p["first"], p["last"]))
 
 
 # ------------------------------------------------ sending
 
 import time
 
-# Telegram lets a bot put about twenty messages a minute into one channel; a
-# class is three (two pictures and the text), so the classes go ten seconds
-# apart and a whole school stays inside the limit.
-SEND_GAP = 10
-ROWS_PER_PICTURE = 22
+# Telegram lets a bot put about twenty messages a minute into one channel, and
+# each picture of an album counts as one, so after an album the sending waits
+# three and a half seconds a picture. A class of twelve takes about a minute.
+PER_PICTURE = 3.5
+ALBUM = 10                 # the most pictures Telegram takes in one album
+LEAGUE_ROWS = 14           # a longer class has its league split over pictures
 _sleep = time.sleep
 
 
 def pictures(rep):
-    """The class table - in pieces for a very big class - and the weeks."""
+    """[(png, caption)] for one class: its league, then each student."""
     import card
     rows = rep["rows"]
-    chunks = [rows[i:i + ROWS_PER_PICTURE] for i in range(0, len(rows), ROWS_PER_PICTURE)] or [[]]
-    return [card.class_table(rep, chunk) for chunk in chunks] + [card.trend(rep)]
+    out = []
+    chunks = [rows[i:i + LEAGUE_ROWS] for i in range(0, len(rows), LEAGUE_ROWS)] or [[]]
+    for i, chunk in enumerate(chunks):
+        out.append((card.league(rep, chunk, first=i * LEAGUE_ROWS), league_caption(rep) if not i else ""))
+    for r in rows:
+        out.append((card.student(r, rep), caption_for(r, rep)))
+    return out
 
 
 def sent_at(db, key, group_id):
@@ -424,13 +414,11 @@ def send_all(token, kind, group_ids, notes, cfg=None, pause=None):
         save()
         for i, gid in enumerate(group_ids):
             try:
-                _post_class(db, token, chan, p, gid, notes, cfg, pause, status)
+                _post_class(db, token, chan, p, gid, notes, cfg, pause, status, save)
             except Exception as exc:      # one class going wrong must not stop the rest
                 status["errors"].append("class %d: %s" % (gid, exc))
             status["done"] = i + 1
             save()
-            if i < len(group_ids) - 1:
-                pause(SEND_GAP)
         status["finished"] = core.iso(core.now())
         save()
         return status
@@ -438,24 +426,35 @@ def send_all(token, kind, group_ids, notes, cfg=None, pause=None):
         db.close()
 
 
-def _post_class(db, token, chan, p, gid, notes, cfg, pause, status):
-    """One class's post: the pictures as an album, then the written report."""
+def _post_class(db, token, chan, p, gid, notes, cfg, pause, status, save):
+    """One class: the teacher's note if there is one, then the pictures in
+    albums of ten, each picture with its caption."""
     import bot
     rep = class_report(db, gid, p, cfg)
-    res = None
-    for _try in range(3):
-        res = bot.send_album(token, chan["id"], pictures(rep), caption(rep))
-        wait = (res.get("parameters") or {}).get("retry_after")
-        if res.get("ok") or not wait:
-            break
-        pause(min(int(wait), 60) + 1)       # too fast: Telegram says how long to wait
-    if res.get("ok"):
-        pause(2)
-        res = bot.send(token, chan["id"], post_text(rep, notes.get(gid, ""), cfg))
-    if res.get("ok"):
-        key = "%s:%d" % (p["key"], gid)
-        db.execute("DELETE FROM notifications WHERE kind='parents_post' AND key=?", (key,))
-        core.mark_sent(db, "parents_post", key)
-    else:
-        status["errors"].append("%s: %s" % (rep["group"]["name"], res.get("description")
-                                            or res.get("error") or "Telegram said no"))
+    note = (notes.get(gid) or "").strip()
+    if note:
+        res = bot.send(token, chan["id"], "✍️ %s-guruh · Группа %s\n\n%s" % (
+            rep["group"]["name"], rep["group"]["name"], note))
+        if not res.get("ok"):
+            raise RuntimeError(res.get("description") or res.get("error") or "Telegram said no")
+        pause(PER_PICTURE)
+    pics = pictures(rep)
+    for start in range(0, len(pics), ALBUM):
+        batch = pics[start:start + ALBUM]
+        res = None
+        for _try in range(3):
+            res = bot.send_album(token, chan["id"], [png for png, _c in batch],
+                                 captions=[c for _p, c in batch])
+            wait = (res.get("parameters") or {}).get("retry_after")
+            if res.get("ok") or not wait:
+                break
+            pause(min(int(wait), 90) + 1)       # too fast: Telegram says how long to wait
+        if not res.get("ok"):
+            raise RuntimeError("%s: %s" % (rep["group"]["name"], res.get("description")
+                                           or res.get("error") or "Telegram said no"))
+        status["pictures"] = status.get("pictures", 0) + len(batch)
+        save()
+        pause(PER_PICTURE * len(batch))
+    key = "%s:%d" % (p["key"], gid)
+    db.execute("DELETE FROM notifications WHERE kind='parents_post' AND key=?", (key,))
+    core.mark_sent(db, "parents_post", key)

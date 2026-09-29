@@ -7269,30 +7269,31 @@ def view_parents(req, db):
     groups = parent_groups(db)
     cards = ""
     for g in groups:
-        rep = parents.class_report(db, g["id"], p, CFG)
-        text = parents.post_text(rep, "", CFG)
+        rep = parents_report(db, g["id"], kind)
         when = parents.sent_at(db, p["key"], g["id"])
-        t = rep["totals"]
         # a class with nothing in the stretch has nothing to tell its parents
-        quiet = not (t["set"] or t["lessons"] or t["words"] or any(r["parts"] for r in rep["rows"]))
+        quiet = not any(r["set"] or r["lessons"] or r["items"] for r in rep["rows"])
         sent = (f'<span class="pill ok">Sent {E(practice_when(when))}</span>' if when
                 else '<span class="pill mute">Nothing to report</span>' if quiet else "")
         n = len(rep["rows"])
         src = f'/parents/card.png?g={g["id"]}&amp;p={kind}'
-        pics = "".join(f'<a href="{src}&amp;k={k}" target="_blank" rel="noopener">'
-                       f'<img src="{src}&amp;k={k}" alt="{E(alt)}" loading="lazy"></a>'
-                       for k, alt in (("table", "The class table"), ("trend", "The last weeks")))
+        shots = [(f"{src}&amp;k=league", "League", "The class league")] + [
+            (f'{src}&amp;k=student&amp;s={r["student"]["id"]}', r["student"]["name"],
+             "Report for " + r["student"]["name"]) for r in rep["rows"]]
+        pics = "".join(f'<a class="par-shot{" par-wide" if i == 0 else ""}" href="{href}"'
+                       f' target="_blank" rel="noopener">'
+                       f'<img src="{href}" alt="{E(alt)}" loading="lazy"><span>{E(label)}</span></a>'
+                       for i, (href, label, alt) in enumerate(shots))
         cards += f"""<section class="card par-class">
   <div class="par-head">
     <label class="par-pick"><input type="checkbox" name="g" value="{g["id"]}"{"" if (when or quiet) else " checked"}>
-    <span><strong>{E(g["name"])}</strong> <span class="sub">{E(rep["level"])} &middot; {n} students</span></span></label>
+    <span><strong>{E(g["name"])}</strong> <span class="sub">{E(rep["level"])} &middot; {n} students
+    &middot; {n + 1} pictures</span></span></label>
     {sent}
   </div>
   <div class="par-pics">{pics}</div>
-  <label class="f">Your note to these parents (optional)
-    <textarea name="note_{g["id"]}" rows="2" placeholder="Posted first. Masalan: Keyingi dars juma kuni."></textarea></label>
-  <details class="par-text"><summary>The written report, as it will be posted</summary>
-  <div class="par-msg">{E(parents.caption(rep))}</div><div class="par-msg">{E(text)}</div></details>
+  <label class="f">Your note to these parents (optional, posted before the pictures)
+    <textarea name="note_{g["id"]}" rows="2" placeholder="Masalan: Keyingi dars juma kuni."></textarea></label>
 </section>"""
     can = bool(chan and token and not core.demo_on() and not going)
     button = (f'<button{"" if can else " disabled"}>Send to the channel</button>')
@@ -7330,13 +7331,37 @@ def view_parents(req, db):
     return html_response(page("Parents", body, "Parents"))
 
 
+_PARENTS_CACHE = {}
+
+
+def parents_report(db, gid, kind):
+    """A class's report, kept for two minutes: the Parents page asks for it
+    once and then once for every picture on it, all at the same moment."""
+    key = (core.demo_on(), gid, kind)
+    hit = _PARENTS_CACHE.get(key)
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    rep = parents.class_report(db, gid, parents.period(kind, CFG), CFG)
+    if len(_PARENTS_CACHE) > 64:
+        _PARENTS_CACHE.clear()
+    _PARENTS_CACHE[key] = (time.time(), rep)
+    return rep
+
+
 def view_parents_card(req, db):
     q = req.get("query", {})
     gid = (q.get("g", [""])[0] or "")
     if not gid.isdigit():
         return not_found()
-    rep = parents.class_report(db, int(gid), parents.period(parents_kind(q), CFG), CFG)
-    png_bytes = card.trend(rep) if q.get("k") == ["trend"] else card.class_table(rep)
+    rep = parents_report(db, int(gid), parents_kind(q))
+    if q.get("k") == ["student"]:
+        sid = (q.get("s", [""])[0] or "")
+        r = next((r for r in rep["rows"] if str(r["student"]["id"]) == sid), None)
+        if not r:
+            return not_found()
+        png_bytes = card.student(r, rep)
+    else:
+        png_bytes = card.league(rep)
     return 200, [("Content-Type", "image/png"), ("Cache-Control", "no-store"),
                  ("Content-Length", str(len(png_bytes)))], png_bytes
 

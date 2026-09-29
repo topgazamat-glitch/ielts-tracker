@@ -2853,10 +2853,16 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
   gap: var(--sp-2); }
 .par-pick { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
 .par-pick input { width: 20px; height: 20px; }
-.par-pics { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.par-pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: var(--sp-3); align-items: start; }
-.par-pics img { width: 100%; height: auto; display: block; border-radius: 12px;
-  border: 1px solid var(--line-soft); }
+/* a picture's top - the name and the three figures - and the whole of it on a tap */
+.par-shot { display: grid; gap: var(--sp-1); color: var(--ink); font-size: 13px; }
+.par-shot img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top;
+  display: block; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--surface-2); }
+.par-wide img { object-fit: contain; object-position: top; }   /* the league: all of it */
+.par-shot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.par-shot:hover { text-decoration: none; }
+.par-shot:hover img { border-color: var(--accent-line); }
 .par-text summary { cursor: pointer; font-weight: 600; }
 .par-msg { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px;
   padding: var(--sp-3) var(--sp-4); margin-top: var(--sp-2); font-size: 14px;

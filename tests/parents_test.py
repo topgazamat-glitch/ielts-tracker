@@ -78,48 +78,57 @@ for sid, score in ((aziza, 9), (moh, 6)):
                " VALUES (?,?,?,?,?,?)", (sid, a1, core.iso(set_at + timedelta(hours=2)), "graded", score,
                                          core.iso(due)))
 day = core.local_day(set_at, cfg)
-for sid, v in ((aziza, 5), (bek, 3), (moh, 4)):
+for sid, v, note in ((aziza, 5, "Juda faol boʻldi."), (bek, 3, ""), (moh, 4, "")):
     db.execute("INSERT INTO lesson_marks (student_id, day, punctuality, behaviour, participation,"
-               " created_at) VALUES (?,?,?,?,?,?)", (sid, day, v, v, v, core.iso(now)))
+               " note, created_at) VALUES (?,?,?,?,?,?,?)", (sid, day, v, v, v, note, core.iso(now)))
 db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at) VALUES (?,?,?,1,?)",
-           (g, "Unit 2A handout", core.iso(now), core.iso(now + timedelta(days=2))))
+           (g, "Unit 2A handout", core.iso(set_at), core.iso(now + timedelta(days=2))))
 db.commit()
 rep = parents.class_report(db, g, p, cfg)
 row = {r["student"]["name"]: r for r in rep["rows"]}
 check("homework done and set, per student", (row["Aziza"]["done"], row["Aziza"]["set"]) == (1, 1)
       and (row["Bekzod"]["done"], row["Bekzod"]["missing"]) == (0, 1))
 check("the mark is of the work handed in", row["Aziza"]["average"] == 9 and row["Bekzod"]["average"] is None)
-check("lesson marks as a share", row["Aziza"]["conduct"] == 100 and row["Bekzod"]["conduct"] == 60)
+check("each lesson with its three marks and the teacher's note",
+      len(row["Aziza"]["lessons"]) == 1 and row["Aziza"]["lessons"][0]["marks"] == [5, 5, 5]
+      and row["Aziza"]["lessons"][0]["note"] == "Juda faol boʻldi.")
+check("lesson marks averaged out of five", row["Aziza"]["conduct"] == 5 and row["Bekzod"]["conduct"] == 3)
+states = {r["student"]["name"]: [(i["title"], i["state"], i["mark"]) for i in r["items"]] for r in rep["rows"]}
+check("each piece of homework and how it went",
+      states["Aziza"] == [("Writing 1", "marked", 9), ("Unit 2A handout", "pending", None)]
+      and states["Bekzod"][0] == ("Writing 1", "missing", None))
 check("with no season running, the class is ranked on the week",
       [r["student"]["name"] for r in rep["rows"]] == ["Aziza", "Мохинур", "Bekzod"]
       and rep["rows"][0]["rank"] == 1)
-check("the class together: 2 of 3 done, 67%", rep["totals"]["done_pct"] == 67 and rep["tasks"] == 1)
-uz, ru = parents.text_uz(rep, cfg), parents.text_ru(rep, cfg)
-check("the Uzbek report names the class and who missed work",
-      "114-guruh" in uz and "Bekzod (1)" in uz and "Vazifa topshirmaganlar" in uz)
-check("the Russian one too", "Группа 114" in ru and "Не сдали задания: Bekzod (1)" in ru)
-check("the week's best are named", "Aziza" in uz.split("eng yaxshilari:")[1])
-check("the next deadline is given", "Unit 2A handout" in uz and "Unit 2A handout" in ru)
-text = parents.post_text(rep, "Juma kuni dars yoʻq.", cfg)
-check("the teacher's note comes first, then Uzbek, then Russian",
-      text.index("Juma kuni") < text.index("🇺🇿") < text.index("🇷🇺") and len(text) < 4096)
+check("points week by week, this week last", len(row["Aziza"]["weekly"]) == parents.WEEKS_SHOWN
+      and row["Aziza"]["weekly"][-1][1] == row["Aziza"]["gained"] > 0)
+uz, ru = parents.summary_uz(row["Aziza"], rep), parents.summary_ru(row["Aziza"], rep)
+check("a few sentences in Uzbek", "Aziza 1 ta darsda baho oldi" in uz and "1-oʻrinda" in uz)
+check("and in Russian", "сдано 1 из 1" in ru and "1-е место в группе" in ru)
+check("Bekzod's says what is missing", "1 ta vazifa topshirilmagan" in parents.summary_uz(row["Bekzod"], rep)
+      and "Не сдано: 1" in parents.summary_ru(row["Bekzod"], rep))
+check("points in Russian", [parents.points_ru(x) for x in (1, 2, 5, 10.9, 21)]
+      == ["очко", "очка", "очков", "очка", "очко"])
 
 print("\n3. THE PICTURES")
-table, trend = card.class_table(rep), card.trend(rep)
-check("the class table is a picture", table[:8] == b"\x89PNG\r\n\x1a\n" and len(table) > 5000)
-check("so are the last weeks", trend[:8] == b"\x89PNG\r\n\x1a\n")
+lg, one = card.league(rep), card.student(row["Мохинур"], rep)
+check("the league is a picture", lg[:8] == b"\x89PNG\r\n\x1a\n" and len(lg) > 5000)
+check("so is each student's report", one[:8] == b"\x89PNG\r\n\x1a\n")
 check("every letter they use is in the font", all(
-    ch in card.atlas()["m22"]["glyphs"] for ch in "Мохинур Oʻrtacha Ўғҳқ Ёё"))
-big = dict(rep, rows=rep["rows"] * 9)
-check("a class too long for one picture is split", len(parents.pictures(big)) == 3)
+    ch in card.atlas()["m32"]["glyphs"] for ch in "Мохинур Oʻrtacha Ўғҳқ Ёё"))
+pics = parents.pictures(rep)
+check("a class is its league and then a picture a student, each named",
+      len(pics) == 4 and "114-guruh" in pics[0][1] and pics[1][1].startswith("Aziza"))
+big = dict(rep, rows=rep["rows"] * 6)
+check("a long class has its league over two pictures", len(parents.pictures(big)) == 2 + 18)
 
 print("\n4. THE PAGE, AND SENDING")
 server.CFG["telegram_token"] = "TEST-TOKEN"
 posted = []
 
 
-def fake_album(token, chat_id, pngs, caption=""):
-    posted.append(("album", chat_id, len(pngs), caption))
+def fake_album(token, chat_id, pngs, caption="", captions=None):
+    posted.append(("album", chat_id, len(pngs), captions))
     return {"ok": True, "result": []}
 
 
@@ -129,7 +138,6 @@ def fake_send(token, chat_id, text, keyboard=None, markup=None):
 
 
 bot.send_album, bot.send = fake_album, fake_send
-parents.SEND_GAP = 0
 parents._sleep = lambda s: None
 
 srv = server.Server(("127.0.0.1", 8894), server.Handler)
@@ -151,14 +159,14 @@ def press(path, fields):
 
 
 pg = get("/parents")
-check("the page shows each class with its pictures", "114" in pg and "116" in pg
-      and "/parents/card.png?g=%d&p=week&k=table" % g in pg)
-check("and the written report as it will be posted", "Vazifa topshirmaganlar" in pg)
+check("the page shows each class: its league and a picture a student",
+      "114" in pg and "116" in pg and "/parents/card.png?g=%d&p=week&k=league" % g in pg
+      and "k=student&s=%d" % aziza in pg)
 check("a class with nothing that week is not ticked", "Nothing to report" in pg
       and 'name="g" value="%d" checked' % g2 not in pg and 'name="g" value="%d" checked' % g in pg)
 check("and is in the teacher's menu", 'href="/parents"' in get("/"))
-r = teacher.open(base + "/parents/card.png?g=%d&p=lastweek&k=trend" % g, timeout=30)
-check("a picture is served as a picture", r.headers.get("Content-Type") == "image/png"
+r = teacher.open(base + "/parents/card.png?g=%d&p=week&k=student&s=%d" % (g, moh), timeout=30)
+check("a student's picture is served as a picture", r.headers.get("Content-Type") == "image/png"
       and r.read()[:4] == b"\x89PNG")
 check("without a channel, sending is not offered", "No channel yet" in pg)
 where, _pg = press("/parents/send", {"p": "week", "g": [g, g2]})
@@ -199,14 +207,14 @@ for _ in range(100):
     if st and st.get("finished"):
         break
     time.sleep(0.1)
-check("both classes are posted: pictures, then words",
-      [k[0] for k in posted] == ["album", "text", "album", "text"])
+check("the note first, then each class's pictures",
+      [k[0] for k in posted] == ["text", "album", "album"])
 check("into the channel", all(k[1] == -1001234 for k in posted))
-check("two pictures a class, with a caption", posted[0][2] == 2 and "114-guruh" in posted[0][3])
-check("the teacher's note is in its class's post only",
-      "Juma kuni" in posted[1][2] and "Juma kuni" not in posted[3][2])
-check("both languages are in it", "🇺🇿" in posted[1][2] and "🇷🇺" in posted[1][2])
-check("nothing went wrong", st["errors"] == [] and st["done"] == 2)
+check("the note says which class it is for", "114-guruh" in posted[0][2] and "Juma kuni" in posted[0][2])
+check("a class's album: the league, then a picture a student, each captioned",
+      posted[1][2] == 4 and "114-guruh" in posted[1][3][0] and posted[1][3][1].startswith("Aziza")
+      and posted[2][2] == 2)
+check("nothing went wrong", st["errors"] == [] and st["done"] == 2 and st["pictures"] == 6)
 pg = get("/parents")
 check("a class already sent is marked, and not ticked again",
       "Sent " in pg and 'name="g" value="%d" checked' % g not in pg)

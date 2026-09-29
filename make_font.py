@@ -24,10 +24,13 @@ import look
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "fonts", "card.atlas")
 
-# (name, weight, pixel size) - the sizes card.py draws with
-SIZES = [("r18", 400, 18), ("m18", 500, 18), ("r22", 400, 22), ("m22", 500, 22),
-         ("b22", 700, 22), ("r26", 400, 26), ("b30", 700, 30), ("b44", 700, 44),
-         ("b60", 700, 60)]
+# (name, weight, pixel size, only these letters) - the sizes card.py draws
+# with. The pictures are 1080 wide and a phone shows them about 390 wide, so
+# nothing is smaller than 28: that reads as 10 on the phone.
+FIGURES = "0123456789+-–,.%/ "
+SIZES = [("r28", 400, 28, None), ("m28", 500, 28, None), ("r32", 400, 32, None),
+         ("m32", 500, 32, None), ("b32", 700, 32, None), ("b40", 700, 40, None),
+         ("b56", 700, 56, None), ("b88", 700, 88, FIGURES)]
 
 CHARS = ("".join(chr(c) for c in range(32, 127))
          + "".join(chr(c) for c in range(0x00C0, 0x0100))            # é, ö, ü ...
@@ -41,9 +44,9 @@ PAGE = """<!doctype html><meta charset="utf-8">
 <body style="font-family:Roboto">%s</body>
 <script>
 async function atlas(sizes, chars) {
-  for (const [_n, w, px] of sizes) await document.fonts.load(w + " " + px + "px Roboto", chars);
+  for (const [_n, w, px, _o] of sizes) await document.fonts.load(w + " " + px + "px Roboto", chars);
   const out = {};
-  for (const [name, weight, px] of sizes) {
+  for (const [name, weight, px, only] of sizes) {
     const c = document.createElement("canvas"), g = c.getContext("2d");
     const pad = Math.ceil(px * 0.6);
     g.font = weight + " " + px + "px Roboto";
@@ -52,7 +55,7 @@ async function atlas(sizes, chars) {
     c.width = px * 3 + pad * 2; c.height = asc + desc + pad * 2;
     g.font = weight + " " + px + "px Roboto";
     const glyphs = {};
-    for (const ch of chars) {
+    for (const ch of (only || chars)) {
       g.clearRect(0, 0, c.width, c.height);
       g.fillStyle = "#000"; g.textBaseline = "alphabetic";
       g.fillText(ch, pad, pad + asc);

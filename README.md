@@ -96,12 +96,13 @@ writing paper.
 - **Overview** → who is at risk (two consecutive misses, or a falling trend).
 - **Students → Parents** → the parents' Telegram channel. Add the bot to the channel as
   an administrator, and the page finds it. For this week, last week, this month or last
-  month, each class gets one post: a picture of the class table (league place, homework
-  done, mark, lesson marks, words, league points), a picture of the last weeks, and a
-  written report in Uzbek and then Russian. The page shows every post as it will
-  appear, with a box for your own note. One button posts the ticked classes, ten
-  seconds apart so Telegram's limit is never hit. Nothing is sent from the demo. The
-  pictures use Roboto from `fonts/card.atlas`, made once by `make_font.py`.
+  month, each class gets an album: its league (each student's points and what they gained)
+  and then one picture per student - place, points, the three lesson marks as dots with the
+  note written in each lesson, homework and its marks, points week by week, and a few
+  sentences in Uzbek and Russian. Each picture carries the student's name, so a parent can
+  search the channel for it. The page shows every picture before anything is sent; one
+  button posts the ticked classes, slowly enough for Telegram's limit. Nothing is sent from
+  the demo. The pictures use Roboto from `fonts/card.atlas`, made once by `make_font.py`.
 - **Students → As a student** → join a class as a practice student and go through
   the student page. It is a copy of today's site (`/data/practice.db`) that only the
   signed-in teacher's browser can open. Buttons at the top of the page answer a
