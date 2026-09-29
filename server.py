@@ -1714,7 +1714,7 @@ def view_assignments(req, db, error="", keep=None):
     for lv in db.execute("SELECT id, name FROM levels ORDER BY sort"):
         books = sorted((b for b in db.execute(
             "SELECT id, number, title, published FROM dtests WHERE kind='handout' AND level_id=?"
-            " ORDER BY id DESC", (lv["id"],))
+            " AND series IS NULL ORDER BY id DESC", (lv["id"],))
             if b["published"] or b["title"] not in open_titles), key=core.lesson_order)
         if books:
             shelves += (f'<optgroup label="{E(lv["name"])}" data-level="{lv["id"]}">'
@@ -10281,7 +10281,7 @@ def act_new_list(req, db):
              core.iso(core.now()), 1 if publish_now else 0,
              1 if f.get("rubric", [""])[0] == "1" else 0,
              mine, minutes if mine else None, min_words if mine else None,
-             booklets.get(title.strip().lower())),
+             booklets.get(title.strip().lower()) or core.destination_test(db, title)),
         ).lastrowid)
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":

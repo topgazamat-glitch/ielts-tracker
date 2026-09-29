@@ -137,9 +137,11 @@
                     pick.querySelector('option[value="' + book.test_id + '"]:not(:disabled)'));
         if (pick) pick.value = picked ? String(book.test_id) : "";
         write();
-        note.textContent = picked
+        const destOn = plan.items.some((i) => i.kind === "destination" && i.test_id);
+        note.textContent = (picked
           ? "Filled in. Students do the handout on the site, or send photos of the paper."
-          : "Filled in. There is no digital handout for this unit yet, so it is a line to tick.";
+          : "Filled in. There is no digital handout for this unit yet, so it is a line to tick.")
+          + (destOn ? " The Destination unit is on the site too." : "");
         // the writing question's level and unit, already chosen
         const lvl = group.selectedOptions[0] && group.selectedOptions[0].getAttribute("data-level-name");
         const sl = $("sug_level"), su = $("sug_unit");

@@ -457,6 +457,11 @@ def migrate(db):
         db.execute("ALTER TABLE dtests ADD COLUMN in_league"
                    " INTEGER NOT NULL DEFAULT 1")
     tcols = {r["name"] for r in db.execute("PRAGMA table_info(dtests)")}
+    if tcols and "series" not in tcols:
+        # a handout from another book - a Destination unit - rather than the
+        # course's own booklet: set as homework like any, never in the chain
+        # of booklets that open one after another
+        db.execute("ALTER TABLE dtests ADD COLUMN series TEXT")
     if tcols and "kind" not in tcols:
         # a handout is a test that is not a test: no clock, no one sitting,
         # no score to chase. It lives on its own page so the Tests tab stays
@@ -686,6 +691,7 @@ def migrate(db):
         strict INTEGER NOT NULL DEFAULT 0, -- leaving the window ends it
         once INTEGER NOT NULL DEFAULT 0,   -- one sitting only: an exam, not practice
         kind TEXT NOT NULL DEFAULT 'test', -- 'test' is marked; 'handout' is worked through
+        series TEXT,                       -- another book's unit (Destination), not the course's
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS dquestions (
@@ -4958,14 +4964,15 @@ def load_test(db, data):
                        (data.get("level", ""),)).fetchone()
     tid = db.execute(
         "INSERT INTO dtests (level_id, number, title, passage, published, layout,"
-        " minutes, strict, once, kind, created_at)"
-        " VALUES (?,?,?,?,0,?,?,?,?,?,?)",
+        " minutes, strict, once, kind, series, created_at)"
+        " VALUES (?,?,?,?,0,?,?,?,?,?,?,?)",
         (level["id"] if level else None, data.get("number"),
          data.get("title") or "Practice test",
          (data.get("passages") or {}).get("gap") or None,
          data.get("layout"), data.get("minutes"),
          1 if data.get("strict") else 0, 1 if data.get("once") else 0,
          "handout" if data.get("kind") == "handout" else "test",
+         data.get("series") or None,
          iso(now()))).lastrowid
     for i, q in enumerate(data.get("questions") or []):
         # a reading passage printed as a picture travels inside the file, and is
@@ -5308,17 +5315,21 @@ def handout_shelf(db, student):
     """The booklets a student sees, in the order of the course, each with the
     booklet that has to be finished first (None when it is open)."""
     gid = student["group_id"]
-    books = [b for b in digital_tests(db, level_of(db, gid), kind="handout")
-             if b["published"] or handout_assigned(db, b["id"], gid)]
-    books.sort(key=lesson_order)
     set_ids = {r["test_id"] for r in db.execute(
         "SELECT test_id FROM assignments WHERE group_id=? AND published=1"
         " AND test_id IS NOT NULL", (gid,))}
+    books = [b for b in digital_tests(db, level_of(db, gid), kind="handout")
+             if not b["series"] and (b["published"] or b["id"] in set_ids)]
+    books.sort(key=lesson_order)
     out, first = [], None
     for b in books:
         out.append((b, first))
         if first is None and b["id"] in set_ids and not handout_finished(db, b["id"], student["id"]):
             first = b
+    # a unit from another book - Destination - opens for the class it is set
+    # to, whatever its level, and neither waits for a booklet nor holds one up
+    out += [(b, None) for b in digital_tests(db, None, kind="handout")
+            if b["series"] and b["id"] in set_ids]
     return out
 
 
@@ -6200,6 +6211,24 @@ UNIT_PLAN = [
 ]
 
 
+DESTINATION_LINE = re.compile(r"destination\s*(a1|a2|b1|b2|c1\s*(?:&|and)?\s*c2|c1)\b.*?\bunit\s*(\d+)",
+                              re.I)
+
+
+def destination_test(db, text):
+    """The digital Destination unit a line of homework names - "Destination
+    B1, Unit 12" - or None when there is none on the site."""
+    m = DESTINATION_LINE.search(text or "")
+    if not m:
+        return None
+    book = re.sub(r"\s+", " ", m.group(1)).upper()
+    row = db.execute(
+        "SELECT id FROM dtests WHERE series='destination' AND number=? AND kind='handout'"
+        " AND UPPER(title) LIKE ? ORDER BY id DESC LIMIT 1",
+        (int(m.group(2)), "DESTINATION %s%%" % book)).fetchone()
+    return row["id"] if row else None
+
+
 def destination_for(db, level_id, unit, text=None):
     """The Destination unit that goes with this coursebook unit at this level.
     Given text, it is remembered for next time; given none, the remembered one
@@ -6239,7 +6268,8 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
     dest = destination_for(db, level_id, unit, destination)
     out["destination"] = dest
     if dest:
-        out["items"].append({"kind": "destination", "test_id": None, "title": dest})
+        out["items"].append({"kind": "destination", "test_id": destination_test(db, dest),
+                             "title": dest})
 
     booklet = None
     if level_id:
