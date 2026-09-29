@@ -364,10 +364,10 @@ class Handout:
         return [m for m in ITEM_P.finditer(self.html) if m.group(2) == label]
 
     def options_on_lines(self, label):
-        """A, B and C each on a line of their own, not run together in one line
+        """A, B, C and D each on a line of their own, not run together in one line
         that wraps wherever the phone's width happens to fall."""
         for m in reversed(self._items(label)):
-            guts = re.sub(r"(<span[^>]*>)([ABC])(</span>)", r"<br>\1\2\3", m.group(4))
+            guts = re.sub(r"(<span[^>]*>)([ABCD])(</span>)", r"<br>\1\2\3", m.group(4))
             guts = re.sub(r"^<br>", "", guts)
             self.html = self.html[:m.start()] + m.group(1) + guts + "</p>" + self.html[m.end():]
 
