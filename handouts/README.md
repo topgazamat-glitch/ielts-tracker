@@ -165,3 +165,19 @@ them): units 12 and 23 so far, live as tests 126 and 127. They carry
 Each exercise keeps the book's letter (A, B, C …) beside its number, so paper
 and screen match. The answers are the book's key (PDF pages 232-254). The
 docstring lists where the key was put right.
+
+## Workbook units
+
+`wb_pi_digital.py` writes the Empower Pre-Intermediate Workbook (the scan in
+`~/Desktop/Empower Second Edition - Books/3. B1 Pre-Intermediate/`, its key on
+page 87) as handouts: unit 1 A & C so far, live as test 128. They carry
+`"series": "workbook"`:
+
+- a homework line "Workbook unit 1 A&C", set to a class of that level, links
+  to it by itself (`core.workbook_test`);
+- it opens only where it is set, and is never in the booklet chain.
+
+Its recordings are the workbook's own, uploaded to `/audio/new` under the
+level "Pre-Intermediate Workbook". They are kept apart from the class tracks,
+which are numbered the same way. The tracks are in
+`~/Downloads/Workbook audio-2/…_B1.zip`, with transcripts (.vtt).
