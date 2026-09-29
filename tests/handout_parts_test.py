@@ -190,6 +190,9 @@ check("the list says it is finished", "Finished" in lst and "1 of 3 right" in ls
 print("\n5. A REBUILT HANDOUT KEEPS WHAT STUDENTS TYPED")
 check("a backtick is an apostrophe", core.answer_matches("won`t", "won't"))
 check("a comma needs no space after it", core.answer_matches("yes,let's", "Yes, let's"))
+check("a dash on its own is an answer: no article",
+      core.answer_matches("–", "–") and core.answer_matches("-", "the/–")
+      and not core.answer_matches("–", "a") and not core.answer_matches("the", "–"))
 old = core.load_test(db, {
     "level": "Pre-Intermediate", "number": 2, "title": "Old version", "kind": "handout",
     "layout": layout, "passages": {},

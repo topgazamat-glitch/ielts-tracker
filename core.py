@@ -4709,6 +4709,8 @@ def answer_matches(given, expected):
     """
     def tidy(t):
         t = (t or "").strip().lower()
+        if t in ("–", "-", "—"):
+            return "–"                          # a dash on its own is an answer: no article
         # a phone types ’ for an apostrophe, and some keyboards only offer ` or ´
         for mark in ("\u2019", "\u2018", "`", "\u00b4", "\u02bc"):
             t = t.replace(mark, "'")
