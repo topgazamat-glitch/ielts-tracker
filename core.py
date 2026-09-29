@@ -1439,9 +1439,17 @@ def student_stats(db, student_id):
             consecutive_misses += 1
         else:
             break
+    # Every piece of homework is out of ten, marked by hand or by itself, and
+    # the average is over every piece whose deadline has gone: one not done is
+    # a nought (his rule - four set, three done, averaged over four). A piece
+    # handed in and still waiting for its mark is left out until it has one.
+    counted = graded + [0.0] * len(missed)
     return {
         "timeline": tl,
-        "average": round(sum(graded) / len(graded), 2) if graded else None,
+        "average": round(sum(counted) / len(counted), 2) if counted else None,
+        # the marks of the work handed in, alone: the ranking's attainment
+        # part, since its effort part already counts what was not done
+        "done_average": round(sum(graded) / len(graded), 2) if graded else None,
         "last3": round(sum(graded[-3:]) / len(graded[-3:]), 2) if graded else None,
         "graded_count": len(graded),
         "completion": completion,
@@ -4002,7 +4010,7 @@ def rating_rows(db, group_id=None):
             "at_risk": stats["at_risk"],
             "marks": marks["overall"],
             "lessons": marks["lessons"],
-            "index": overall_index(completion, stats["average"], marks["overall"]),
+            "index": overall_index(completion, stats["done_average"], marks["overall"]),
             "gain": improvement(db, st["id"]),
         })
     rows.sort(key=lambda r: (-(r["index"] or 0), -(r["completion"] or 0),

@@ -1215,7 +1215,7 @@ def group_rows(db, gid, since=None):
         rows.append({
             "student": st, "stats": stats, "marks": marks,
             "completion": completion,
-            "index": core.overall_index(completion, stats["average"], marks["overall"]),
+            "index": core.overall_index(completion, stats["done_average"], marks["overall"]),
         })
     rows.sort(key=lambda r: (-(r["index"] or 0), r["student"]["name"]))
     return rows
@@ -4526,7 +4526,7 @@ def view_parent_report(req, db, token):
     st = core.student_stats(db, s["id"])
     marks = core.mark_stats(db, s["id"])
     completion = core.live_completion(db, s["id"])
-    index = core.overall_index(completion, st["average"], marks["overall"])
+    index = core.overall_index(completion, st["done_average"], marks["overall"])
     level = core.level_name(db, core.level_of(db, s["group_id"]))
 
     band = []

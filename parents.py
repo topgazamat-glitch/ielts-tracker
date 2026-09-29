@@ -224,13 +224,9 @@ def student_period(db, st, lo, hi, cfg):
     """One student over [lo, hi): what the league would have counted."""
     scores, late, missing, waiting, _pending, batches = core.homework_marks(db, st, lo, hi, [])
     set_n = len(scores) + waiting
-    # the league scores a missing or late piece as a nought; a parent wants
-    # the marks of the work that was handed in, and the misses said apart
-    marks = sorted(scores)
-    drop = missing + late
-    while drop and marks and marks[0] == 0:
-        marks.pop(0)
-        drop -= 1
+    # every piece out of ten, and one not done a nought - the league's average,
+    # so a parent reads the same figure the table is built from
+    marks = scores
     homework_points = sum(sum(m) / len(m) / 10.0 * core.HOMEWORK_PER_SET
                           for m in batches.values())
     ls = lessons(db, st["id"], lo, hi, cfg)

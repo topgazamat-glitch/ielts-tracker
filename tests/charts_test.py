@@ -99,8 +99,8 @@ check("a class test is a percentage, not a raw mark",
       p["class_tests"] == 80.0)
 check("the exam is a percentage", p["final"] == 82.0)
 check("and the final is preferred over the mid", p["exam"] == 82.0)
-check("a student with nothing has nothing, not zero",
-      pts["Jasur"]["homework"] is None and pts["Jasur"]["exam"] is None)
+check("homework missed is a nought in the average; no exam is nothing, not zero",
+      pts["Jasur"]["homework"] == 0 and pts["Jasur"]["exam"] is None)
 check("still here is not the same as left", p["left"] is False)
 
 core.mark_left(db, ids[1], "bored")

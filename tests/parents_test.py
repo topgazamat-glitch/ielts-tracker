@@ -88,7 +88,8 @@ rep = parents.class_report(db, g, p, cfg)
 row = {r["student"]["name"]: r for r in rep["rows"]}
 check("homework done and set, per student", (row["Aziza"]["done"], row["Aziza"]["set"]) == (1, 1)
       and (row["Bekzod"]["done"], row["Bekzod"]["missing"]) == (0, 1))
-check("the mark is of the work handed in", row["Aziza"]["average"] == 9 and row["Bekzod"]["average"] is None)
+check("the average counts work not done as a nought, as the league does",
+      row["Aziza"]["average"] == 9 and row["Bekzod"]["average"] == 0)
 check("each lesson with its three marks and the teacher's note",
       len(row["Aziza"]["lessons"]) == 1 and row["Aziza"]["lessons"][0]["marks"] == [5, 5, 5]
       and row["Aziza"]["lessons"][0]["note"] == "Juda faol boʻldi.")

@@ -117,9 +117,14 @@ writing paper.
 
 ## Design decisions worth keeping
 
-- **A missed assignment is never scored zero.** It shows as a gap in the score chart
-  and is counted in the separate completion figure — so the score line measures
-  ability and completion measures discipline. Merging them hides which one is wrong.
+- **Every piece of homework is out of ten, and one not done is a nought in the average.**
+  Marked by hand or marking itself, each piece counts the same; four set and three done
+  is averaged over four (the teacher's rule, 30 Sep 2026). The league has always worked
+  this way; the Average shown on every page and in the parents' reports now does too.
+  A piece handed in and waiting for its mark is left out until it has one. The score
+  chart still shows a missed piece as a gap, and the Progress ranking's attainment part
+  uses the marks of the work handed in (`done_average`), since its effort part already
+  counts what was not done.
 - **Charts plot a rolling 3-submission average**, with raw scores as dots. A raw
   1–10 line is too noisy to read a trend from.
 - **A student's chart shows the group average behind their line** for context.
