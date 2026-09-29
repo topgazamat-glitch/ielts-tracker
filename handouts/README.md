@@ -44,6 +44,7 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 | Script | Level | Unit | Boxes | Marked on the spot |
 |---|---|---|---|---|
 | `p04bd_digital.py` | Pre-Intermediate | 4B + 4D Celebrations | 152 | 100 |
+| `p01ac_digital.py` | Pre-Intermediate | 1A + 1C Communication | 191 | 159 |
 | `p02ac_digital.py` | Pre-Intermediate | 2A + 2C Travel and tourism | 163 | 129 |
 | `p02bd_digital.py` | Pre-Intermediate | 2B + 2D Travel and tourism | 154 | 123 |
 | `asrp4_digital.py` | Pre-Intermediate | 4 ASP + RP homework | 86 | 69 |

@@ -302,11 +302,14 @@ class Handout:
                                                           told(text, bare=True))
         self.html = self.html[:end] + line + self.html[end:]
 
-    def retell_cells(self, cells):
+    def retell_cells(self, cells, after=None):
         """Table cells told again - the headings and the "Why" column of a
         table that explains. A cell is matched by what it says, since Word
         splits a cell's words across several pieces of formatting; each must
-        be found exactly once."""
+        be found exactly once - from `after` on, if a word like "Why" is also
+        a cell in an earlier table."""
+        start = self.html.index(after) if after else 0
+        head, self.html = self.html[:start], self.html[start:]
         done = []
 
         def swap(m):
@@ -315,9 +318,11 @@ class Handout:
                 done.append(text)
                 return '%s<p><span>%s</span></p></td>' % (m.group(1), cells[text])
             return m.group(0)
-        self.html = re.sub(r"(<td[^>]*>)((?:(?!<td|<table).)*?)</td>", swap, self.html, flags=re.S)
+        self.html = head + re.sub(r"(<td[^>]*>)((?:(?!<td|<table).)*?)</td>", swap, self.html, flags=re.S)
         if sorted(done) != sorted(cells):
-            raise SystemExit("cells not found once each: %s" % sorted(set(cells) ^ set(done)))
+            twice = sorted({c for c in done if done.count(c) > 1})
+            raise SystemExit("cells not found once each: missing %s, twice %s"
+                             % (sorted(set(cells) - set(done)), twice))
 
     def goals(self, lines):
         """The "You will learn to" lines, told again."""
