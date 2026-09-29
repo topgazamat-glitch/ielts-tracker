@@ -1688,10 +1688,10 @@ def view_assignments(req, db, error="", keep=None):
     open_titles = {r["title"] for r in db.execute(
         "SELECT title FROM dtests WHERE kind='handout' AND published=1")}
     for lv in db.execute("SELECT id, name FROM levels ORDER BY sort"):
-        books = [b for b in db.execute(
-            "SELECT id, title, published FROM dtests WHERE kind='handout' AND level_id=?"
-            " ORDER BY number, id DESC", (lv["id"],))
-            if b["published"] or b["title"] not in open_titles]
+        books = sorted((b for b in db.execute(
+            "SELECT id, number, title, published FROM dtests WHERE kind='handout' AND level_id=?"
+            " ORDER BY id DESC", (lv["id"],))
+            if b["published"] or b["title"] not in open_titles), key=core.lesson_order)
         if books:
             shelves += (f'<optgroup label="{E(lv["name"])}" data-level="{lv["id"]}">'
                         + "".join(f'<option value="{b["id"]}"{" selected" if str(b["id"]) == kept("handout") else ""}>{E(b["title"])}'
