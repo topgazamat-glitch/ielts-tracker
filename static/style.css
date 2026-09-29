@@ -2879,3 +2879,14 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
 .tickpad { display: grid; gap: var(--sp-2); }
 .tickbtns { display: grid; grid-template-columns: 2fr 1fr; gap: var(--sp-2); }
 .tickbtns button { min-height: 56px; font-size: 17px; }
+
+/* Set homework: one form. The unit's three boxes sit in a tinted band, since
+   they fill the rest in; the send options and the button close it. */
+.setform { display: grid; gap: var(--sp-3); }
+.setform .inline { margin: 0; }
+.unitfill { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md); background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.setgo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4);
+  padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.setgo label { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: 14px; }
+.setgo button { margin-left: auto; }

@@ -243,8 +243,26 @@ check("and comes back by itself next time; Academic Skills comes with the review
       plan["items"][0]["title"] == "Workbook unit 4 — Academic Skills, Reading Plus and Review"
       and plan["items"][1]["title"] == "Destination B1, Unit 7 (Grammar)")
 page = re.sub(r"\s+", " ", get("/assignments", teacher))
-check("the builder has the Destination box and says the handout can come on paper",
-      'id="u_dest"' in page and "send photos of the paper for your tick (5 out of 10)" in page)
+check("one form: the unit, the lessons and the Destination box are in it",
+      page.count('action="/assignments/list"') == 1 and 'name="destination" id="u_dest"' in page
+      and 'name="unit" id="u_unit"' in page and "unitbuild" not in page)
+check("and it says the handout can come on paper",
+      "send photos of the paper for your tick, 5 out of 10" in page)
+due = core.local_day(core.now() + timedelta(days=3), cfg)
+teacher.open(base + "/assignments/list", urllib.parse.urlencode({
+    "group_id": g, "due": due, "due_time": "20:00", "publish": "1", "unit": "5",
+    "destination": "Destination B1, Unit 9", "handout": str(h2),
+    "items": "Workbook unit 5 A&C\nDestination B1, Unit 9",
+    "prompt": "Write about your town.", "min_words": "120"}).encode(), timeout=30).read()
+set_now = db.execute("SELECT title, prompt, test_id FROM assignments WHERE group_id=? AND due_at LIKE ?"
+                     " ORDER BY id", (g, due + "%")).fetchall()
+check("setting it makes each line a piece, the handout included",
+      [r["title"] for r in set_now][:2] == ["Workbook unit 5 A&C", "Destination B1, Unit 9"]
+      and any(r["test_id"] == h2 for r in set_now))
+check("a question gets a writing line of its own, not the workbook's",
+      set_now[0]["prompt"] is None and any(r["title"] == "Writing" and r["prompt"] for r in set_now))
+check("and the Destination unit typed is remembered for that unit",
+      core.destination_for(db, lvl, 5) == "Destination B1, Unit 9")
 srv.shutdown()
 
 print()

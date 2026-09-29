@@ -29,6 +29,7 @@
             unitBox.appendChild(o);
           });
           unitBox.disabled = !(d.units || []).length;
+          if (unitBox.dataset.want) unitBox.value = unitBox.dataset.want;
         })
         .catch(function () {});
     }
@@ -81,86 +82,79 @@
   wire();
 })();
 
-/* ------------------------------------------------- a unit's homework, in one go
- * The four things a unit always needs were being typed by hand every week, and
- * the writing question was then typed a second time to make it digital. This
- * asks the server what that unit's homework is - the booklet is already on the
- * shelf, the question is already in the bank - and fills the form in.
+/* ------------------------------------------------- a unit's homework, in the form
+ *
+ * Picking the unit and the lessons fills the form in: the workbook line, the
+ * Destination unit remembered for that unit, and the handout from the class's
+ * shelf. Lines the teacher has typed over are left alone, and a Destination
+ * unit typed in the box goes straight into the lines.
  */
 (function () {
-  const build = document.getElementById("u_build");
-  if (!build) return;
-  const $ = (id) => document.getElementById(id);
+  function wire() {
+    const unit = document.getElementById("u_unit");
+    if (!unit || unit.dataset.wired) return;
+    unit.dataset.wired = "1";
+    const $ = (id) => document.getElementById(id);
+    const form = unit.form;
+    const items = $("u_items"), dest = $("u_dest"), pair = $("u_pair"), note = $("u_note");
+    const group = form.querySelector("select[name=group_id]");
+    let auto = items.value;        // what was last filled in, so typing over it is respected
+    let plan = null, picked = false, where = "";
 
-  // the Destination unit typed once for a unit comes back by itself
-  async function peek() {
-    const unit = ($("u_unit").value || "").trim();
-    if (!unit) return;
-    try {
-      const q = new URLSearchParams({group_id: $("u_group").value, unit: unit, peek: "1"});
-      const r = await fetch("/assignments/unit.json?" + q.toString());
-      const got = await r.json();
-      $("u_dest").value = got.destination || "";
-    } catch (e) { /* the box just stays as it was */ }
-  }
-  $("u_unit").addEventListener("change", peek);
-  $("u_group").addEventListener("change", peek);
-
-  build.addEventListener("click", async () => {
-    const unit = ($("u_unit").value || "").trim();
-    const note = $("u_note");
-    if (!unit) { note.textContent = "Which unit?"; return; }
-    build.disabled = true;
-    note.textContent = "Looking…";
-    try {
-      const q = new URLSearchParams({
-        group_id: $("u_group").value, unit: unit,
-        pair: $("u_pair").value, kind: $("u_kind").value,
-        practice: ($("u_practice").value || "").trim(),
-        destination: ($("u_dest").value || "").trim(),
+    function lines() {
+      const out = [];
+      (plan ? plan.items : []).forEach((i) => {
+        if (i.kind === "destination") return;           // the box says it, below
+        if (i.kind === "booklet" && picked) return;     // the handout box says it
+        out.push(i.title);
+        if (i.kind === "workbook" && (dest.value || "").trim()) out.push(dest.value.trim());
       });
-      const r = await fetch("/assignments/unit.json?" + q.toString());
-      const plan = await r.json();
-      const items = plan.items || [];
-      if (plan.destination !== undefined) $("u_dest").value = plan.destination;
-      if (!items.length) { note.textContent = "Nothing found for that unit."; return; }
-
-      const form = document.querySelector('form[action="/assignments/list"]');
-      form.querySelector('select[name=group_id]').value = $("u_group").value;
-      handoutsForLevel();
-      // a digital handout goes in its own box, where it marks itself; the
-      // rest are lines
-      const pick = document.getElementById("hwhandout");
-      const book = items.find((i) => i.kind === "booklet" && i.test_id);
-      let picked = false;
-      if (pick && book && pick.querySelector('option[value="' + book.test_id + '"]:not(:disabled)')) {
-        pick.value = String(book.test_id);
-        picked = true;
-      }
-      form.querySelector('textarea[name=items]').value = items
-        .filter((i) => !(picked && i === book)).map((i) => i.title).join("\n");
-
-      const writing = items.find((i) => i.kind === "writing");
-      const promptBox = form.querySelector('textarea[name=prompt]');
-      if (writing && writing.prompt && promptBox) {
-        promptBox.value = writing.prompt;
-        const details = promptBox.closest("details");
-        if (details) details.open = true;
-        if (writing.minutes) {
-          const m = form.querySelector('input[name=minutes]');
-          if (m && !m.value) m.value = writing.minutes;
-        }
-      }
-      const booklet = items.find((i) => i.kind === "booklet");
-      note.textContent = booklet && booklet.test_id
-        ? "Ready. The handout is on the site, so that line opens the booklet itself."
-        : "Ready. No digital handout for that unit yet — that line is just a note.";
-    } catch (e) {
-      note.textContent = "Could not build it.";
-    } finally {
-      build.disabled = false;
+      return out.join("\n");
     }
-  });
+    function write() {
+      if (items.value.trim() && items.value !== auto) {
+        note.textContent = "Your own lines are kept. Empty the box to have it filled in again.";
+        return;
+      }
+      items.value = auto = lines();
+    }
+    async function fill() {
+      const u = (unit.value || "").trim();
+      if (!u) return;
+      const q = new URLSearchParams({group_id: group.value, unit: u, pair: pair.value, kind: "none"});
+      try {
+        const r = await fetch("/assignments/unit.json?" + q.toString(), {cache: "no-store"});
+        plan = await r.json();
+        if (!plan.items) return;
+        // a new unit (or class) brings its own Destination unit; new lessons keep the one typed
+        const key = group.value + ":" + u;
+        if (key !== where || !(dest.value || "").trim()) dest.value = plan.destination || "";
+        where = key;
+        if (typeof handoutsForLevel === "function") handoutsForLevel();
+        const pick = $("hwhandout");
+        const book = plan.items.find((i) => i.kind === "booklet");
+        picked = !!(pick && book && book.test_id &&
+                    pick.querySelector('option[value="' + book.test_id + '"]:not(:disabled)'));
+        if (pick) pick.value = picked ? String(book.test_id) : "";
+        write();
+        note.textContent = picked
+          ? "Filled in. Students do the handout on the site, or send photos of the paper."
+          : "Filled in. There is no digital handout for this unit yet, so it is a line to tick.";
+        // the writing question's level and unit, already chosen
+        const lvl = group.selectedOptions[0] && group.selectedOptions[0].getAttribute("data-level-name");
+        const sl = $("sug_level"), su = $("sug_unit");
+        if (sl && lvl && sl.value !== lvl) { sl.value = lvl; sl.dispatchEvent(new Event("change")); }
+        if (su) { su.dataset.want = u; su.value = u; }
+      } catch (e) { /* the form stays as it was */ }
+    }
+    unit.addEventListener("change", fill);
+    pair.addEventListener("change", fill);
+    group.addEventListener("change", () => { if ((unit.value || "").trim()) fill(); });
+    dest.addEventListener("input", () => { if (plan) write(); });
+  }
+  document.addEventListener("DOMContentLoaded", wire);
+  document.addEventListener("pageswap", wire);
+  wire();
 })();
 
 /* ------------------------------------------------- the handout to open

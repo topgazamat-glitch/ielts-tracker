@@ -1703,6 +1703,7 @@ def view_assignments(req, db, error="", keep=None):
     sug_kinds = "".join(f'<option value="{k}">{E(lab)}</option>'
                         for k, lab, _w, _m in core.prompt_kinds())
     opts = "".join(f'<option value="{g["id"]}" data-level="{g["level_id"] or ""}"'
+                   f' data-level-name="{E(core.level_name(db, g["level_id"]) or "")}"'
                    f'{" selected" if str(g["id"]) == kept("group_id") else ""}>{E(g["name"])}</option>'
                    for g in groups)
     # every digital handout, under its level; one open only as a class's
@@ -1726,66 +1727,44 @@ def view_assignments(req, db, error="", keep=None):
             'set, students would never see it, and the league would count it as missed. '
             'Everything you typed is still below &mdash; change the date and set it again.</div>'
             if error == "past" else "")
+    pairs = "".join(f'<option value="{E(v)}"{" selected" if kept("pair", "A&C") == v else ""}>{E(l)}</option>'
+                    for v, l in (("A&C", "A & C"), ("B&D", "B & D"),
+                                 ("ASRP", "Academic Skills + Reading Plus + Review")))
     body = f"""<h1>Set homework</h1>{warn}
-<p class="sub">What you set here is what the bot offers students when they send a photo.
-Everything already set is on the <a class="linky" href="/homework">Homework</a> page,
-where you see who has done it, change it or delete it.</p>
-<div class="card gap-3" id="unitbuild">
-<p style="margin-top:0"><strong>A unit\u2019s homework, in one go.</strong></p>
-<p class="sub">The workbook, the Destination unit that goes with it, the handout
-and, if you want them, a writing task and a practice test &mdash; filled in below,
-ready to edit. The handout is found on this group\u2019s shelf; the Destination unit
-is remembered once you have typed it for a unit; the question comes from the bank.
-Students can do the handout on the site, or send photos of the paper for your
-tick ({core.PAPER_TICK:g} out of 10).</p>
-<div class="inline gap-2">
-<label class="f">Group<select id="u_group">{opts}</select></label>
-<label class="f">Unit<input type="number" id="u_unit" min="1" max="20"
- style="width:80px"></label>
-<label class="f">Lessons<select id="u_pair">
-<option value="A&amp;C">A &amp; C</option><option value="B&amp;D">B &amp; D</option>
-<option value="ASRP">Academic Skills + Reading Plus</option></select></label>
-<label class="f">Destination<input id="u_dest" placeholder="e.g. Destination B1, Unit 7"
- style="width:230px"></label>
-<label class="f">Writing<select id="u_kind">{sug_kinds}<option value="none">No writing</option></select></label>
-<label class="f">Practice test<input id="u_practice" placeholder="optional"
- style="width:110px"></label>
-<label class="f pushed">&nbsp;<button type="button" id="u_build">Build it</button></label>
+<p class="sub">Everything already set is on the <a class="linky" href="/homework">Homework</a>
+page, where you see who has done it, change it or delete it.</p>
+<form method="post" action="/assignments/list" class="card setform">
+<div class="inline">
+  <label class="f">Group<select name="group_id">{opts}</select></label>
+  <label class="f">Due<input type="date" name="due" min="{today}"></label>
+  <label class="f">at<input type="time" name="due_time" value="{E(kept("due_time", "23:59"))}" step="60"></label>
 </div>
-<p class="sub gap-2" id="u_note"></p>
+
+<div class="unitfill">
+  <div class="inline">
+    <label class="f">Unit<input type="number" name="unit" id="u_unit" min="1" max="20"
+      value="{E(kept("unit"))}" style="width:80px"></label>
+    <label class="f">Lessons<select name="pair" id="u_pair">{pairs}</select></label>
+    <label class="f">Destination<input name="destination" id="u_dest" value="{E(kept("destination"))}"
+      placeholder="e.g. Destination B1, Unit 7" style="width:240px"></label>
+  </div>
+  <p class="sub flush" id="u_note">Pick the unit and the lessons: the workbook, the Destination
+  unit and the handout fill in below. A Destination unit you type is remembered for next time.</p>
 </div>
-<div class="card"><form method="post" action="/assignments/list">
-<div class="inline" style="margin-bottom:10px">
-<label class="f">Group<select name="group_id">{opts}</select></label>
-<label class="f">Type<select name="task_type">
-<option value="other">Other</option><option value="task2">Task 2</option>
-<option value="task1">Task 1</option></select></label>
-<label class="f">Due<input type="date" name="due" min="{today}"></label>
-<label class="f">at<input type="time" name="due_time" value="{E(kept("due_time", "23:59"))}" step="60"></label>
-<label class="f pushed">&nbsp;
-<span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="publish" value="1"{checked("publish")}> open to students now</span></label>
-<label class="f pushed">&nbsp;
-<span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="announce" value="1"{checked("announce")}> tell them in Telegram</span></label>
-<label class="f pushed">&nbsp;
-<span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
-<input type="checkbox" name="rubric" value="1"{checked("rubric", False)}> mark on the four criteria</span></label>
-</div>
-<div class="hwpick gap-2">
+
 <label class="f">Digital handout<select name="handout" id="hwhandout">
 <option value="">none</option>{shelves}</select></label>
-<p class="sub">It opens for this class with the deadline above and marks itself:
-half for the parts done by the deadline, half for the right answers. Its mark
-out of ten is averaged with your marks for the rest of this homework.</p>
-</div>
-<label class="f">One item per line &mdash; numbering is optional
-<textarea name="items" rows="6" class="wide"
-placeholder="Workbook unit 4 A &amp; C&#10;Writing &ndash; an email to a friend&#10;Grammar paper page 45">{E(kept("items"))}</textarea></label>
-<details class="gap-3"><summary>Make it a writing task they type</summary>
-<p class="sub gap-2">Students get a writing paper &mdash; the question on one side, the
-sheet on the other &mdash; instead of sending a photo of their handwriting. One question
-per posting.</p>
+<p class="sub flush">Students do it on the site &mdash; it marks itself, half for the parts done
+by the deadline, half for the right answers &mdash; or send photos of the paper for your tick,
+{core.PAPER_TICK:g} out of 10. The better of the two counts.</p>
+
+<label class="f">Everything else, one per line
+<textarea name="items" id="u_items" rows="5" class="wide"
+placeholder="Workbook unit 4 A &amp; C&#10;Destination B1, Unit 7&#10;Practice test 3">{E(kept("items"))}</textarea></label>
+
+<details class="gap-2"><summary>Add a writing task they type</summary>
+<p class="sub gap-2">Students get a writing paper &mdash; the question on one side, the sheet
+on the other &mdash; instead of sending a photo of their handwriting.</p>
 <div class="inline gap-2" id="suggestbar">
 <label class="f">Level<select id="sug_level">{sug_levels}</select></label>
 <label class="f">Unit<select id="sug_unit"><option value="">any unit</option></select></label>
@@ -1802,13 +1781,24 @@ per posting.</p>
  placeholder="250" style="width:90px"> words</label>
 <label class="f">Time<input type="number" name="minutes" min="0" max="240"
  placeholder="40" style="width:90px"> minutes</label>
+<label class="f">Type<select name="task_type">
+<option value="other">Other</option><option value="task2">Task 2</option>
+<option value="task1">Task 1</option></select></label>
+<label class="f pushed">&nbsp;
+<span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
+<input type="checkbox" name="rubric" value="1"{checked("rubric", False)}> mark on the four criteria</span></label>
 </div></details>
-<div class="gap-3"><button onclick="this.disabled=true;this.form.submit()">
-Set the homework</button></div></form>
-<p class="sub gap-3">One line makes one piece of homework, several lines
-make several &mdash; students pick which one they are sending and each gets its own score.
-Without &ldquo;open to students now&rdquo; it is saved as a draft: nobody sees it until you
-press Publish on the Homework page.</p></div>"""
+
+<div class="setgo">
+  <label><input type="checkbox" name="publish" value="1"{checked("publish")}> open to students now</label>
+  <label><input type="checkbox" name="announce" value="1"{checked("announce")}> tell them in Telegram</label>
+  <button onclick="this.disabled=true;this.form.submit()">Set the homework</button>
+</div>
+</form>
+<p class="sub gap-3">One line makes one piece of homework, several lines make several
+&mdash; students pick which one they are sending and each gets its own score. Without
+&ldquo;open to students now&rdquo; it is saved as a draft: nobody sees it until you press
+Publish on the Homework page.</p>"""
     return html_response(page("Set homework", body, "Set homework"))
 
 
@@ -10228,6 +10218,12 @@ def act_new_list(req, db):
                           (int(handout), int(gid))).fetchone()
     if book and book["title"] not in items:
         items.append(book["title"])       # the handout is one more piece of the set
+    if (f.get("prompt", [""])[0] or "").strip() and len(items) > 1 and not any(
+            t.lower().startswith("writing") for t in items):
+        # a question among several pieces is a writing task of its own: it
+        # gets its own line rather than turning the first - the workbook -
+        # into a writing paper. A lone line is the writing task itself.
+        items.append("Writing")
     if not gid or not items:
         return redirect("/assignments")
     due = f.get("due", [""])[0]
@@ -10238,6 +10234,11 @@ def act_new_list(req, db):
         # comes back as it was typed, with the date to fix.
         return view_assignments(req, db, error="past", keep=f)
     publish_now = f.get("publish", [""])[0] == "1"
+    # the Destination unit typed for a unit is remembered for the next time
+    unit_no = (f.get("unit", [""])[0] or "").strip()
+    dest = (f.get("destination", [""])[0] or "").strip()
+    if unit_no.isdigit() and dest:
+        core.destination_for(db, core.level_of(db, int(gid)), int(unit_no), dest)
     # a question makes it a writing paper; only the first item carries it, since
     # one posting is one question
     prompt = (f.get("prompt", [""])[0] or "").strip() or None
