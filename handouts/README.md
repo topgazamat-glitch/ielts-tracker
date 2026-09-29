@@ -55,6 +55,32 @@ booklet's markup rather than reading the Word file, in four parts that
 follow the pack's own seam between the self-checked and teacher-marked parts.
 | `b03b_digital.py` | Beginner | 3B Food and drink | 188 | 116 |
 | `e12ac_digital.py` | Elementary | 12A + 12C Travel | 155 | 110 |
+| `e12bd_digital.py` | Elementary | 12B + 12D Travel | 153 | 116 |
+| `p01bd_digital.py` | Pre-Intermediate | 1B + 1D Communication | 192 | 145 |
+| `p03ac_digital.py` | Pre-Intermediate | 3A + 3C Money | 154 | 129 |
+| `p03bd_digital.py` | Pre-Intermediate | 3B + 3D Money | 152 | 120 |
+| `p04ac_digital.py` | Pre-Intermediate | 4A + 4C Celebrations | 151 | 105 |
+| `i07a_digital.py` | Intermediate | 7A House and home | 259 | 220 |
+| `i07b_digital.py` | Intermediate | 7B House and home | 294 | 254 |
+| `i08b_digital.py` | Intermediate | 8B Information | 279 | 220 |
+| `i09ac_digital.py` | Intermediate | 9A + 9C Entertainment | 230 | 184 |
+| `i09bd_digital.py` | Intermediate | 9B + 9D Entertainment | 133 | 100 |
+| `i10ac_digital.py` | Intermediate | 10A + 10C Opportunities | 158 | 121 |
+| `i10bd_digital.py` | Intermediate | 10B + 10D Opportunities | 155 | 108 |
+
+Intermediate explanations stay English. The Intermediate and E12BD booklets
+come from the Material Bank `_NEW BOOKLET STYLE` copies: the Desktop
+"redesigns" have the same exercises, but their section bars share a table
+with what follows, so they would not split into parts. A booklet with the
+older cover (the unit number in a box, the goals under "By the end of this
+booklet") calls `Handout.cover(...)` so the page reads its name and goals.
+
+Each script's docstring lists what it puts right: places where the key and
+the booklet disagree (a "TWO sentences are correct" that the key ticks three
+of, a listening line the key gives to the wrong speaker), since a page that
+marks itself cannot be wrong about its own answers. The marking forgives
+case and commas, so a correction that is only a capital letter or a comma
+is left for the teacher rather than marked right when copied out unchanged.
 
 The Beginner and Elementary ones tell their explanations again in Uzbek (`Handout.retell`):
 at that level most students cannot read a grammar box in English. The
@@ -80,3 +106,17 @@ the rest of the set, like any other piece, into the league.
 
 A handout open to the whole level is practice and earns nothing; one that
 is not open opens only for the class it is set to.
+
+# One booklet after another
+
+A student's Handouts page lists the level's booklets in the order of the
+course - by unit, the A & C lessons before B & D, the unit's ASRP pack last
+(`core.lesson_order`). A booklet set as homework to the class has to have
+every part checked before anything after it opens: the list shows the later
+ones locked, their address shows which booklet to finish first, and saving
+or checking into them is refused (`core.handout_shelf`,
+`core.handout_blocked_by`). Booklets before the first one set to the class
+stay open as practice, so a class that starts using them at Unit 4 is not
+sent back to Unit 1, and a booklet never set holds nobody up. A written
+answer the teacher later marks as not counting lowers the mark but does not
+shut the student out again.

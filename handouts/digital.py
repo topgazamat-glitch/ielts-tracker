@@ -336,6 +336,29 @@ class Handout:
             part = part[:m.start()] + '<p><span>—  </span>%s</p>' % told(line, bare=True) + part[m.end():]
         self.html = self.html[:at] + part + self.html[end:]
 
+    def cover(self, unit_line, level_line, name, lesson_line, topics=""):
+        """An older booklet's cover (the unit number in a box, the goals under
+        "By the end of this booklet") in the shape the page reads: the unit
+        line, the name, the lesson line, then the contents and "You will
+        learn to". The contents and the goals are the booklet's own."""
+        start = self.html.index(">", self.html.index('<div class="booklet"')) + 1
+        end = bh_section_at().search(self.html).start()
+        old = self.html[start:end]
+        paras = re.findall(r"<p[^>]*>(?:(?!</p>).)*?</p>", old, re.S)
+        contents = "".join(p for p in paras if re.match(r"[1-5]\s+\S", plain(p)) and "—" in plain(p))
+        goals = "".join(p for p in paras if plain(p).startswith("—"))
+        if not contents or not goals:
+            raise SystemExit("the cover has no contents or no goals")
+        self.html = self.html[:start] + (
+            "<p><span>%s</span><span class='tab'></span><span>%s</span></p>"
+            "<p><span>%s</span></p><p><span>%s</span><span>      %s</span></p>"
+            '<table class="bk"><tr><td><p><span>In this booklet</span></p>%s</td>'
+            "<td><p><span>You will learn to</span></p>%s</td></tr></table>"
+            "<p><span>Prepared by  Olimov Azamat</span></p>"
+            % (tuple(html.escape(x) for x in (unit_line, level_line, name, lesson_line, topics))
+               + (contents, goals))
+        ) + self.html[end:]
+
     # ---------------------------------------------------- shapes that recur
     def _items(self, label):
         return [m for m in ITEM_P.finditer(self.html) if m.group(2) == label]
@@ -480,6 +503,12 @@ class Handout:
             raise SystemExit("decisions for boxes that are not there: %s" % unused)
         return {"level": level, "number": number, "title": title, "kind": "handout",
                 "passages": {}, "layout": layout, "questions": questions}
+
+
+def bh_section_at():
+    """Where the first section bar is - the pattern the site splits parts on."""
+    import core
+    return core.SECTION_AT
 
 
 def report(data):
