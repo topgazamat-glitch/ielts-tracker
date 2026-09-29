@@ -15,8 +15,10 @@ import urllib.parse
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import card
 import charts
 import core
+import parents
 import uploads
 
 CFG = core.load_config()
@@ -70,6 +72,7 @@ SECTIONS = [
                              ("/ratings", "Progress"), ("/reteach", "Reteach"),
                              ("/records", "Records"), ("/questions", "Questions"),
                              ("/championship", "League"),
+                             ("/parents", "Parents"),
                              ("/practice", "As a student")]),
     ("Materials", "/materials", [("/materials", "Materials"), ("/vocab", "Vocabulary"),
                                  ("/tests", "Tests"), ("/play", "Play"),
@@ -7188,6 +7191,227 @@ def act_demo_reset(req, db):
     return redirect("/insights")
 
 
+# ------------------------------------------------ the parents' channel
+#
+# One post a class: the class table and the last weeks as pictures, and a
+# written report in Uzbek and Russian (parents.py works it out, card.py draws
+# it). The page shows each post exactly as it will appear, and one button
+# posts them all. Sending runs on its own thread, on the real database, and
+# never from the demo.
+
+def parent_groups(db):
+    return [g for g in db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name")
+            if db.execute("SELECT 1 FROM students WHERE group_id=? AND active=1",
+                          (g["id"],)).fetchone()]
+
+
+def parents_kind(query):
+    kind = (query.get("p", [""])[0] or "week")
+    return kind if kind in dict(parents.PERIODS) else "week"
+
+
+def view_parents(req, db):
+    q = req.get("query", {}) if isinstance(req, dict) else {}
+    kind = parents_kind(q)
+    p = parents.period(kind, CFG)
+    chan = core.parents_channel(db)
+    token = CFG.get("telegram_token")
+    state = parents.sending(db)
+    going = parents.busy(db)
+
+    flash = ""
+    if q.get("said") == ["1"]:
+        flash = '<div class="flash">Posted in the channel.</div>'
+    elif q.get("e"):
+        why = {"demo": "This is the demo: its classes are invented, so nothing is sent from it. "
+                       "Leave the demo to send.",
+               "channel": "There is no channel yet - see the steps below.",
+               "bot": "The bot is not set up on this server, so nothing can be sent.",
+               "busy": "A sending is still going. Wait for it to finish.",
+               "none": "Tick at least one class.",
+               "empty": "Write something first.",
+               "said": "Telegram did not take it: " + (q.get("why", [""])[0] or "")}
+        flash = '<div class="flash err">%s</div>' % E(why.get(q["e"][0], "Something went wrong."))
+    if state:
+        if going:
+            flash += (f'<div class="flash">Sending: {state["done"]} of {state["total"]} classes '
+                      f'posted. This page refreshes by itself.</div>')
+        elif state.get("finished") and q.get("sent") == ["1"]:
+            errs = state.get("errors") or []
+            flash += ('<div class="flash%s">%d of %d classes posted.%s</div>' % (
+                " err" if errs else "", state["total"] - len(errs), state["total"],
+                "".join(" " + E(e) for e in errs)))
+
+    # the channel: found by the bot, or typed in
+    if chan:
+        where = f'@{E(chan["username"])}' if chan.get("username") else "a private channel"
+        chan_html = (f'<p class="flush">Posting to <strong>{E(chan["title"] or "the channel")}</strong> '
+                     f'<span class="sub">({where})</span></p>')
+    else:
+        chan_html = """<p class="flush"><strong>No channel yet.</strong></p>
+<ol class="par-steps">
+  <li>In Telegram, make the channel for the parents.</li>
+  <li>Open the channel's settings &rarr; Administrators &rarr; Add administrator, and add
+  your bot. Let it post messages.</li>
+  <li>Post anything in the channel, then open this page again. The bot will have found it.</li>
+</ol>"""
+    others = [c for c in core.channels_seen(db)
+              if c.get("admin") and (not chan or str(c["id"]) != str(chan["id"]))]
+    pick = "".join(
+        f'<form method="post" action="/parents/channel"><input type="hidden" name="id" value="{E(str(c["id"]))}">'
+        f'<button class="ghost">Use {E(c["title"] or str(c["id"]))} instead</button></form>' for c in others)
+
+    tabs = "".join(
+        f'<a class="tab{" on" if k == kind else ""}" href="/parents?p={k}">{E(label)}</a>'
+        for k, label in parents.PERIODS)
+    days = "%s – %s" % (p["first"].strftime("%d %b"), p["last"].strftime("%d %b"))
+
+    groups = parent_groups(db)
+    cards = ""
+    for g in groups:
+        rep = parents.class_report(db, g["id"], p, CFG)
+        text = parents.post_text(rep, "", CFG)
+        when = parents.sent_at(db, p["key"], g["id"])
+        t = rep["totals"]
+        # a class with nothing in the stretch has nothing to tell its parents
+        quiet = not (t["set"] or t["lessons"] or t["words"] or any(r["parts"] for r in rep["rows"]))
+        sent = (f'<span class="pill ok">Sent {E(practice_when(when))}</span>' if when
+                else '<span class="pill mute">Nothing to report</span>' if quiet else "")
+        n = len(rep["rows"])
+        src = f'/parents/card.png?g={g["id"]}&amp;p={kind}'
+        pics = "".join(f'<a href="{src}&amp;k={k}" target="_blank" rel="noopener">'
+                       f'<img src="{src}&amp;k={k}" alt="{E(alt)}" loading="lazy"></a>'
+                       for k, alt in (("table", "The class table"), ("trend", "The last weeks")))
+        cards += f"""<section class="card par-class">
+  <div class="par-head">
+    <label class="par-pick"><input type="checkbox" name="g" value="{g["id"]}"{"" if (when or quiet) else " checked"}>
+    <span><strong>{E(g["name"])}</strong> <span class="sub">{E(rep["level"])} &middot; {n} students</span></span></label>
+    {sent}
+  </div>
+  <div class="par-pics">{pics}</div>
+  <label class="f">Your note to these parents (optional)
+    <textarea name="note_{g["id"]}" rows="2" placeholder="Posted first. Masalan: Keyingi dars juma kuni."></textarea></label>
+  <details class="par-text"><summary>The written report, as it will be posted</summary>
+  <div class="par-msg">{E(parents.caption(rep))}</div><div class="par-msg">{E(text)}</div></details>
+</section>"""
+    can = bool(chan and token and not core.demo_on() and not going)
+    button = (f'<button{"" if can else " disabled"}>Send to the channel</button>')
+    why_not = ("" if can else
+               '<p class="sub flush">%s</p>' % (
+                   "The demo's classes are invented: nothing is sent from here." if core.demo_on()
+                   else "Sending&hellip;" if going
+                   else "Connect a channel first (below)." if not chan
+                   else "The bot is not set up on this server."))
+    refresh = '<meta http-equiv="refresh" content="6">' if going else ""
+    body = f"""{refresh}<h1>Parents' channel</h1>
+{flash}
+<form method="post" action="/parents/send" class="par-form"
+      onsubmit="return confirm('Post the ticked classes in the parents\\' channel?')">
+  <input type="hidden" name="p" value="{kind}">
+  <div class="par-bar">
+    <div class="tabs">{tabs}</div>
+    <span class="sub">{E(days)}</span>
+    {button}
+  </div>
+  {why_not}
+  {cards or '<div class="card"><p class="flush">No classes with students yet.</p></div>'}
+</form>
+<h2>Write to all parents</h2>
+<div class="card"><form method="post" action="/parents/say">
+  <label class="f">One message, posted in the channel as you write it
+  <textarea name="text" rows="4" placeholder="Hurmatli ota-onalar! ... / Уважаемые родители! ..."></textarea></label>
+  <button{"" if (chan and token and not core.demo_on()) else " disabled"}>Post it</button>
+</form></div>
+<h2>The channel</h2>
+<div class="card">{chan_html}<div class="row-actions">{pick}</div>
+<form method="post" action="/parents/channel" class="par-typed">
+  <label class="f">Or type a public channel's name<input name="username" placeholder="@channel_name"></label>
+  <button class="ghost">Use it</button></form></div>"""
+    return html_response(page("Parents", body, "Parents"))
+
+
+def view_parents_card(req, db):
+    q = req.get("query", {})
+    gid = (q.get("g", [""])[0] or "")
+    if not gid.isdigit():
+        return not_found()
+    rep = parents.class_report(db, int(gid), parents.period(parents_kind(q), CFG), CFG)
+    png_bytes = card.trend(rep) if q.get("k") == ["trend"] else card.class_table(rep)
+    return 200, [("Content-Type", "image/png"), ("Cache-Control", "no-store"),
+                 ("Content-Length", str(len(png_bytes)))], png_bytes
+
+
+def act_parents_send(req, db):
+    f = req["form"]
+    kind = parents_kind(f)
+    if core.demo_on():
+        return redirect(f"/parents?p={kind}&e=demo")
+    if not CFG.get("telegram_token"):
+        return redirect(f"/parents?p={kind}&e=bot")
+    if not core.parents_channel(db):
+        return redirect(f"/parents?p={kind}&e=channel")
+    if parents.busy(db):
+        return redirect(f"/parents?p={kind}&e=busy")
+    known = {g["id"] for g in parent_groups(db)}
+    gids = [int(v) for v in f.get("g", []) if v.isdigit() and int(v) in known]
+    if not gids:
+        return redirect(f"/parents?p={kind}&e=none")
+    notes = {gid: (f.get("note_%d" % gid, [""])[0] or "").strip()[:600] for gid in gids}
+    # marked as going before the thread starts, so a second press is refused
+    core.meta_set(db, "parents_sending", json.dumps(
+        {"kind": kind, "total": len(gids), "done": 0, "errors": [],
+         "started": core.iso(core.now()), "touched": core.iso(core.now()), "finished": None}))
+    import threading
+    threading.Thread(target=parents.send_all, daemon=True,
+                     args=(CFG["telegram_token"], kind, gids, notes, CFG)).start()
+    return redirect(f"/parents?p={kind}&sent=1")
+
+
+def act_parents_say(req, db):
+    text = (req["form"].get("text", [""])[0] or "").strip()
+    chan = core.parents_channel(db)
+    if core.demo_on():
+        return redirect("/parents?e=demo")
+    if not text:
+        return redirect("/parents?e=empty")
+    if not chan:
+        return redirect("/parents?e=channel")
+    if not CFG.get("telegram_token"):
+        return redirect("/parents?e=bot")
+    import bot
+    res = bot.send(CFG["telegram_token"], chan["id"], text[:4000])
+    if not res.get("ok"):
+        return redirect("/parents?e=said&why=" + urllib.parse.quote(
+            str(res.get("description") or res.get("error") or "")[:200]))
+    return redirect("/parents?said=1")
+
+
+def act_parents_channel(req, db):
+    """Choose one of the channels the bot has found, or name a public one."""
+    f = req["form"]
+    if core.demo_on():
+        return redirect("/parents?e=demo")
+    cid = (f.get("id", [""])[0] or "").strip()
+    seen = {str(c["id"]): c for c in core.channels_seen(db)}
+    if cid in seen:
+        core.meta_set(db, "parents_channel", json.dumps(seen[cid]))
+        return redirect("/parents")
+    name = (f.get("username", [""])[0] or "").strip().lstrip("@").split("/")[-1]
+    token = CFG.get("telegram_token")
+    if not name or not token:
+        return redirect("/parents?e=" + ("bot" if name else "channel"))
+    import bot
+    res = bot.call(token, "getChat", chat_id="@" + name)
+    chat = res.get("result") or {}
+    if not res.get("ok") or chat.get("type") != "channel":
+        return redirect("/parents?e=said&why=" + urllib.parse.quote(
+            "no channel called @%s that the bot can see" % name))
+    core.channel_seen(db, chat["id"], chat.get("title") or "", chat.get("username") or "", True)
+    core.meta_set(db, "parents_channel", json.dumps(
+        {"id": chat["id"], "title": chat.get("title") or "", "username": chat.get("username") or ""}))
+    return redirect("/parents")
+
+
 # ------------------------------------------------ the student page, as a student
 #
 # The teacher's way to go through the student page without joining a class
@@ -10108,6 +10332,11 @@ ROUTES = [
     ("POST", r"^/demo/on$", act_demo_on),
     ("POST", r"^/demo/off$", act_demo_off),
     ("POST", r"^/demo/reset$", act_demo_reset),
+    ("GET",  r"^/parents$", view_parents),
+    ("GET",  r"^/parents/card\.png$", view_parents_card),
+    ("POST", r"^/parents/send$", act_parents_send),
+    ("POST", r"^/parents/say$", act_parents_say),
+    ("POST", r"^/parents/channel$", act_parents_channel),
     ("GET",  r"^/practice$", view_practice),
     ("GET",  r"^/practice/screens$", view_practice_screens),
     ("POST", r"^/practice/start$", act_practice_start),

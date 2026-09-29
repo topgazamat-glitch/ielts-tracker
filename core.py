@@ -3625,6 +3625,33 @@ def practice_telegram(method, params):
     return {"ok": True, "result": {"message_id": 0}}
 
 
+def channel_seen(db, chat_id, title, username, admin):
+    """Remember a channel the bot can post in (or no longer can). The first
+    one it can post in becomes the parents' channel unless one is chosen."""
+    seen = json.loads(meta_get(db, "channels_seen", "{}") or "{}")
+    seen[str(chat_id)] = {"id": chat_id, "title": title, "username": username,
+                          "admin": bool(admin), "at": iso(now())}
+    meta_set(db, "channels_seen", json.dumps(seen))
+    chosen = parents_channel(db)
+    if admin and not chosen:
+        meta_set(db, "parents_channel", json.dumps(seen[str(chat_id)]))
+    elif chosen and str(chosen["id"]) == str(chat_id):
+        meta_set(db, "parents_channel", json.dumps(seen[str(chat_id)]) if admin else "")
+
+
+def parents_channel(db):
+    """The channel the parents' reports go to: {id, title, username} or None."""
+    raw = meta_get(db, "parents_channel")
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def channels_seen(db):
+    return list(json.loads(meta_get(db, "channels_seen", "{}") or "{}").values())
+
+
 def practice_heard(db):
     """What the bot would have sent while the practice copy was open,
     newest first, with who it was for."""

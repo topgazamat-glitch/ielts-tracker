@@ -566,6 +566,53 @@ def grade_submission(db, token, sub_id, score):
     return row
 
 
+def note_channel(db, update):
+    """The bot was made an administrator of a channel, or taken off one, or
+    saw a post in one it can post in. The parents' channel is found this way:
+    the teacher adds the bot to it, and the Parents page shows it."""
+    chat = update.get("chat") or {}
+    if chat.get("type") != "channel":
+        return
+    member = (update.get("new_chat_member") or {}).get("status")
+    admin = member in ("administrator", "creator") if member else True
+    core.channel_seen(db, chat["id"], chat.get("title") or "", chat.get("username") or "", admin)
+
+
+def send_album(token, chat_id, pngs, caption=""):
+    """Pictures as one post - an album - with the caption under the first.
+    One picture goes as a plain photo, which Telegram shows larger."""
+    if len(pngs) == 1:
+        return send_photo(token, chat_id, pngs[0], caption)
+    if core.practice_on():
+        return core.practice_telegram("sendPhoto", {"chat_id": chat_id, "caption": caption})
+    boundary = "----ta" + os.urandom(8).hex()
+    media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(pngs))]
+    if caption:
+        media[0]["caption"] = caption[:1000]
+    parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"'
+             f"\r\n\r\n{chat_id}\r\n".encode(),
+             f'--{boundary}\r\nContent-Disposition: form-data; name="media"'
+             f"\r\n\r\n{json.dumps(media)}\r\n".encode()]
+    for i, blob in enumerate(pngs):
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="p{i}";'
+                     f' filename="p{i}.png"\r\nContent-Type: image/png\r\n\r\n'.encode()
+                     + blob + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        API.format(token=token, method="sendMediaGroup"), data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return json.load(e)
+        except Exception:
+            return {"ok": False, "description": "http %s" % e.code}
+    except Exception as exc:
+        return {"ok": False, "description": str(exc)}
+
+
 def send_document(token, chat_id, path, filename, caption="", file_id=None, mime=None):
     """Send a stored file. Returns Telegram's file_id so the next send is instant.
 
@@ -2148,7 +2195,8 @@ def main():
 
     while True:
         res = call(token, "getUpdates", offset=offset, timeout=50,
-                   allowed_updates=["message", "callback_query"])
+                   allowed_updates=["message", "callback_query",
+                                    "my_chat_member", "channel_post"])
         if not res.get("ok"):
             time.sleep(3)
             continue
@@ -2158,7 +2206,10 @@ def main():
                 offset = upd["update_id"] + 1
                 core.meta_set(db, "bot_offset", str(offset))
                 try:
-                    if "callback_query" in upd:
+                    if "my_chat_member" in upd or "channel_post" in upd:
+                        # the parents' channel: remember it, answer nothing
+                        note_channel(db, upd.get("my_chat_member") or upd["channel_post"])
+                    elif "callback_query" in upd:
                         handle_callback(db, token, upd["callback_query"])
                     elif "message" in upd:
                         msg = upd["message"]
