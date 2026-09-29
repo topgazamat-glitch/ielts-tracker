@@ -892,6 +892,14 @@ ul.checklist li.done { color: var(--ink-3); }
 .tile.small { padding: var(--sp-3); text-align: center; }
 .tile.empty { opacity: .5; }
 .tile.empty:hover { border-color: var(--line); transform: none; }
+/* a booklet that opens once an earlier one is finished */
+.tile.shut { background: var(--surface-2); box-shadow: none; color: var(--ink-3); cursor: not-allowed; }
+.tile.shut:hover { border-color: var(--line); transform: none; }
+.tile.shut .tile-title svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: var(--sp-1); }
+.hx-shut { text-align: center; }
+.hx-shut-lock { margin: 0 0 var(--sp-2); color: var(--ink-3); }
+.hx-shut-lock svg { width: 32px; height: 32px; }
+.hx-shut h3 { text-wrap: balance; }
 
 .crumb { color: var(--ink-3); }
 .crumb:hover { color: var(--accent); }

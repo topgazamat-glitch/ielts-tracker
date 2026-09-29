@@ -2399,12 +2399,13 @@ def portal_home(db, s, token, flash):
                 # a digital handout: open it, and see how many parts are done
                 state = core.handout_status(db, tid, s["id"])
                 done = state["done"]
-                link = (f' <span class="pill{" good" if done else ""}">'
-                        f'{state["parts"]}/{state["total"]} parts</span>'
+                first = None if done else core.handout_blocked_by(db, tid, s)
+                link = (f' <span class="pill good">{state["mark"]:g} / 10</span>' if done else
+                        f' <a class="linky" href="/s/{E(token)}?tab=handouts&amp;h={first["id"]}">'
+                        f'finish {E(short_title(first))} first &rarr;</a>' if first else
+                        f' <span class="pill">{state["parts"]}/{state["total"]} parts</span>'
                         f' <a class="linky" href="/s/{E(token)}?tab=handouts&amp;h={tid}">'
-                        f'{"open it" if not state["started"] else "carry on"} &rarr;</a>'
-                        if not done else
-                        f' <span class="pill good">{state["mark"]:g} / 10</span>')
+                        f'{"open it" if not state["started"] else "carry on"} &rarr;</a>')
             elif tid:
                 # the handout is on the site, so the homework opens it rather
                 # than telling the student to go and find it
@@ -3312,25 +3313,26 @@ def portal_handouts(db, s, token, query):
     can close the page on the bus and pick it up again at home, and so the
     teacher can see what they wrote.
     """
-    level_id = core.level_of(db, s["group_id"])
     base = f"/s/{E(token)}?tab=handouts"
     hid = query.get("h", [None])[0]
     hid = int(hid) if hid and hid.isdigit() else None
 
     if hid is None:
-        books = core.digital_tests(db, level_id, published_only=True, kind="handout")
-        seen = {b["id"] for b in books}
         # a handout set as homework to this class opens for it even when it is
-        # not open to everyone as practice
-        books = list(books) + [b for b in core.digital_tests(db, level_id, kind="handout")
-                               if b["id"] not in seen
-                               and core.handout_assigned(db, b["id"], s["group_id"])]
-        if not books:
+        # not open to everyone as practice; and they come in the order of the
+        # course, each one after a set booklet shut until that is finished
+        shelf = core.handout_shelf(db, s)
+        if not shelf:
             return ('<h2>Handouts</h2><div class="card"><p class="flush">'
                     'Nothing here yet. Your teacher will put your booklets '
                     'on this page.</p></div>')
         cards = ""
-        for b in books:
+        for b, first in shelf:
+            if first:
+                cards += (f'<div class="tile small shut" aria-disabled="true">'
+                          f'<div class="tile-title">{LOCK_SVG}{E(b["title"])}</div>'
+                          f'<div class="sub">Opens when you finish {E(short_title(first))}</div></div>')
+                continue
             layout = db.execute("SELECT layout FROM dtests WHERE id=?",
                                 (b["id"],)).fetchone()["layout"] or ""
             _intro, parts = handout_parts(layout)
@@ -3352,13 +3354,17 @@ def portal_handouts(db, s, token, query):
         return (f'<h2>Handouts</h2><p class="sub">Your booklets, one part at a '
                 f'time. Nothing is timed and what you write is saved as you go. '
                 f'Answer every box in a part and check it: you see how you did '
-                f'straight away, and the next part opens.</p>'
+                f'straight away, and the next part opens. A booklet set as '
+                f'homework has to be finished before the next one opens.</p>'
                 f'<div class="tiles">{cards}</div>')
 
     t = db.execute("SELECT * FROM dtests WHERE id=? AND IFNULL(kind,'test')='handout'",
                    (hid,)).fetchone()
     if not t or not core.handout_open_to(db, hid, s["group_id"]):
         return '<h2>Handouts</h2><p class="sub">That booklet is not open.</p>'
+    first = core.handout_blocked_by(db, hid, s)
+    if first:
+        return handout_shut(db, s, token, t, first)
     if not (t["layout"] if "layout" in t.keys() else None):
         return '<h2>Handouts</h2><p class="sub">That booklet has no pages.</p>'
     qs = core.test_questions(db, hid)
@@ -3370,6 +3376,28 @@ def portal_handouts(db, s, token, query):
         attempt = db.execute("SELECT * FROM dattempts WHERE id=?",
                              (aid,)).fetchone()
     return handout_view(db, token, t, qs, attempt, query)
+
+
+def short_title(t):
+    """'Unit 12A & 12C' out of 'Unit 12A & 12C — Travel'."""
+    return re.split(r"\s+[—–-]\s+", t["title"] or "", maxsplit=1)[0]
+
+
+def handout_shut(db, s, token, t, first):
+    """A booklet that opens only once an earlier one is finished: say which,
+    and how far the student is with it."""
+    state = core.handout_status(db, first["id"], s["id"])
+    go = f"/s/{E(token)}?tab=handouts&amp;h={first['id']}"
+    far = (f"You have checked {state['parts']} of its {state['total']} parts."
+           if state["parts"] else f"It has {state['total']} parts, and you have not started it yet.")
+    return f"""<h2>Handouts</h2>
+<div class="card hx-shut">
+  <p class="hx-shut-lock">{LOCK_SVG}</p>
+  <h3>{E(t["title"])} is not open yet</h3>
+  <p>Finish <strong>{E(first["title"])}</strong> first. {far}
+  A booklet set as homework has to be finished before the ones after it open.</p>
+  <p class="flush"><a class="btn" href="{go}">Open {E(short_title(first))} &rarr;</a></p>
+</div>"""
 
 
 def handout_where(parts, done, want):
@@ -3563,6 +3591,8 @@ def act_handout_save(req, db, token, hid):
         return json_response({"ok": False})
     if not core.handout_open_to(db, hid, st["group_id"]):
         return json_response({"ok": False})
+    if core.handout_blocked_by(db, hid, st):
+        return json_response({"ok": False, "locked": True})
     attempt = db.execute(
         "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
         " ORDER BY id DESC LIMIT 1", (hid, st["id"])).fetchone()
@@ -3611,6 +3641,8 @@ def act_handout_check(req, db, token, hid):
         return json_response({"ok": False})
     if not core.handout_open_to(db, hid, st["group_id"]):
         return json_response({"ok": False})
+    if core.handout_blocked_by(db, hid, st):
+        return json_response({"ok": False, "locked": True})
     attempt = db.execute(
         "SELECT * FROM dattempts WHERE test_id=? AND student_id=?"
         " ORDER BY id DESC LIMIT 1", (hid, st["id"])).fetchone()

@@ -185,6 +185,8 @@
           if (mk) mk.textContent = "Some boxes are still empty.";
           var first = sheet().querySelector('[data-q="' + out.missing[0] + '"]');
           if (first) first.scrollIntoView({block: "center", behavior: "smooth"});
+        } else if (out.locked && mk) {
+          mk.textContent = "Finish the booklet before this one first.";
         } else if (mk) mk.textContent = "Could not check just now. Try again in a moment.";
       })
       .catch(function () {

@@ -4976,6 +4976,65 @@ def is_handout(db, test_id):
     return bool(t) and (t["kind"] or "") == "handout"
 
 
+# ------------------------------------------------ one booklet after another
+#
+# The booklets go in the order of the course, and a student works through
+# them in that order: a booklet set as homework has to be finished before
+# anything after it opens. The ones before the first booklet set to the class
+# stay open as practice - a class that starts using them at Unit 4 is not sent
+# back to Unit 1 - and one never set holds nobody up.
+
+LESSON_AT = re.compile(r"\bUnit\s*\d+\s*([A-D])(?=[A-D]*\b)", re.I)
+REVIEW_AT = re.compile(r"\b(ASRP|ASP|RP|review)\b", re.I)
+
+
+def lesson_order(t):
+    """Where a booklet sits in the course: by unit, then A & C before B & D,
+    and the unit's review (ASRP) after its lessons."""
+    title = t["title"] or ""
+    m = LESSON_AT.search(title)
+    rank = ("ABCD".index(m.group(1).upper()) if m else
+            9 if REVIEW_AT.search(title) else 8)
+    return (t["number"] or 0, rank, t["id"])
+
+
+def handout_finished(db, test_id, student_id):
+    """Every part checked. A written answer the teacher later says does not
+    count lowers the mark, but it does not undo the work: the student cannot
+    check that part again, so it must not keep them out of the next booklet."""
+    parts = handout_info(db, test_id)["parts"]
+    att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                     " ORDER BY id DESC LIMIT 1", (test_id, student_id)).fetchone()
+    if not att:
+        return not parts
+    n = db.execute("SELECT COUNT(DISTINCT part) FROM dparts WHERE attempt_id=?",
+                   (att["id"],)).fetchone()[0]
+    return n >= len(parts)
+
+
+def handout_shelf(db, student):
+    """The booklets a student sees, in the order of the course, each with the
+    booklet that has to be finished first (None when it is open)."""
+    gid = student["group_id"]
+    books = [b for b in digital_tests(db, level_of(db, gid), kind="handout")
+             if b["published"] or handout_assigned(db, b["id"], gid)]
+    books.sort(key=lesson_order)
+    set_ids = {r["test_id"] for r in db.execute(
+        "SELECT test_id FROM assignments WHERE group_id=? AND published=1"
+        " AND test_id IS NOT NULL", (gid,))}
+    out, first = [], None
+    for b in books:
+        out.append((b, first))
+        if first is None and b["id"] in set_ids and not handout_finished(db, b["id"], student["id"]):
+            first = b
+    return out
+
+
+def handout_blocked_by(db, test_id, student):
+    """The booklet this student has to finish before `test_id` opens, or None."""
+    return next((first for b, first in handout_shelf(db, student) if b["id"] == test_id), None)
+
+
 # ------------------------------------------------ a handout, rebuilt
 #
 # When a handout is rebuilt - a better layout, a corrected key - the students
