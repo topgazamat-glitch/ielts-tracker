@@ -1691,6 +1691,25 @@ kb.value = botUser ? "https://t.me/" + botUser + "?start=P{E(core.parent_token(d
     return html_response(page(s["name"], body, "Groups"))
 
 
+def dest_on_site(db):
+    """The Destination units on the site: suggested as the box is typed in,
+    and listed under it, a tap puts one in."""
+    units = []
+    for t in db.execute("SELECT title FROM dtests WHERE series='destination' AND kind='handout'"
+                        " ORDER BY title"):
+        m = re.match(r"(Destination \S+)\s*·\s*Unit (\d+)\s*[—–-]\s*(.*)", t["title"])
+        if m:
+            units.append(("%s, Unit %s" % (m.group(1), m.group(2)), m.group(3)))
+    units = sorted(set(units), key=lambda u: (u[0].split(",")[0], int(u[0].rsplit(" ", 1)[1])))
+    if not units:
+        return ""
+    opts = "".join(f'<option value="{E(v)}">{E(v)} — {E(name)}</option>' for v, name in units)
+    taps = "".join(f'<button type="button" class="chip destpick" data-dest="{E(v)}">{E(v)}'
+                   f' <span class="sub">{E(name)}</span></button>' for v, name in units)
+    return (f'<datalist id="destlist">{opts}</datalist>'
+            f'<div class="destsite"><span class="sub">On the site, done there or on paper:</span> {taps}</div>')
+
+
 def view_assignments(req, db, error="", keep=None):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
     keep = keep or {}
@@ -1746,8 +1765,9 @@ page, where you see who has done it, change it or delete it.</p>
       value="{E(kept("unit"))}" style="width:80px"></label>
     <label class="f">Lessons<select name="pair" id="u_pair">{pairs}</select></label>
     <label class="f">Destination<input name="destination" id="u_dest" value="{E(kept("destination"))}"
-      placeholder="e.g. Destination B1, Unit 7" style="width:240px"></label>
+      placeholder="e.g. Destination B1, Unit 7" style="width:240px" list="destlist"></label>
   </div>
+  {dest_on_site(db)}
   <p class="sub flush" id="u_note">Pick the unit and the lessons: the workbook, the Destination
   unit and the handout fill in below. A Destination unit you type is remembered for next time.</p>
 </div>
@@ -9119,7 +9139,7 @@ def view_tests(req, db):
                       f'<td>{t["n"]}</td><td>{key}</td><td>{state}</td>'
                       f'<td class="sub">{sat} sat</td></tr>')
 
-    body = f"""<h1>Digital tests</h1>
+    body = f"""{handouts_list(db)}<h1>Digital tests</h1>
 <p class="sub">A test taken on the phone and marked the moment it is handed in. The
 questions come out of the practice book; the answer key does not, so a test cannot be
 published until every answer has been set.</p>
@@ -9136,6 +9156,96 @@ published until every answer has been set.</p>
 that runs the site. Load the file it produces here; the answer key is set on the
 test's own page.</p></div>"""
     return html_response(page("Digital tests", body, "Tests"))
+
+
+def handouts_list(db):
+    """Every digital handout, so one can be found: another book's units
+    (Destination) first, then the course's booklets by level - each with
+    the classes it is set to and a way to look through it."""
+    rows = db.execute(
+        "SELECT t.*, l.name level, l.sort lsort FROM dtests t LEFT JOIN levels l ON l.id=t.level_id"
+        " WHERE t.kind='handout'").fetchall()
+    newest = {}
+    for t in rows:                       # a rebuilt one replaces the one before it
+        if t["title"] not in newest or t["published"] >= newest[t["title"]]["published"]:
+            newest[t["title"]] = t
+    rows = sorted(newest.values(), key=lambda t: (t["series"] is None, t["lsort"] or 0,
+                                                  core.lesson_order(t)))
+
+    def row(t):
+        sets = [r["name"] for r in db.execute(
+            "SELECT DISTINCT g.name FROM assignments a JOIN groups g ON g.id=a.group_id"
+            " WHERE a.test_id=? AND a.published=1 ORDER BY g.name", (t["id"],))]
+        parts = len(handout_parts(t["layout"] or "")[1])
+        n = db.execute("SELECT COUNT(*) FROM dquestions WHERE test_id=?", (t["id"],)).fetchone()[0]
+        where = ("set to " + ", ".join(sets)) if sets else (
+            "open to the level as practice" if t["published"] else "not set yet")
+        return (f'<tr><td><strong>{E(t["title"])}</strong></td>'
+                f'<td class="sub">{parts} parts &middot; {n} boxes</td>'
+                f'<td class="sub">{E(where)}</td>'
+                f'<td><a class="linky" href="/tests/{t["id"]}/look">Look through</a> '
+                f'&middot; <a class="linky" href="/tests/{t["id"]}">Key</a></td></tr>')
+    dest = "".join(row(t) for t in rows if t["series"])
+    course = ""
+    level = None
+    for t in rows:
+        if t["series"]:
+            continue
+        if t["level"] != level:
+            level = t["level"]
+            course += f'<tr><th colspan="4">{E(level or "any level")}</th></tr>'
+        course += row(t)
+    how = ("To set a Destination unit, write it in the Destination box on "
+           '<a class="linky" href="/assignments">Set homework</a> the way the book names it - '
+           "<em>Destination B1, Unit 12</em>. It opens only for the classes it is set to.")
+    return f"""<h1>Digital handouts</h1>
+<h2>Destination</h2>
+<p class="sub">{how}</p>
+<div class="tablewrap"><table>{dest or '<tr><td class="sub">None yet.</td></tr>'}</table></div>
+<details class="gap-3" style="margin-bottom:var(--sp-6)"><summary>The course booklets ({sum(1 for t in rows if not t["series"])})</summary>
+<div class="tablewrap"><table>{course}</table></div></details>"""
+
+
+def view_handout_look(req, db, tid):
+    """A handout as a student sees it, part by part, for the teacher to look
+    through - nothing saved, nothing checked. With ?answers=1 the key's
+    answers are in the boxes."""
+    t = db.execute("SELECT * FROM dtests WHERE id=? AND kind='handout'", (tid,)).fetchone()
+    if not t:
+        return not_found()
+    q = req["query"]
+    _intro, parts = handout_parts(t["layout"] or "")
+    n = (q.get("part", ["1"])[0] or "1")
+    idx = max(0, min(len(parts) - 1, int(n) - 1 if n.isdigit() else 0))
+    num, pname, what, markup = parts[idx]
+    show = q.get("answers") == ["1"]
+    qs = core.test_questions(db, tid)
+    nums = set(part_keys(markup))
+    pqs = [(qq, o) for qq, o in qs if qq["num"] in nums]
+    given = marks = None
+    if show:
+        given = {qq["id"]: (qq["answer"] or "").split("/")[0] for qq, _o in pqs if qq["answer"]}
+        marks = {qq["id"]: 1 for qq, _o in pqs if qq["answer"]}
+    layout = '<div class="booklet">' + hx_dress(markup) + "</div>"
+    layout, _secs, _ex = handout_controls(layout, pqs, given, marks)
+    level = core.level_name(db, t["level_id"]) or ""
+    sheet = fill_layout(layout, pqs, given, marks, level=level)
+    here = f"/tests/{tid}/look?answers={'1' if show else '0'}"
+    steps = "".join(
+        f'<a class="tab{" on" if i == idx else ""}" href="{here}&amp;part={i + 1}">{i + 1} {E(p[1])}</a>'
+        for i, p in enumerate(parts))
+    flip = (f'<a class="btn ghost" href="/tests/{tid}/look?answers={"0" if show else "1"}&amp;part={idx + 1}">'
+            f'{"Hide the answers" if show else "Show the answers"}</a>')
+    body = f"""<div class="trybar" role="note">
+  <div class="try-where"><strong>{E(t["title"])}</strong>
+  <span class="sub">&mdash; as a student sees it; nothing here is saved</span></div>
+  <div class="try-do">{flip}<a class="btn ghost" href="/tests">Back to the list</a></div>
+  <div class="tabs stretch psub">{steps}</div>
+</div>
+<div class="hx-parthead"><p class="hx-partno">Part {idx + 1} of {len(parts)}</p>
+<h2>{E(pname)}</h2>{f"<p>{E(what)}</p>" if what else ""}</div>
+<div class="booksheet handout hx-sheet">{sheet}</div>"""
+    return html_response(student_page(t["title"], body, music=False))
 
 
 def view_test(req, db, tid):
@@ -10476,6 +10586,7 @@ ROUTES = [
     ("POST", r"^/records/left$", act_mark_left),
     ("GET",  r"^/tests$", view_tests),
     ("GET",  r"^/tests/(\d+)$", view_test),
+    ("GET",  r"^/tests/(\d+)/look$", view_handout_look),
     ("POST", r"^/tests/(\d+)/key$", act_test_key),
     ("POST", r"^/tests/(\d+)/publish$", act_test_publish),
     ("POST", r"^/tests/(\d+)/delete$", act_test_delete),

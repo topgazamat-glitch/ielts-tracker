@@ -2890,3 +2890,7 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
   padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .setgo label { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: 14px; }
 .setgo button { margin-left: auto; }
+
+/* Set homework: the Destination units that are on the site, a tap away */
+.destsite { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.destsite .chip .sub { margin: 0; font-size: 12px; }

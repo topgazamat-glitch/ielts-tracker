@@ -112,6 +112,21 @@ plan = json.loads(teacher.open(base + "/assignments/unit.json?" + urllib.parse.u
      "destination": "Destination B1, Unit 12"}), timeout=30).read())
 check("the Set homework form knows the Destination unit is on the site",
       any(i["kind"] == "destination" and i["test_id"] == d12 for i in plan["items"]))
+
+print("\n6. THE TEACHER CAN FIND IT")
+tp = teacher.open(base + "/tests", timeout=30).read().decode()
+check("the Tests page lists the Destination units first, with where each is set",
+      tp.find("Destination B1 · Unit 12") < tp.find("Unit 13A") and "set to 116, 214" in tp
+      and "/tests/%d/look" % d23 in tp and "not set yet" in tp)
+look = teacher.open(base + "/tests/%d/look?part=2" % d12, timeout=30).read().decode()
+check("its look-through page shows a part as a student sees it",
+      "Part 2 of 4" in look and "Choose the correct word" in look and "bk-chip" in look)
+with_key = teacher.open(base + "/tests/%d/look?part=1&answers=1" % d12, timeout=30).read().decode()
+check("and, asked, with the key's answers in the boxes", 'value="grateful"' in with_key)
+sh = teacher.open(base + "/assignments", timeout=30).read().decode()
+check("Set homework offers the units on the site, to type or to tap",
+      '<datalist id="destlist">' in sh and 'data-dest="Destination B1, Unit 12"' in sh
+      and 'data-dest="Destination B1, Unit 23"' in sh)
 srv.shutdown()
 
 print()

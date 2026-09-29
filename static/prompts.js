@@ -153,6 +153,13 @@
     pair.addEventListener("change", fill);
     group.addEventListener("change", () => { if ((unit.value || "").trim()) fill(); });
     dest.addEventListener("input", () => { if (plan) write(); });
+    // a Destination unit on the site, put in the box with a tap
+    form.querySelectorAll(".destpick").forEach((b) => b.addEventListener("click", () => {
+      dest.value = b.getAttribute("data-dest");
+      if (plan) write();
+      else if (!(items.value || "").trim()) items.value = auto = dest.value;
+      note.textContent = dest.value + " is on the site: students do it there, or send photos of the pages.";
+    }));
   }
   document.addEventListener("DOMContentLoaded", wire);
   document.addEventListener("pageswap", wire);
