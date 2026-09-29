@@ -43,7 +43,7 @@ assert 'name="task_type"' in pg and 'name="rubric"' in pg
 
 print("\n2. ONE LINE MAKES ONE PIECE OF HOMEWORK")
 post("/assignments/list", {"group_id": g, "items": "Task 2 essay - Technology",
-     "task_type": "task2", "due": "2026-09-20", "due_time": "18:00",
+     "task_type": "task2", "due": "2030-09-20", "due_time": "18:00",
      "publish": "1", "rubric": "1"})
 db = core.connect()
 rows = db.execute("SELECT * FROM assignments").fetchall()
@@ -54,17 +54,17 @@ assert a["title"] == "Task 2 essay - Technology" and a["task_type"] == "task2"
 assert a["rubric"] == 1 and a["published"] == 1
 d, t = core.deadline_parts(a["due_at"], core.load_config())
 print("   deadline kept the exact time:", d, t)
-assert (d, t) == ("2026-09-20", "18:00")
+assert (d, t) == ("2030-09-20", "18:00")
 db.close()
 
 print("\n3. SEVERAL LINES STILL MAKE SEVERAL")
 post("/assignments/list", {"group_id": g,
      "items": "Grammar page 45\nVocabulary unit 4\nReading passage 2",
-     "task_type": "other", "due": "2026-09-25", "due_time": "23:59", "publish": "1"})
+     "task_type": "other", "due": "2030-09-25", "due_time": "23:59", "publish": "1"})
 db = core.connect()
 n = db.execute("SELECT COUNT(*) c FROM assignments").fetchone()["c"]
-made = db.execute("SELECT title, rubric FROM assignments WHERE due_at LIKE '2026-09-25%'"
-                  " OR due_at LIKE '2026-09-26%'").fetchall()
+made = db.execute("SELECT title, rubric FROM assignments WHERE due_at LIKE '2030-09-25%'"
+                  " OR due_at LIKE '2030-09-26%'").fetchall()
 print("   total assignments now:", n, "| this batch:", [r["title"] for r in made])
 assert n == 4 and len(made) == 3
 print("   criteria off when unticked:", all(r["rubric"] == 0 for r in made))

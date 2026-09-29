@@ -3977,6 +3977,21 @@ def deadline_iso(day, clock=None, cfg=None):
     return iso(when)
 
 
+def deadline_passed(due_at):
+    """A deadline that is already behind us - which no new homework may have."""
+    when = parse(due_at)
+    return when is not None and when <= now()
+
+
+def same_minute(a, b):
+    """Two deadlines that a teacher would read as the same - the form keeps
+    only the minute, so the seconds of a stored one do not make it a move."""
+    x, y = parse(a), parse(b)
+    if x is None or y is None:
+        return x is None and y is None
+    return x.replace(second=0, microsecond=0) == y.replace(second=0, microsecond=0)
+
+
 def deadline_parts(due_at, cfg=None):
     """A stored deadline back as the date and time a teacher would type."""
     cfg = cfg or load_config()

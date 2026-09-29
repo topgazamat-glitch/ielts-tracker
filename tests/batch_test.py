@@ -33,9 +33,9 @@ def get(u): return op.open(B + u).read().decode("utf-8")
 def post(u, d): return op.open(B + u, urllib.parse.urlencode(d, doseq=True).encode()).read().decode("utf-8")
 
 post("/assignments/list", {"group_id": g, "items": "Essay\nGrammar p45\nReading 2",
-     "task_type": "task2", "due": "2026-09-20", "due_time": "18:00", "publish": "1"})
+     "task_type": "task2", "due": "2030-09-20", "due_time": "18:00", "publish": "1"})
 post("/assignments/list", {"group_id": g, "items": "Listening 3",
-     "task_type": "other", "due": "2026-09-27", "due_time": "20:00", "publish": "1"})
+     "task_type": "other", "due": "2030-09-27", "due_time": "20:00", "publish": "1"})
 db = core.connect()
 first = db.execute("SELECT due_at FROM assignments WHERE title='Essay'").fetchone()["due_at"]
 # two students hand in, one gets marked
@@ -69,16 +69,16 @@ print("   per-item close/delete still there:",
 
 print("\n3. MOVE THE WHOLE DEADLINE")
 post("/assignments/batch/edit", {"group_id": g, "due": first,
-     "new_due": "2026-09-30", "new_time": "12:00"})
+     "new_due": "2030-09-30", "new_time": "12:00"})
 db = core.connect()
 rows = db.execute("SELECT title, due_at FROM assignments ORDER BY id").fetchall()
 for r in rows[:3]:
     d, t = core.deadline_parts(r["due_at"], cfg)
     print("   %-12s -> %s %s" % (r["title"], d, t))
-    assert (d, t) == ("2026-09-30", "12:00")
+    assert (d, t) == ("2030-09-30", "12:00")
 print("   the other batch untouched:",
       core.deadline_parts(rows[3]["due_at"], cfg))
-assert core.deadline_parts(rows[3]["due_at"], cfg) == ("2026-09-27", "20:00")
+assert core.deadline_parts(rows[3]["due_at"], cfg) == ("2030-09-27", "20:00")
 moved = rows[0]["due_at"]
 db.close()
 

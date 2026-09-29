@@ -1218,9 +1218,27 @@ def view_group(req, db, gid):
             f'<a href="/groups">← all classes</a></p>')
 
     level = core.level_name(db, g["level_id"])
+    lopts = '<option value="">no level</option>' + "".join(
+        f'<option value="{l["id"]}"{" selected" if l["id"] == g["level_id"] else ""}>{E(l["name"])}</option>'
+        for l in db.execute("SELECT id, name FROM levels ORDER BY sort"))
+    moved = (query.get("level", [""])[0] or "").strip()
+    note = (f'<div class="card good gap-2"><strong>{E(g["name"])} is now {E(level or "without a level")}.</strong> '
+            f'Its students see the handouts, tests and materials of that level from now on.</div>'
+            if moved else "")
+    past = ('<div class="card bad gap-2"><strong>That deadline has already passed.</strong> '
+            'Nothing was set &mdash; choose a date and time that is still to come.</div>'
+            if query.get("pastdue") else "")
+    # a class that finishes its book moves up a level; this is where
+    change = f"""<details class="adder"><summary>Change level</summary>
+<div class="card"><form method="post" action="/groups/{gid}/level" class="inline">
+<label class="f">Level<select name="level_id">{lopts}</select></label>
+<label class="f pushed">&nbsp;<button>Save</button></label></form>
+<p class="sub gap-2">For a class that has finished its book and moved up. Its students
+then see the handouts, tests and materials of the new level. Their homework, marks and
+league points stay as they are.</p></div></details>"""
     head = (f'<h1>{E(g["name"])}</h1><p class="sub">'
             f'{E(level or "no level")} · join code '
-            f'<span class="kbd">{E(g["join_code"])}</span></p>{tabs}')
+            f'<span class="kbd">{E(g["join_code"])}</span></p>{note}{past}{change}{tabs}')
 
     if tab == "marks":
         return html_response(page(g["name"], head + group_marks(db, g, query), "Groups"))
@@ -1504,7 +1522,8 @@ def group_homework(db, g):
       <div class="sub gap-1">{E(titles)} — last due {E(when)}</div>
     </div>
     <label class="f">New deadline
-      <input type="date" name="due" value="{E(core.shift_days(when, 7))}" required></label>
+      <input type="date" name="due" value="{E(core.shift_days(when, 7))}" required
+             min="{core.local_day(core.now(), core.load_config())}"></label>
     <label class="f">at
       <input type="time" name="due_time" value="{E(last_time or '23:59')}" step="60"></label>
     <label class="check"><input type="checkbox" name="announce" value="1" checked>
@@ -1649,13 +1668,19 @@ kb.value = botUser ? "https://t.me/" + botUser + "?start=P{E(core.parent_token(d
     return html_response(page(s["name"], body, "Groups"))
 
 
-def view_assignments(req, db):
+def view_assignments(req, db, error="", keep=None):
     groups = db.execute("SELECT * FROM groups WHERE archived=0 ORDER BY name").fetchall()
+    keep = keep or {}
+
+    def kept(name, default=""):
+        return (keep.get(name, [default])[0] or default) if keep else default
+    checked = (lambda name, on=True: " checked" if (kept(name) == "1" if keep else on) else "")
     core.seed_prompts(db)
     sug_levels = "".join(f'<option value="{E(l)}">{E(l)}</option>' for l in core.LEVELS)
     sug_kinds = "".join(f'<option value="{k}">{E(lab)}</option>'
                         for k, lab, _w, _m in core.prompt_kinds())
-    opts = "".join(f'<option value="{g["id"]}" data-level="{g["level_id"] or ""}">{E(g["name"])}</option>'
+    opts = "".join(f'<option value="{g["id"]}" data-level="{g["level_id"] or ""}"'
+                   f'{" selected" if str(g["id"]) == kept("group_id") else ""}>{E(g["name"])}</option>'
                    for g in groups)
     # every digital handout, under its level; one open only as a class's
     # homework says so. An older version with the same title is left out.
@@ -1669,10 +1694,16 @@ def view_assignments(req, db):
             if b["published"] or b["title"] not in open_titles]
         if books:
             shelves += (f'<optgroup label="{E(lv["name"])}" data-level="{lv["id"]}">'
-                        + "".join(f'<option value="{b["id"]}">{E(b["title"])}'
+                        + "".join(f'<option value="{b["id"]}"{" selected" if str(b["id"]) == kept("handout") else ""}>{E(b["title"])}'
                                   f'{"" if b["published"] else " (opens only for this class)"}'
                                   f'</option>' for b in books) + "</optgroup>")
-    body = f"""<h1>Set homework</h1>
+    today = core.local_day(core.now(), core.load_config())
+    warn = ('<div class="card bad gap-3"><strong>That deadline has already passed.</strong> '
+            'Nothing was set: homework with a deadline in the past would close the moment it was '
+            'set, students would never see it, and the league would count it as missed. '
+            'Everything you typed is still below &mdash; change the date and set it again.</div>'
+            if error == "past" else "")
+    body = f"""<h1>Set homework</h1>{warn}
 <p class="sub">What you set here is what the bot offers students when they send a photo.
 Everything already set is on the <a class="linky" href="/homework">Homework</a> page,
 where you see who has done it, change it or delete it.</p>
@@ -1702,17 +1733,17 @@ neither has to be typed twice.</p>
 <label class="f">Type<select name="task_type">
 <option value="other">Other</option><option value="task2">Task 2</option>
 <option value="task1">Task 1</option></select></label>
-<label class="f">Due<input type="date" name="due"></label>
-<label class="f">at<input type="time" name="due_time" value="23:59" step="60"></label>
+<label class="f">Due<input type="date" name="due" min="{today}"></label>
+<label class="f">at<input type="time" name="due_time" value="{E(kept("due_time", "23:59"))}" step="60"></label>
 <label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="publish" value="1" checked> open to students now</span></label>
+<input type="checkbox" name="publish" value="1"{checked("publish")}> open to students now</span></label>
 <label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)">
-<input type="checkbox" name="announce" value="1" checked> tell them in Telegram</span></label>
+<input type="checkbox" name="announce" value="1"{checked("announce")}> tell them in Telegram</span></label>
 <label class="f pushed">&nbsp;
 <span style="font-size:13px;color:var(--ink)" title="Task response, coherence, vocabulary, grammar">
-<input type="checkbox" name="rubric" value="1"> mark on the four criteria</span></label>
+<input type="checkbox" name="rubric" value="1"{checked("rubric", False)}> mark on the four criteria</span></label>
 </div>
 <div class="hwpick gap-2">
 <label class="f">Digital handout<select name="handout" id="hwhandout">
@@ -1723,7 +1754,7 @@ out of ten is averaged with your marks for the rest of this homework.</p>
 </div>
 <label class="f">One item per line &mdash; numbering is optional
 <textarea name="items" rows="6" class="wide"
-placeholder="Workbook unit 4 A &amp; C&#10;Writing &ndash; an email to a friend&#10;Grammar paper page 45"></textarea></label>
+placeholder="Workbook unit 4 A &amp; C&#10;Writing &ndash; an email to a friend&#10;Grammar paper page 45">{E(kept("items"))}</textarea></label>
 <details class="gap-3"><summary>Make it a writing task they type</summary>
 <p class="sub gap-2">Students get a writing paper &mdash; the question on one side, the
 sheet on the other &mdash; instead of sending a photo of their handwriting. One question
@@ -1738,7 +1769,7 @@ per posting.</p>
 </div>
 <label class="f">The question
 <textarea name="prompt" rows="4" class="wide"
- placeholder="Some people think that… Discuss both views and give your own opinion."></textarea></label>
+ placeholder="Some people think that… Discuss both views and give your own opinion.">{E(kept("prompt"))}</textarea></label>
 <div class="inline gap-2">
 <label class="f">At least<input type="number" name="min_words" min="0" max="1000"
  placeholder="250" style="width:90px"> words</label>
@@ -5783,12 +5814,16 @@ def view_homework_set(req, db):
       <input type="hidden" name="back" value="{E(here)}">
       <button class="linky danger">delete</button></form></td></tr>"""
 
+    today = core.local_day(core.now(), cfg)
+    past = ('<div class="card bad gap-2"><strong>That deadline has already passed.</strong> '
+            'Nothing was moved &mdash; choose a date and time that is still to come.</div>'
+            if q.get("pastdue") else "")
     manage = f"""<h2 id="manage">Change it</h2>
-<div class="card">
+{past}<div class="card">
 <div class="batchacts">{buttons}</div>
 <form method="post" action="/assignments/batch/edit" class="inline gap-4">
 {key_fields}
-<label class="f">New deadline<input type="date" name="new_due" value="{E(day)}"></label>
+<label class="f">New deadline<input type="date" name="new_due" value="{E(day)}" min="{today}"></label>
 <label class="f">at<input type="time" name="new_time" value="{E(clock or "23:59")}" step="60"></label>
 <label class="f pushed">&nbsp;<button class="ghost">Move the deadline</button></label>
 </form>
@@ -9342,7 +9377,7 @@ def act_set_group_level(req, db, gid):
     db.execute("UPDATE groups SET level_id=? WHERE id=?",
                (int(lid) if lid.isdigit() else None, gid))
     db.commit()
-    return redirect("/groups")
+    return redirect(f"/groups/{gid}?level=1")
 
 
 def act_repeat_homework(req, db, gid):
@@ -9356,6 +9391,8 @@ def act_repeat_homework(req, db, gid):
     if not due:
         return redirect(f"/groups/{gid}?tab=homework")
     due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
+    if core.deadline_passed(due_iso):
+        return redirect(f"/groups/{gid}?tab=homework&pastdue=1")
     made = []
     for a in core.last_homework_batch(db, gid):
         if already_set(db, gid, a["title"], due_iso):
@@ -9500,6 +9537,9 @@ def act_batch_edit(req, db):
     gid, due, items = _batch_of(req, db)
     f = req["form"]
     when = core.deadline_iso(f.get("new_due", [""])[0], f.get("new_time", [""])[0])
+    if not core.same_minute(when, due) and core.deadline_passed(when):
+        back = _back(req, "/assignments")
+        return redirect(back + ("&" if "?" in back else "?") + "pastdue=1")
     for a in items:
         db.execute("UPDATE assignments SET due_at=? WHERE id=?", (when, a["id"]))
     # a piece handed in before the new deadline is no longer late
@@ -9547,6 +9587,11 @@ def act_new_list(req, db):
         return redirect("/assignments")
     due = f.get("due", [""])[0]
     due_iso = core.deadline_iso(due, f.get("due_time", [""])[0])
+    if core.deadline_passed(due_iso):
+        # a deadline in the past closes the homework the moment it is set: the
+        # students never see it and the league counts it as missed. The form
+        # comes back as it was typed, with the date to fix.
+        return view_assignments(req, db, error="past", keep=f)
     publish_now = f.get("publish", [""])[0] == "1"
     # a question makes it a writing paper; only the first item carries it, since
     # one posting is one question
@@ -9644,14 +9689,17 @@ def act_edit_assignment(req, db, aid):
     f = req["form"]
     title = (f.get("title", [""])[0] or "").strip()
     due = (f.get("due", [""])[0] or "").strip()
-    row = db.execute("SELECT group_id FROM assignments WHERE id=?", (aid,)).fetchone()
+    row = db.execute("SELECT group_id, due_at FROM assignments WHERE id=?", (aid,)).fetchone()
+    back = _back(req, f"/groups/{row['group_id']}?tab=homework" if row else "/assignments")
+    when = core.deadline_iso(due, f.get("due_time", [""])[0])
+    if row and not core.same_minute(when, row["due_at"]) and core.deadline_passed(when):
+        return redirect(back + ("&" if "?" in back else "?") + "pastdue=1")
     if title:
         db.execute("UPDATE assignments SET title=? WHERE id=?", (title[:120], aid))
-    db.execute("UPDATE assignments SET due_at=? WHERE id=?",
-               (core.deadline_iso(due, f.get("due_time", [""])[0]), aid))
+    if row and not core.same_minute(when, row["due_at"]):
+        db.execute("UPDATE assignments SET due_at=? WHERE id=?", (when, aid))
     db.commit()
-    return redirect(_back(
-        req, f"/groups/{row['group_id']}?tab=homework" if row else "/assignments"))
+    return redirect(back)
 
 
 def act_delete_assignment(req, db, aid):

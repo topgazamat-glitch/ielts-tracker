@@ -130,12 +130,15 @@ assert '<span class="pill mute">closed</span>' in get("/homework?show=closed")
 
 print("\n3b. ONE BUTTON CLOSES EVERYTHING PAST ITS DEADLINE")
 post("/assignments/batch/open", {"group_id": g1, "due": due2})     # 114 open again, due 2030
-post("/assignments/list", {"group_id": g1, "items": "Old essay\nOld grammar",
-                           "task_type": "other", "due": "2020-01-10", "due_time": "18:00",
-                           "publish": "1"})
-post("/assignments/list", {"group_id": g2, "items": "Old words",
-                           "task_type": "other", "due": "2020-01-11", "due_time": "18:00",
-                           "publish": "1"})
+# homework whose deadline has passed - which the form now refuses to set, so
+# it is put straight into the database, as if it had been set long ago
+db = core.connect()
+for gid, title, day in ((g1, "Old essay", "2020-01-10"), (g1, "Old grammar", "2020-01-10"),
+                        (g2, "Old words", "2020-01-11")):
+    db.execute("INSERT INTO assignments (group_id, title, task_type, due_at, created_at, published)"
+               " VALUES (?,?,'other',?,?,1)", (gid, title, core.deadline_iso(day, "18:00"),
+                                                core.iso(core.now())))
+db.commit(); db.close()
 pg = get("/homework")
 print("   the button names the pile:", "Close all 2 past their deadline" in pg)
 assert "Close all 2 past their deadline" in pg
