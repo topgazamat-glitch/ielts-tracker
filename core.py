@@ -4985,15 +4985,18 @@ def is_handout(db, test_id):
 # back to Unit 1 - and one never set holds nobody up.
 
 LESSON_AT = re.compile(r"\bUnit\s*\d+\s*([A-D])(?=[A-D]*\b)", re.I)
+PART_AT = re.compile(r"\bUnit\s*\d+\.(\d)\b", re.I)          # Unit 5.1, Unit 5.2
 REVIEW_AT = re.compile(r"\b(ASRP|ASP|RP|review)\b", re.I)
 
 
 def lesson_order(t):
-    """Where a booklet sits in the course: by unit, then A & C before B & D,
-    and the unit's review (ASRP) after its lessons."""
+    """Where a booklet sits in the course: by unit, then A & C before B & D
+    (or 5.1 before 5.2), and the unit's review (ASRP) after its lessons."""
     title = t["title"] or ""
     m = LESSON_AT.search(title)
+    part = PART_AT.search(title)
     rank = ("ABCD".index(m.group(1).upper()) if m else
+            int(part.group(1)) - 1 if part else
             9 if REVIEW_AT.search(title) else 8)
     return (t["number"] or 0, rank, t["id"])
 

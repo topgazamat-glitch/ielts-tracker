@@ -136,7 +136,8 @@ check("by unit, A & C before B & D, the review after its lessons: %s" % order,
 key = lambda title, n: core.lesson_order({"title": title, "number": n, "id": 1})
 check("a single lesson and a run of lessons sort by their first letter",
       key("Unit 3A — Food", 3) < key("Unit 3B — Food", 3) < key("Unit 3 ASRP", 3)
-      and key("Unit 1ABC — Hello", 1) < key("Unit 1D — Hello", 1))
+      and key("Unit 1ABC — Hello", 1) < key("Unit 1D — Hello", 1)
+      and key("Unit 5.1 — Nature", 5) < key("Unit 5.2 — Nature", 5) < key("Unit 5 ASRP", 5))
 page = get("/s/%s?tab=handouts" % tok[ann])
 check("and the Handouts page lists them so",
       page.index("Unit 1A & 1C") < page.index("Unit 1B & 1D") < page.index("Unit 2A & 2C")
