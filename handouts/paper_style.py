@@ -289,7 +289,7 @@ def keep_headings(body):
     return n
 
 
-def recolour(xml):
+def recolour(xml, scale=SCALE):
     def swap(m):
         return m.group(1) + COLOURS.get(m.group(2).upper(), m.group(2)) + '"'
     xml = re.sub(r'((?:w:color w:val|w:fill|w:color)=")([0-9A-Fa-f]{6})"', swap, xml)
@@ -298,13 +298,13 @@ def recolour(xml):
         return m.group(1) + FONTS.get(m.group(2), m.group(2)) + '"'
     xml = re.sub(r'(w:(?:ascii|hAnsi|cs|eastAsia)=")([^"]+)"', font, xml)
     # text sizes only: a border's width is a w:sz attribute, and stays as it is
-    xml = re.sub(r'(<w:sz(?:Cs)? w:val=")(\d+)"', lambda m: m.group(1) + str(max(1, round(int(m.group(2)) * SCALE))) + '"', xml)
+    xml = re.sub(r'(<w:sz(?:Cs)? w:val=")(\d+)"', lambda m: m.group(1) + str(max(1, round(int(m.group(2)) * scale))) + '"', xml)
     # a theme names its fonts too, and text with no font of its own takes them
     return re.sub(r'(<a:(?:latin|ea|cs) typeface=")(Calibri Light|Calibri|Cambria|Verdana)"',
                   lambda m: m.group(1) + ("Georgia" if m.group(2) == "Cambria" else "Aptos") + '"', xml)
 
 
-def restyle(src, dst):
+def restyle(src, dst, scale=SCALE):
     """Write src's handout, in the site's clothes, to dst. Returns what changed."""
     zin = zipfile.ZipFile(src)
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
@@ -322,7 +322,7 @@ def restyle(src, dst):
                 report["cover"] = dress_cover(body)
                 data = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
             if name.startswith("word/") and name.endswith(".xml"):     # the theme is word/theme/*.xml
-                data = recolour(data.decode("utf-8")).encode("utf-8")
+                data = recolour(data.decode("utf-8"), scale).encode("utf-8")
             zout.writestr(info, data)
     return report
 
@@ -409,7 +409,50 @@ def pdf_pages(pdf):
     return max(counts) if counts else len(re.findall(rb"/Type\s*/Page\b", data))
 
 
+def designed_pages(rel):
+    """How long a handout is meant to be: "(12 pages)" in its name, else
+    its line in the folder's INDEX.txt, else nothing known."""
+    m = re.search(r"\((\d+) pages", rel)
+    if m:
+        return int(m.group(1))
+    code = os.path.basename(rel).split(" ")[0].replace(".docx", "").replace(":", "")
+    index = os.path.join(HANDOUTS, "INDEX.txt")
+    for line in open(index, encoding="utf-8") if os.path.exists(index) else []:
+        m = re.match(r"\s+(\S+)\s.*?(\d+) pp", line)
+        if m and m.group(1).replace(".", "") == code.replace(".", ""):
+            return int(m.group(2))
+    return None
+
+
+def retune(rel, target):
+    """Try the text a touch larger or smaller until the copy is as long as it
+    should be; keep the size that comes closest."""
+    src, dst = os.path.join(HANDOUTS, rel), os.path.join(OUT, rel)
+    pdf = dst[:-5] + ".pdf"
+    best = None
+    for scale in (0.96, 0.97, 0.98, 0.99, 1.0, 0.95, 0.94):
+        restyle(src, dst, scale)
+        word_pdf(dst, pdf)
+        n = pdf_pages(pdf)
+        if best is None or abs(n - target) < abs(best[1] - target):
+            best = (scale, n)
+        if n == target:
+            return scale, n
+    restyle(src, dst, best[0])
+    word_pdf(dst, pdf)
+    return best
+
+
 def main():
+    if "--retune" in sys.argv:
+        # rel|original pages, one a line, on stdin: the handouts whose length moved
+        for line in sys.stdin:
+            rel, before = line.rstrip("\n").split("|")
+            target = designed_pages(rel) or int(before)
+            scale, n = retune(rel, target)
+            print("%-72s target %2d  got %2d at %d%%%s" % (rel[:72], target, n, round(scale * 100),
+                                                         "" if n == target else "  STILL OFF"), flush=True)
+        return
     if sys.argv[1:2] != ["--all"]:
         src, dst = sys.argv[1], sys.argv[2]
         print(restyle(src, dst))

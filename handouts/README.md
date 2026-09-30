@@ -204,7 +204,11 @@ headings, because Aptos is 4% wider than Calibri.
     python3 handouts/paper_style.py --all --pdf       # ~/Desktop/Handouts -> ~/Desktop/Handouts (website style)
 
 `--pdf` has Word count each original's pages and print the restyled copy to
-PDF, and flags any page count that moved. Word is driven by AppleScript. It
+PDF, and flags any page count that moved. `--retune` takes "path|pages" lines
+on stdin and tries the text between 94% and 100% until a copy is as long as its
+name ("12 pages"), INDEX.txt or the original says. A cell that does not end in
+a paragraph is mended, since Word would otherwise stop to offer a repair; an
+original like that is counted from its saved page count, not opened. Word is driven by AppleScript. It
 closes only the document it opened itself, found by counting documents
 rather than by name, because some files open untitled. Word's sandbox lets it
 write to the Desktop but not a temporary folder, and it asks before replacing
