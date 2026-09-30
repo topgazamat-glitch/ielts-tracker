@@ -3195,7 +3195,7 @@ main > h2:first-of-type { margin-top: 32px; }
 main > h1 + h2, main > .pagehead + h2, main > h1 + p.sub + h2 { margin-top: 8px; }
 
 /* cards: white, soft depth, no hard outline */
-.card, .tablewrap, .grid .stat, .todo {
+.card, .tablewrap, .grid .stat, .todo-card {
   border-color: var(--card-line); box-shadow: var(--card-shadow); }
 .card { border-radius: var(--r-card); padding: 20px 22px; margin-bottom: 18px; }
 .card.calm { background: color-mix(in srgb, var(--ok) 7%, var(--surface)); border-color: color-mix(in srgb, var(--ok) 22%, var(--card-line)); }
@@ -3225,26 +3225,26 @@ a.card:hover { text-decoration: none; transform: translateY(-2px); box-shadow: v
 
 /* today's work: a card each, a drawing, the count, the way in */
 .todos { gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom: 8px; }
-.todo { display: grid; grid-template-columns: 46px minmax(0, 1fr) 18px; align-items: center; gap: 14px;
+.todo-card { display: grid; grid-template-columns: 46px minmax(0, 1fr) 18px; align-items: center; gap: 14px;
   padding: 16px 18px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--card-line);
   border-left-width: 1px; color: var(--ink);
   transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
-.todo:hover { transform: translateY(-2px); box-shadow: var(--card-shadow-up); border-color: var(--card-line); }
+.todo-card:hover { transform: translateY(-2px); box-shadow: var(--card-shadow-up); border-color: var(--card-line); }
 .t-ico { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px;
   background: var(--accent-soft); color: var(--brand); }
 .t-text { display: block; min-width: 0; }
-.todo .todo-head { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); }
-.todo .sub { display: block; margin: 2px 0 0; font-size: 13.5px; color: var(--ink-3); }
+.todo-card .todo-head { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); }
+.todo-card .sub { display: block; margin: 2px 0 0; font-size: 13.5px; color: var(--ink-3); }
 .t-go { width: 18px; height: 18px; fill: none; stroke: var(--ink-3); stroke-width: 2; stroke-linecap: round;
   stroke-linejoin: round; transition: transform .2s var(--ease), stroke .2s var(--ease); }
-.todo:hover .t-go { transform: translateX(3px); stroke: var(--brand); }
-.todo.urgent { background: var(--surface); border-color: var(--card-line); }
-.todo.urgent .t-ico { background: var(--warn-soft); color: #c02a3c; }
-.todo.urgent .todo-head { color: #c02a3c; }
-.todo.urgent .sub { color: var(--ink-3); }
+.todo-card:hover .t-go { transform: translateX(3px); stroke: var(--brand); }
+.todo-card.urgent { background: var(--surface); border-color: var(--card-line); }
+.todo-card.urgent .t-ico { background: var(--warn-soft); color: #c02a3c; }
+.todo-card.urgent .todo-head { color: #c02a3c; }
+.todo-card.urgent .sub { color: var(--ink-3); }
 @media (prefers-color-scheme: dark) {
-  .todo.urgent .todo-head, .todo.urgent .t-ico { color: #ff8a8f; }
-  .todo.urgent .sub { color: var(--ink-3); }
+  .todo-card.urgent .todo-head, .todo-card.urgent .t-ico { color: #ff8a8f; }
+  .todo-card.urgent .sub { color: var(--ink-3); }
   .t-ico { color: var(--brand-lift); }
 }
 

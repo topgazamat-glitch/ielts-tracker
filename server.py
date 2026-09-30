@@ -409,7 +409,7 @@ TODO_ICONS = {"/queue": "inbox", "/homework": "calendar", "/ratings": "alert", "
 
 def todo(href, headline, detail, urgent=False):
     icon = next((i for start, i in TODO_ICONS.items() if href.startswith(start)), "arrow")
-    return (f'<a class="todo{" urgent" if urgent else ""}" href="{href}">{look_icon(icon, "t-ico")}'
+    return (f'<a class="todo todo-card{" urgent" if urgent else ""}" href="{href}">{look_icon(icon, "t-ico")}'
             f'<span class="t-text"><span class="todo-head">{headline}</span>'
             f'<span class="sub">{detail}</span></span>'
             f'<svg class="t-go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>')
