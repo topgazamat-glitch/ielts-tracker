@@ -183,3 +183,29 @@ Its recordings are the workbook's own, uploaded to `/audio/new` under the
 level "Pre-Intermediate Workbook". They are kept apart from the class tracks,
 which are numbered the same way. The tracks are in
 `~/Downloads/Workbook audio-2/…_B1.zip`, with transcripts (.vtt).
+
+# Paper handouts in the website's colours
+
+`paper_style.py` dresses Azamat's Word handouts the way the website draws
+them, without touching their content:
+
+- teal becomes the site's plum;
+- each explanation box takes the colour of its kind: blue for listening and
+  pronunciation, gold for a checklist, rose for a warning, soft plum for the rest;
+- a box's name is set in coloured capitals rather than a filled tag;
+- the unit, title and lesson line sit in a deep plum band, with the title in Georgia;
+- Calibri becomes Aptos.
+
+Every word, table and page break stays where it was. The script checks the
+text of every part against the original, and adds "keep with next" to exercise
+headings, because Aptos is 4% wider than Calibri.
+
+    python3 handouts/paper_style.py in.docx out.docx
+    python3 handouts/paper_style.py --all --pdf       # ~/Desktop/Handouts -> ~/Desktop/Handouts (website style)
+
+`--pdf` has Word count each original's pages and print the restyled copy to
+PDF, and flags any page count that moved. Word is driven by AppleScript. It
+closes only the document it opened itself, found by counting documents
+rather than by name, because some files open untitled. Word's sandbox lets it
+write to the Desktop but not a temporary folder, and it asks before replacing
+a file, so an old PDF is deleted first.
