@@ -6174,13 +6174,20 @@ def open_draft(db, student_id, assignment_id):
 
 
 def sent_submission(db, student_id, assignment_id):
-    """Work already handed in for this task - the reason to refuse more photos."""
+    """Work already handed in for this task - the reason to refuse more photos.
+    Not a paper copy the teacher turned down as not complete: the student is
+    told to send it again, so they must be able to."""
     if assignment_id is None:
         return None
-    return db.execute(
-        "SELECT * FROM submissions WHERE student_id=? AND assignment_id=? AND draft=0"
-        " ORDER BY created_at DESC LIMIT 1", (student_id, assignment_id)
+    row = db.execute(
+        "SELECT s.*, a.test_id FROM submissions s LEFT JOIN assignments a ON a.id=s.assignment_id"
+        " WHERE s.student_id=? AND s.assignment_id=? AND s.draft=0"
+        " ORDER BY s.created_at DESC LIMIT 1", (student_id, assignment_id)
     ).fetchone()
+    if (row and row["status"] == "graded" and (row["score"] or 0) <= 0
+            and row["test_id"] and is_handout(db, row["test_id"])):
+        return None
+    return row
 
 
 def finish_draft(db, submission_id):

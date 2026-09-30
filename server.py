@@ -462,6 +462,44 @@ def scorepad(name="score", value=None, small=False):
             f'<div class="{cls} halves">{half}</div>')
 
 
+def attach_card(db, sub, student):
+    """A piece that came without its task - the website lost the student's
+    choice for a while - is put with the right one here, so it ticks their
+    list and is marked the way that task is."""
+    rows = db.execute(
+        "SELECT id, title, due_at FROM assignments WHERE group_id=? AND published=1"
+        " AND created_at >= ? ORDER BY COALESCE(due_at, created_at) DESC, id",
+        (student["group_id"], core.iso(core.now() - timedelta(days=30)))).fetchall()
+    if not rows:
+        return ""
+    cfg = core.load_config()
+    opts = "".join(
+        f'<option value="{a["id"]}">{E(a["title"])}'
+        f'{" · due " + core.local_day(core.parse(a["due_at"]), cfg) if a["due_at"] else ""}</option>'
+        for a in rows)
+    return f"""<form method="post" action="/grade/attach" class="card attach">
+  <input type="hidden" name="submission_id" value="{sub["id"]}">
+  <label class="f">Which homework is this?<select name="assignment_id">{opts}</select></label>
+  <button class="ghost">Put it there</button>
+</form>"""
+
+
+def act_grade_attach(req, db):
+    f = req["form"]
+    sid, aid = (f.get("submission_id", [""])[0] or ""), (f.get("assignment_id", [""])[0] or "")
+    if not (sid.isdigit() and aid.isdigit()):
+        return redirect("/queue")
+    sub = db.execute("SELECT s.*, st.group_id FROM submissions s JOIN students st ON st.id=s.student_id"
+                     " WHERE s.id=?", (int(sid),)).fetchone()
+    a = db.execute("SELECT * FROM assignments WHERE id=?", (int(aid),)).fetchone()
+    if not sub or not a or a["group_id"] != sub["group_id"]:
+        return redirect("/queue")
+    late = 1 if (a["due_at"] and sub["created_at"] > a["due_at"]) else 0
+    db.execute("UPDATE submissions SET assignment_id=?, late=? WHERE id=?", (a["id"], late, sub["id"]))
+    db.commit()
+    return redirect(f"/queue?id={sub['id']}")
+
+
 def grade_form(db, sub, student, assignment, regrade=False, gid=None, due=None):
     """The marking form, used for a fresh piece and for changing an old mark."""
     tags = db.execute("SELECT * FROM tags ORDER BY sort, id").fetchall()
@@ -899,6 +937,7 @@ def grade_page(db, sub, regrade=False, rows=None, gid=None, due=None, show_picke
         {'<span class="pill mute">resubmission</span>' if sub["improves"] else ''}</div>
       <div class="sub gap-2">{prev}</div>
     </div>
+    {attach_card(db, sub, student) if not assignment else ""}
     {grade_form(db, sub, student, assignment, regrade, gid=gid, due=due)}
     {previous_panel(db, sub, student)}
   </div>
@@ -5644,10 +5683,11 @@ def act_student_upload(req, db, token):
     aid = None
     raw_aid = (fields.get("assignment_id") or [None])[0]
     if raw_aid and raw_aid.isdigit():
-        # only accept an assignment that is genuinely open for this student's group
+        # only accept an assignment that is genuinely open for this student's
+        # group - a handout or a workbook unit included: its paper copy comes as
+        # photographs, and dropping the choice filed them as unassigned
         ok = db.execute(
-            "SELECT id FROM assignments WHERE id=? AND group_id=? AND closed=0"
-            " AND (test_id IS NULL OR test_id NOT IN (SELECT id FROM dtests WHERE kind='handout'))",
+            "SELECT id FROM assignments WHERE id=? AND group_id=? AND closed=0",
             (int(raw_aid), s["group_id"]),
         ).fetchone()
         aid = ok["id"] if ok else None
@@ -10707,6 +10747,7 @@ ROUTES = [
     ("GET", r"^/vocab/(\d+)$", view_word_list),
     ("GET", r"^/skip$", act_skip),
     ("POST", r"^/grade$", act_grade),
+    ("POST", r"^/grade/attach$", act_grade_attach),
     ("POST", r"^/regrade$", act_regrade),
     ("GET",  r"^/regrade/(\d+)$", view_regrade),
     ("POST", r"^/notes/new$", act_new_note),

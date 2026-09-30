@@ -2913,3 +2913,8 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
 .owed-since .f { margin: 0; }
 .owed-act { margin: 0; }
 .owed-act button { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+
+/* the Grade screen: a piece that came without its task, put with it here */
+.attach { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2);
+  border-color: var(--gold); background: var(--gold-soft); }
+.attach .f { flex: 1 1 220px; margin: 0; }
