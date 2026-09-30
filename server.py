@@ -83,56 +83,121 @@ SECTIONS = [
 SECTION_OF = {label: name for name, _home, pages in SECTIONS for _href, label in pages}
 
 
+# One line drawing per section, in the sidebar's own stroke.
+SIDE_ICONS = {
+    "Today": '<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+    "Homework": '<path d="M4 13l2.4-7.2A1.5 1.5 0 0 1 7.8 4.8h8.4a1.5 1.5 0 0 1 1.4 1L20 13v5a2 2 0 0 1-2 2H6'
+                'a2 2 0 0 1-2-2z"/><path d="M4 13h4.5a3.5 3.5 0 0 0 7 0H20"/>',
+    "Students": '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/>'
+                '<path d="M15.5 5a3 3 0 0 1 0 6M17 14a5.5 5.5 0 0 1 3.5 5.5"/>',
+    "Materials": '<path d="M12 6.5C10.3 5.2 7.9 4.5 4 4.5v13c3.9 0 6.3.7 8 2 1.7-1.3 4.1-2 8-2v-13'
+                 'c-3.9 0-6.3.7-8 2z"/><path d="M12 6.5v13"/>',
+    "Insights": '<path d="M4 20h16"/><path d="M7 16.5v-5M12 16.5V7M17 16.5v-8"/>',
+    "Settings": '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/>'
+                '<circle cx="9" cy="17" r="2"/>',
+    "Sign out": '<path d="M14 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4M6 12h9"/>',
+    "Music": '<path d="M9 18V6.5l10-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+}
+
+
+def side_icon(name):
+    return ('<svg class="side-ico" viewBox="0 0 24 24" aria-hidden="true">%s</svg>'
+            % SIDE_ICONS.get(name, SIDE_ICONS["Today"]))
+
+
+# Before the page is drawn: the sidebar as it was left, open or narrowed to
+# its icons, so it never opens and then snaps shut on the way in.
+SIDE_EARLY = ('<script>try{if(localStorage.getItem("side")==="rail")'
+              'document.documentElement.classList.add("rail")}catch(e){}'
+              'document.documentElement.classList.add("still")</script>')
+
+
 def page(title, body, active="", music=False):
-    """The teacher's shell. Silent unless a page asks otherwise: marking
+    """The teacher's shell: the sections down the left, the pages of the one
+    you are in across the top of the work, the work beneath. The sidebar
+    narrows to its icons and back with one button (or the [ key), and
+    remembers how it was left. Silent unless a page asks otherwise: marking
     for three hours should not come with a soundtrack - but the song of the
     day is the teacher's own choice, so that one plays here too."""
     tune = song_tag()
     section = SECTION_OF.get(active, "")
+    if active == "Settings":
+        section = "Settings"
 
-    def link(href, label, on):
+    def side_link(href, name, on):
         cls = ' class="on"' if on else ""
-        return f'<a href="{href}"{cls}>{label}</a>'
+        return (f'<a href="{href}"{cls} data-tip="{E(name)}">{side_icon(name)}'
+                f'<span class="side-label">{E(name)}</span></a>')
 
-    # A section with several pages opens a menu of them on hover, and says so
-    # with a small arrow: a section name alone looked like a page, and the
-    # pages inside it could not be found without clicking through.
-    def section_html(name, home, pages):
+    # Every page is in the rail, under its section: the section you are in
+    # shows its pages, any other opens with its arrow - a page that could only
+    # be found from inside its section was a page nobody found.
+    def side_group(name, home, pages):
         on = name == section
         if len(pages) == 1:
-            return link(home, name, on)
-        menu = "".join(link(h, l, l == active) for h, l in pages)
-        a_cls = "on has-menu" if on else "has-menu"
-        return (f'<div class="sec"><a href="{home}" class="{a_cls}">'
-                f'{name}</a><div class="menu">{menu}</div></div>')
+            return f'<div class="side-group">{side_link(home, name, on)}</div>'
+        lit = ' class="on" aria-current="page"'
+        subs = "".join(f'<a href="{h}"{lit if (on and l == active) else ""}>{E(l)}</a>' for h, l in pages)
+        return (f'<div class="side-group{" open" if on else ""}" data-sec="{E(name)}">'
+                f'<div class="side-row">{side_link(home, name, on)}'
+                f'<button type="button" class="side-more" aria-expanded="{"true" if on else "false"}"'
+                f' aria-label="{E(name)} pages"><svg viewBox="0 0 24 24" aria-hidden="true">'
+                f'<path d="M9 6l6 6-6 6"/></svg></button></div>'
+                f'<div class="side-sub"><div class="side-sub-in" role="group" aria-label="{E(name)}">'
+                f'<p class="side-sub-head">{E(name)}</p>{subs}</div></div></div>')
 
-    primary = "".join(section_html(name, home, pages)
-                      for name, home, pages in SECTIONS)
-    # The second row exists only where a section has more than one page, so
-    # Today and KPI do not carry an empty strip under the name.
-    sub = ""
+    items = "".join(side_group(name, home, pages) for name, home, pages in SECTIONS)
+    music_row = ""
+    if music or tune:
+        music_row = ('<div class="side-music"><button type="button" id="musicbtn" class="musicbtn"'
+                     ' onclick="Music.toggle()" title="Music" data-tip="Music"></button>'
+                     '<span id="songname" class="songname side-label" hidden></span></div>')
+
+    tabs = ""
     for name, _home, pages in SECTIONS:
         if name == section and len(pages) > 1:
-            links = "".join(link(h, l, l == active) for h, l in pages)
-            sub = (f'<div class="pagesband"><nav class="pages" aria-label="{name}">'
-                   f'{links}</nav></div>')
-    settings_on = ' class="on"' if active == "Settings" else ""
+            here = ' class="on" aria-current="page"'
+            links = "".join(f'<a href="{h}"{here if l == active else ""}>{E(l)}</a>' for h, l in pages)
+            tabs = (f'<nav class="toptabs" aria-label="{E(name)}">{links}'
+                    f'<span class="tab-glide" aria-hidden="true"></span></nav>')
+    heading = section or title
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
-<link rel="stylesheet" href="/static/style.css"></head><body>
-{demo_banner()}<header class="top">
-<div class="bar">
-<span class="brand"><span class="mark">O</span>OlimovAzamat</span>
-<nav class="sections" aria-label="Sections">{primary}</nav>
-<span class="right">{'<button type="button" id="musicbtn" class="musicbtn"'
-  ' onclick="Music.toggle()" title="Music"></button>' if (music or tune) else ''}
-<a href="/settings"{settings_on}>Settings</a><a href="/logout">Sign out</a></span>
-</div>{sub}</header>
+{SIDE_EARLY}
+<link rel="stylesheet" href="/static/style.css"></head><body class="shell">
+<aside class="side" id="side" aria-label="Main menu">
+  <div class="side-head">
+    <a class="side-brand" href="/" data-tip="OlimovAzamat"><span class="mark">O</span>
+      <span class="side-label">OlimovAzamat<small>Teacher</small></span></a>
+    <button type="button" class="side-toggle" id="sidetoggle" aria-controls="side" aria-expanded="true"
+            title="Hide the menu  [" aria-label="Hide the menu"><svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15M15.5 10l-2 2 2 2"/></svg><svg
+      class="side-x" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <nav class="side-nav" aria-label="Sections">{items}</nav>
+  <div class="side-foot">
+    {music_row}{side_link("/settings", "Settings", section == "Settings")}
+    <a href="/logout" data-tip="Sign out">{side_icon("Sign out")}<span class="side-label">Sign out</span></a>
+  </div>
+</aside>
+<div class="side-scrim" id="sidescrim"></div>
+<div class="stage">
+{demo_banner()}<header class="topbar">
+  <div class="topbar-in">
+    <button type="button" class="side-open" id="sideopen" aria-controls="side" aria-expanded="false"
+            aria-label="Show the menu"><svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <div class="topbar-title">{E(heading)}</div>
+    {tabs}
+  </div>
+</header>
 <main>{body}</main>
+</div>
 {tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
+<script src="/static/shell.js" defer></script>
 <script src="/static/nav.js" defer></script>
 <script src="/static/listen.js" defer></script>
 <script src="/static/materials.js" defer></script>

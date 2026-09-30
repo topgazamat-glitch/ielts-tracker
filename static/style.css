@@ -148,10 +148,8 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------------------------------------------------------------- app bar */
 
-/* Two rows with two jobs. The top row names the five sections and never
-   changes shape; the row beneath lists the pages of the section you are in.
-   Eighteen links on one row used to wrap, scroll or cut off depending on the
-   screen - five words fit everywhere, and the second row is short by design. */
+/* The students' pages: a slim bar with the name and the music button. The
+   teacher's pages have a shell of their own - see "The teacher's shell". */
 header.top {
   position: sticky; top: 0; z-index: 20;
   background: var(--surface);
@@ -175,105 +173,15 @@ header.top .brand .mark {
   font-size: 13px; font-weight: 700; letter-spacing: -.02em;
 }
 
-header.top nav {
-  display: flex; align-items: stretch; gap: var(--sp-1);
-  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
-}
-header.top nav::-webkit-scrollbar { display: none; }
-
-/* Sections are words with a rule under the current one - the language of a
-   site's top level - so they cannot be confused with the pills beneath. */
-header.top nav.sections a {
-  display: flex; align-items: center;
-  padding: 0 var(--sp-3);
-  color: var(--ink-2); font-size: 14px; font-weight: 500; white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  transition: color .14s var(--ease), border-color .14s var(--ease);
-}
-header.top nav.sections a:hover { color: var(--ink); text-decoration: none; }
-header.top nav.sections a.on { color: var(--ink); font-weight: 600;
-  border-bottom-color: var(--accent); }
-/* the arrow is the promise of a menu; a section without one is a plain link */
-header.top nav.sections a.has-menu::after {
-  content: "\25BE"; margin-left: var(--sp-1); font-size: 12px; opacity: .55;
-}
-header.top nav.sections { overflow: visible; }
-header.top nav.sections .sec { position: relative; display: flex; align-items: stretch; }
-header.top nav.sections .menu {
-  display: none; position: absolute; top: 100%; left: 0; z-index: 30;
-  min-width: 190px; padding: var(--sp-2);
-  flex-direction: column; gap: var(--sp-1);
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-md); box-shadow: var(--shadow-2);
-}
-header.top nav.sections .menu a {
-  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); border-bottom: 0;
-  font-size: 14px; font-weight: 500; color: var(--ink-2);
-}
-header.top nav.sections .menu a:hover { background: var(--line-soft); color: var(--ink);
-  text-decoration: none; }
-header.top nav.sections .menu a.on { background: var(--accent-soft); color: var(--accent);
-  font-weight: 600; }
-@media (hover: hover) {
-  header.top nav.sections .sec:hover .menu,
-  header.top nav.sections .sec:focus-within .menu { display: flex; }
-}
-/* opened by a tap: pinned under the header, clear of the sideways strip */
-header.top nav.sections .sec.open .menu {
-  display: flex; position: fixed; left: var(--sp-4); right: var(--sp-4);
-}
-header.top nav.sections .sec.open > a { color: var(--accent); }
-
 header.top .right {
   margin-left: auto; display: flex; align-items: center; gap: var(--sp-2);
   white-space: nowrap;
 }
-header.top .right a {
-  color: var(--ink-3); font-size: 13px; padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-sm);
-}
-header.top .right a:hover { color: var(--ink); background: var(--line-soft);
-  text-decoration: none; }
-header.top .right a.on { color: var(--accent); font-weight: 600; }
-
-/* The pages of the current section: small pills on a quieter band, so the
-   eye reads "inside Students" before it reads the page names. */
-header.top .pagesband { background: var(--surface-2); border-top: 1px solid var(--line-soft); }
-header.top nav.pages {
-  gap: var(--sp-1);
-  padding: var(--sp-2) var(--sp-5);
-  max-width: 1120px; margin: 0 auto; box-sizing: border-box;
-}
-header.top nav.pages a {
-  padding: var(--sp-1) var(--sp-3); border-radius: var(--r-full);
-  color: var(--ink-2); font-size: 13px; font-weight: 500; white-space: nowrap;
-  transition: background .14s var(--ease), color .14s var(--ease);
-}
-header.top nav.pages a:hover { background: var(--line-soft); color: var(--ink);
-  text-decoration: none; }
-header.top nav.pages a.on { background: var(--accent-soft); color: var(--accent);
-  font-weight: 600; }
-
-/* A phone shows the name and the sign-out on the first line and the five
-   sections on the next, each row swiping if it must; the fade at the edge is
-   what says "there is more", since the scrollbar is hidden. */
+/* a phone: the name and the music button on one line */
 @media (max-width: 720px) {
-  header.top .bar {
-    flex-wrap: wrap; height: auto; gap: 0 var(--sp-3);
-    padding: var(--sp-2) var(--sp-4) 0;
-  }
+  header.top .bar { height: auto; gap: 0 var(--sp-3); padding: var(--sp-2) var(--sp-4); }
   header.top .brand { height: 40px; }
   header.top .right { height: 40px; }
-  header.top nav.sections { order: 3; flex-basis: 100%; height: 40px;
-    margin: 0 calc(-1 * var(--sp-4)); padding: 0 var(--sp-2); overflow-x: auto; }
-  header.top nav.sections a { padding: 0 var(--sp-2); font-size: 13px; }
-  header.top nav.pages { padding: var(--sp-2) var(--sp-4); }
-  header.top nav {
-    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
-    mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
-  }
-  /* a mask hides what its element paints outside its box, the open menu too */
-  header.top nav.menu-open { -webkit-mask-image: none; mask-image: none; }
 }
 
 /* ------------------------------------------------------------------ layout */
@@ -2932,7 +2840,10 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
 
 /* Set homework: one form. The unit's three boxes sit in a tinted band, since
    they fill the rest in; the send options and the button close it. */
-.setform { display: grid; gap: var(--sp-3); }
+.setform { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+/* a grid lets a child grow to its widest content - a long list of lessons -
+   past a phone's edge unless it is told it may be narrower */
+.setform > *, .unitfill > * { min-width: 0; }
 .setform .inline { margin: 0; }
 .unitfill { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-md); background: var(--accent-soft); border: 1px solid var(--accent-line); }
@@ -2968,3 +2879,234 @@ ol.findings li::marker { color: var(--brand); font-weight: 600; }
 .attach { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2);
   border-color: var(--gold); background: var(--gold-soft); }
 .attach .f { flex: 1 1 220px; margin: 0; }
+
+/* ============================================================================
+   The teacher's shell
+   The sections down the left on a deep plum rail, the pages of the one you are
+   in across the top of the work, the work beneath. The rail narrows to its
+   icons and back (remembered); on a phone it slides in over the page. Two
+   markers glide rather than jump: the soft pill behind the current section and
+   the line under the current page. Nothing here moves <main> - a transform on
+   it breaks fixed elements - only the rail, the stage's margin and the markers.
+   ========================================================================== */
+
+:root { --side-w: 248px; --side-rail: 76px; --top-h: 60px; }
+
+body.shell { min-height: 100vh; }
+
+.side {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
+  width: var(--side-w);
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-3) var(--sp-3);
+  color: rgba(255, 255, 255, .68);
+  background:
+    radial-gradient(130% 55% at 0% 0%, rgba(255, 211, 110, .09), transparent 62%),
+    linear-gradient(180deg, #2c0839 0%, #1d0526 100%);
+  transition: width .32s var(--ease), transform .34s var(--ease), box-shadow .34s var(--ease);
+}
+.stage { margin-left: var(--side-w); min-width: 0; transition: margin-left .32s var(--ease); }
+html.rail .side { width: var(--side-rail); }
+html.rail .stage { margin-left: var(--side-rail); }
+/* the first frame is drawn where the rail was left, with nothing sliding in */
+html.still *, html.still *::before, html.still *::after { transition: none !important; }
+
+.side svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
+
+/* name and the button that narrows the rail */
+.side-head { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; }
+.side-brand { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center;
+  flex: 1; min-width: 0; color: #fff; }
+.side-brand:hover { text-decoration: none; }
+.side-brand .mark { justify-self: center; display: grid; place-items: center; width: 34px; height: 34px;
+  border-radius: 11px; font-size: 15px; font-weight: 700; color: #2a0736;
+  background: linear-gradient(135deg, #ffe3a3, #ffc76a); box-shadow: 0 6px 16px rgba(255, 199, 106, .22); }
+.side-brand .side-label { font-size: 14.5px; font-weight: 650; letter-spacing: -.015em; line-height: 1.15; }
+.side-brand small { display: block; font-size: 11.5px; font-weight: 500; letter-spacing: .02em;
+  color: rgba(255, 255, 255, .5); }
+.side-toggle { flex: none; display: grid; place-items: center; width: 34px; height: 34px; padding: 0;
+  border-radius: 10px; background: none; color: rgba(255, 255, 255, .55); box-shadow: none;
+  transition: background .18s var(--ease), color .18s var(--ease); }
+.side-toggle:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.side-toggle svg:first-child path:last-child { transition: transform .32s var(--ease); transform-origin: 14.5px 12px; }
+.side-toggle .side-x { display: none; }
+html.rail .side-head { flex-direction: column; gap: var(--sp-2); }
+html.rail .side-brand { flex: none; width: 52px; }
+html.rail .side-toggle svg:first-child path:last-child { transform: scaleX(-1); }
+
+/* a link: its icon in a fixed column, so narrowing only hides the words */
+.side-nav, .side-foot { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.side-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none;
+  margin: 0 calc(-1 * var(--sp-3)); padding: 0 var(--sp-3); }
+.side-nav::-webkit-scrollbar { display: none; }
+html.rail .side-nav { overflow: visible; }
+.side-group > a, .side-row > a, .side-foot a, .side-music {
+  position: relative; display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center;
+  height: 44px; border-radius: 12px; color: inherit; font-size: 14.5px; font-weight: 520;
+  transition: color .18s var(--ease), background .18s var(--ease);
+}
+.side-group > a:hover, .side-row > a:hover, .side-foot a:hover { color: #fff; background: rgba(255, 255, 255, .06);
+  text-decoration: none; }
+.side-ico { justify-self: center; transition: color .18s var(--ease), transform .18s var(--ease); }
+.side-nav a:active .side-ico, .side-foot a:active .side-ico { transform: scale(.92); }
+.side-row { position: relative; display: flex; }
+.side-row > a { flex: 1; min-width: 0; padding-right: 36px; }
+.side-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip;
+  transition: opacity .2s var(--ease); }
+html.rail .side-label { opacity: 0; }
+
+/* the current section: white words, a gold icon, a soft pill behind it */
+.side-group > a.on, .side-row > a.on, .side-foot a.on { color: #fff; font-weight: 620;
+  background: rgba(255, 255, 255, .12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
+.side-nav a.on .side-ico, .side-foot a.on .side-ico { color: #ffd36e; }
+
+/* a section's pages: the arrow opens them, and they slide down under it */
+.side-more { position: absolute; right: 5px; top: 7px; display: grid; place-items: center;
+  width: 30px; height: 30px; padding: 0; border-radius: 8px; background: none; box-shadow: none;
+  color: rgba(255, 255, 255, .45); transition: background .18s var(--ease), color .18s var(--ease); }
+.side-more:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.side-more svg { width: 16px; height: 16px; transition: transform .3s var(--ease); }
+.side-group.open .side-more svg { transform: rotate(90deg); }
+.side-sub { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s var(--ease); }
+.side-group.open .side-sub { grid-template-rows: 1fr; }
+.side-sub-in { position: relative; min-height: 0; overflow: hidden; display: flex; flex-direction: column;
+  padding-left: 40px; }
+.side-sub-in::before { content: ""; position: absolute; left: 25.5px; top: 4px; bottom: 10px; width: 1px;
+  background: rgba(255, 255, 255, .1); }
+.side-sub-head { display: none; }
+.side-sub a { position: relative; display: flex; align-items: center; height: 34px; margin: 1px 0;
+  padding: 0 var(--sp-3); border-radius: 9px; color: rgba(255, 255, 255, .58); font-size: 13.5px;
+  font-weight: 500; white-space: nowrap; transition: color .18s var(--ease), background .18s var(--ease); }
+.side-sub a:last-child { margin-bottom: var(--sp-2); }
+.side-sub a:hover { color: #fff; background: rgba(255, 255, 255, .06); text-decoration: none; }
+.side-sub a::before { content: ""; position: absolute; left: -17px; top: 50%; width: 6px; height: 6px;
+  border-radius: 50%; background: #ffd36e; opacity: 0; transform: translateY(-50%) scale(.3);
+  transition: opacity .2s var(--ease), transform .25s var(--ease); }
+.side-sub a.on { color: #fff; font-weight: 620; }
+.side-sub a.on::before { opacity: 1; transform: translateY(-50%) scale(1); }
+
+/* narrowed: no arrows and no lists - the pages come out beside the icon */
+html.rail .side-more { display: none; }
+html.rail .side-sub { display: none; }
+@media (hover: hover) and (min-width: 861px) {
+  html.rail .side-group[data-sec] { position: relative; }
+  html.rail .side-sub { display: block; position: absolute; left: calc(100% + 14px); top: -8px; z-index: 50;
+    min-width: 210px; opacity: 0; visibility: hidden; transform: translateX(-6px);
+    transition: opacity .18s var(--ease), transform .2s var(--ease), visibility 0s linear .2s; }
+  html.rail .side-sub::before { content: ""; position: absolute; left: -16px; top: 0; bottom: 0; width: 16px; }
+  html.rail .side-group:hover .side-sub, html.rail .side-group:focus-within .side-sub {
+    opacity: 1; visibility: visible; transform: none;
+    transition: opacity .18s var(--ease), transform .2s var(--ease); }
+  html.rail .side-sub-in { padding: var(--sp-2); border-radius: 14px; overflow: visible;
+    background: #2d0c3a; border: 1px solid rgba(255, 255, 255, .08);
+    box-shadow: 0 18px 44px rgba(20, 6, 28, .38); }
+  html.rail .side-sub-in::before, html.rail .side-sub a::before { display: none; }
+  html.rail .side-sub-head { display: block; margin: 0; padding: var(--sp-1) var(--sp-3) var(--sp-2);
+    font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    color: rgba(255, 255, 255, .45); }
+  html.rail .side-sub a:last-child { margin-bottom: 0; }
+  html.rail .side-sub a.on { background: rgba(255, 255, 255, .1); }
+  /* where the pages come out, the name needs no tooltip of its own */
+  html.rail .side-group[data-sec] > .side-row > a[data-tip]:hover::after { display: none; }
+}
+
+.side-foot { margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid rgba(255, 255, 255, .08);
+  font-size: 14px; }
+.side-music { color: inherit; }
+.side-music .musicbtn { justify-self: center; display: grid; place-items: center; width: 34px; height: 34px;
+  padding: 0; border-radius: 10px; background: none; box-shadow: none; color: rgba(255, 255, 255, .7);
+  font-size: 18px; line-height: 1; }
+.side-music .musicbtn:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.side-music .musicbtn.on { color: #ffd36e; }
+.side-music .songname { font-size: 12.5px; color: rgba(255, 255, 255, .6); }
+
+/* the site's buttons are plum gradients; the rail's are quiet icons */
+.side button, .topbar .side-open { border: 0; margin: 0; filter: none; }
+.side button:hover, .topbar .side-open:hover { filter: none; }
+
+/* narrowed: the name of what is under the pointer, beside it */
+@media (hover: hover) {
+  html.rail .side [data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; left: calc(100% + 14px); top: 50%; z-index: 50;
+    transform: translateY(-50%); padding: 6px 10px; border-radius: 8px; white-space: nowrap;
+    background: #1c0f22; color: #fff; font-size: 12.5px; font-weight: 600; letter-spacing: 0;
+    box-shadow: 0 8px 24px rgba(20, 6, 28, .28); pointer-events: none;
+  }
+}
+
+/* the bar over the work: where you are, and the pages beside it */
+.topbar { position: sticky; top: 0; z-index: 30; background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  -webkit-backdrop-filter: saturate(1.6) blur(14px); backdrop-filter: saturate(1.6) blur(14px);
+  border-bottom: 1px solid var(--line-soft); }
+.topbar-in { display: flex; align-items: center; gap: var(--sp-5); height: var(--top-h);
+  max-width: 1120px; margin: 0 auto; padding: 0 var(--sp-5); box-sizing: border-box; }
+.topbar-title { flex: none; font-size: 17px; font-weight: 650; letter-spacing: -.02em; color: var(--ink);
+  white-space: nowrap; }
+.side-open { display: none; flex: none; place-items: center; width: 38px; height: 38px; padding: 0;
+  margin-left: calc(-1 * var(--sp-2)); border-radius: 10px; background: none; box-shadow: none; color: var(--ink); }
+.side-open svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+.side-open:hover { background: var(--line-soft); }
+
+.toptabs { position: relative; display: flex; align-self: stretch; gap: 2px; min-width: 0;
+  overflow-x: auto; scrollbar-width: none; }
+/* the section's name, a hairline, then its pages */
+@media (min-width: 861px) {
+  .topbar-title + .toptabs { padding-left: var(--sp-3); margin-left: calc(-1 * var(--sp-2)); }
+  .topbar-title + .toptabs::before { content: ""; position: sticky; left: 0; flex: none; align-self: center;
+    width: 1px; height: 20px; margin-right: var(--sp-3); background: var(--line); }
+}
+.toptabs::-webkit-scrollbar { display: none; }
+.toptabs a { display: flex; align-items: center; padding: 0 var(--sp-3); color: var(--ink-3);
+  font-size: 14px; font-weight: 520; white-space: nowrap; transition: color .18s var(--ease); }
+.toptabs a:hover { color: var(--ink); text-decoration: none; }
+.toptabs a.on { color: var(--ink); font-weight: 620; box-shadow: inset 0 -2.5px 0 var(--accent); }
+.toptabs.glides a.on { box-shadow: none; }
+.tab-glide { position: absolute; left: 0; bottom: 0; width: 0; height: 2.5px; border-radius: 2px 2px 0 0;
+  background: var(--accent); pointer-events: none;
+  transition: transform .36s var(--ease), width .36s var(--ease); }
+/* another section's pages arrive, they do not blink in */
+.topbar-in.fresh .toptabs, .topbar-in.fresh .topbar-title { animation: tabs-in .3s var(--ease) both; }
+@keyframes tabs-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* the grading panel stays in reach under the bar, not under the old header */
+.shell .queue .panel { top: calc(var(--top-h) + var(--sp-4)); max-height: calc(100vh - var(--top-h) - 32px); }
+
+/* a phone: the rail is a drawer that slides over the page */
+@media (max-width: 860px) {
+  .side, html.rail .side { width: min(84vw, 300px); transform: translateX(-102%); }
+  html.drawer .side { transform: none; box-shadow: 0 0 70px rgba(20, 6, 28, .45); }
+  .stage, html.rail .stage { margin-left: 0; }
+  html.rail .side-label { opacity: 1; }
+  html.rail .side-head { flex-direction: row; }
+  html.rail .side-brand { flex: 1; width: auto; }
+  .side-scrim { position: fixed; inset: 0; z-index: 35; background: rgba(20, 6, 28, .42);
+    opacity: 0; pointer-events: none; transition: opacity .3s var(--ease); }
+  html.drawer .side-scrim { opacity: 1; pointer-events: auto; }
+  html.drawer { overflow: hidden; }
+  .side-open { display: grid; }
+  .side-toggle svg:first-child { display: none; }
+  .side-toggle .side-x { display: block; }
+  .topbar-in { flex-wrap: wrap; height: auto; gap: 0 var(--sp-2); padding: 0 var(--sp-4); }
+  .topbar-title { display: flex; align-items: center; height: 52px; }
+  .toptabs { order: 3; flex-basis: 100%; height: 44px; margin: 0 calc(-1 * var(--sp-4)); padding: 0 var(--sp-2);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - var(--sp-5)), transparent); }
+}
+@media (min-width: 861px) { .side-scrim { display: none; } }
+
+@media (prefers-color-scheme: dark) {
+  .side { background: radial-gradient(130% 55% at 0% 0%, rgba(255, 211, 110, .06), transparent 62%),
+                      linear-gradient(180deg, #1f0a29 0%, #130618 100%);
+    box-shadow: inset -1px 0 0 var(--line); }
+  .side-brand .mark { color: #1f0a29; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .side, .stage, .side-sub, .side-more svg, .tab-glide, .side-label, .side-toggle svg path { transition: none !important; }
+  .topbar-in.fresh .toptabs, .topbar-in.fresh .topbar-title { animation: none; }
+}
+@media print {
+  .side, .side-scrim, .topbar { display: none !important; }
+  .stage { margin: 0 !important; }
+}

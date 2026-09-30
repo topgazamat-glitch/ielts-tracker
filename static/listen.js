@@ -21,7 +21,7 @@
 
   function makeDock() {
     if (dock) return dock;
-    var top = document.querySelector("header.top");
+    var top = document.querySelector(".topbar") || document.querySelector("header.top");
     if (!top) return null;
     dock = document.createElement("div");
     dock.className = "lx lx-dock";

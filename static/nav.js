@@ -81,31 +81,51 @@
   // other scripts - the marking form - swap pages the same way
   window.Nav = {go: go, swap: swapDocument, bar: bar};
 
-  // The teacher's header is two rows: the sections, and the pages of the
-  // current section. Both change from page to page, and the second row may
-  // appear or vanish, so each is brought over from the new document. The
-  // music button and the sign-out link live between them and are left alone.
+  // The students' pages have a header of their own, whose sections are
+  // brought over as they are; the teacher's shell is handled below.
   function swapHeader(doc) {
-    var oldTop = document.querySelector("header.top");
-    var newTop = doc.querySelector("header.top");
-    var oldSec = oldTop && oldTop.querySelector("nav.sections");
-    if (!oldSec) {
-      var oldNav = document.querySelector("header nav");
-      var newNav = doc.querySelector("header nav");
-      if (oldNav && newNav) { oldNav.innerHTML = newNav.innerHTML; }
-      return;
+    if (document.querySelector(".side")) { swapShell(doc); return; }
+    var oldNav = document.querySelector("header nav");
+    var newNav = doc.querySelector("header nav");
+    if (oldNav && newNav) { oldNav.innerHTML = newNav.innerHTML; }
+  }
+
+  // The teacher's shell: the rail says which section is lit, the bar over
+  // the work says which page. Inside one section only the lit page changes,
+  // and its line glides across; another section brings its own name and
+  // pages, which fade in. The rail itself is never replaced, so it does not
+  // flicker, and whatever the music button is doing carries on.
+  // the same links in the same order on every page, so the n-th here takes
+  // the n-th there's state (a section and its first page share an address)
+  function light(links, from) {
+    Array.prototype.forEach.call(links, function (a, i) {
+      var on = !!(from[i] && from[i].classList.contains("on"));
+      a.classList.toggle("on", on);
+      if (on && a.closest(".toptabs, .side-sub")) { a.setAttribute("aria-current", "page"); }
+      else { a.removeAttribute("aria-current"); }
+    });
+  }
+
+  function swapShell(doc) {
+    light(document.querySelectorAll(".side a[href]"), doc.querySelectorAll(".side a[href]"));
+    var here = document.querySelector(".topbar-in"), there = doc.querySelector(".topbar-in");
+    var same = false;
+    if (here && there) {
+      var title = here.querySelector(".topbar-title"), newTitle = there.querySelector(".topbar-title");
+      var tabs = here.querySelector(".toptabs"), newTabs = there.querySelector(".toptabs");
+      same = !!(title && newTitle && title.textContent === newTitle.textContent && !!tabs === !!newTabs);
+      if (same && tabs) {
+        light(tabs.querySelectorAll("a[href]"), newTabs.querySelectorAll("a[href]"));
+      } else if (!same) {
+        if (title && newTitle) { title.textContent = newTitle.textContent; }
+        if (tabs) { tabs.parentNode.removeChild(tabs); }
+        if (newTabs) { here.appendChild(document.importNode(newTabs, true)); }
+        here.classList.remove("fresh");
+        void here.offsetWidth;
+        here.classList.add("fresh");
+      }
     }
-    if (!newTop) return;
-    var newSec = newTop.querySelector("nav.sections");
-    if (newSec) { oldSec.innerHTML = newSec.innerHTML; }
-    var oldBand = oldTop.querySelector(".pagesband");
-    var newBand = newTop.querySelector(".pagesband");
-    if (oldBand && newBand) { oldBand.innerHTML = newBand.innerHTML; }
-    else if (oldBand) { oldBand.parentNode.removeChild(oldBand); }
-    else if (newBand) { oldTop.appendChild(newBand); }
-    var oldSet = oldTop.querySelector('.right a[href="/settings"]');
-    var newSet = newTop.querySelector('.right a[href="/settings"]');
-    if (oldSet && newSet) { oldSet.className = newSet.className; }
+    if (window.Shell) { window.Shell.place(true); }
   }
 
   document.addEventListener("click", function (e) {
@@ -125,52 +145,4 @@
   window.addEventListener("popstate", function (e) {
     if (e.state && e.state.nav) { go(window.location.href, false); }
   });
-})();
-
-
-/* On a phone there is no hover, so the arrow beside a section opens its
- * menu on a tap instead of leaving the page. The menu is pinned just under
- * the header, outside the strip that scrolls sideways, or the strip would
- * clip it. A second tap on the same section, or a tap anywhere else, closes
- * it. Registered on the capture phase so it runs before the page-swapping
- * handler above, which honours preventDefault.
- */
-(function () {
-  if (window.matchMedia && window.matchMedia("(hover: hover)").matches) return;
-  if (!document.querySelector("nav.sections")) return;
-  var open = null;
-  // the strip fades at its edge with a mask, and a mask hides everything the
-  // element paints outside its own box - the pinned menu included - so the
-  // strip drops the fade while a menu is open
-  function strip(sec) { return sec.closest("nav"); }
-  function close() {
-    if (!open) return;
-    open.classList.remove("open");
-    var nav = strip(open);
-    if (nav) nav.classList.remove("menu-open");
-    open = null;
-  }
-  document.addEventListener("click", function (e) {
-    var t = e.target;
-    if (!t || !t.closest) return;
-    var a = t.closest("nav.sections a.has-menu");
-    if (a) {
-      e.preventDefault();
-      var sec = a.parentNode;
-      if (sec === open) { close(); return; }
-      close();
-      var head = document.querySelector("header.top");
-      var menu = sec.querySelector(".menu");
-      if (head && menu) {
-        menu.style.top = Math.round(head.getBoundingClientRect().bottom) + "px";
-      }
-      sec.classList.add("open");
-      var nav = strip(sec);
-      if (nav) nav.classList.add("menu-open");
-      open = sec;
-      return;
-    }
-    if (!t.closest("nav.sections .menu")) close();
-  }, true);
-  document.addEventListener("pageswap", function () { open = null; });
 })();
