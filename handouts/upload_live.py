@@ -40,12 +40,14 @@ def opener():
 
 
 def menu(op):
-    """{title: (id, open to the level?)} from the Digital handout menu on Set homework."""
-    pg = html.unescape(op.open(SITE + "/assignments", timeout=60).read().decode())
+    """{title: (id, open to the level?)} from the handout checkboxes on Set homework."""
+    pg = op.open(SITE + "/assignments", timeout=60).read().decode()
     out = {}
-    for tid, title in re.findall(r'<option value="(\d+)"[^>]*>([^<]*)</option>', pg):
-        hidden = title.endswith("(opens only for this class)")
-        out[title.replace(" (opens only for this class)", "")] = (int(tid), not hidden)
+    for tid, title, hidden in re.findall(r'<input type="checkbox" name="handout" value="(\d+)"[^>]*>'
+                                         r'<span>([^<]*)(<em>\(opens only for this class\)</em>)?</span>', pg):
+        out[html.unescape(title).strip()] = (int(tid), not hidden)
+    if not out:                               # a page that lists no handouts is not an answer
+        sys.exit("no handouts on Set homework - signed out, or the page changed")
     return out
 
 
