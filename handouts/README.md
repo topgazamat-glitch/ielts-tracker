@@ -49,6 +49,8 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 | `b02c_digital.py` | Beginner | 2C All about me | 173 | 116 |
 | `b03a_digital.py` | Beginner | 3A Food and drink | 204 | 143 |
 | `b03b_digital.py` | Beginner | 3B Food and drink | 188 | 116 |
+| `b03c_digital.py` | Beginner | 3C Food and drink | 176 | 150 |
+| `b04a_digital.py` | Beginner | 4A My life and my family | 168 | 118 |
 | `u011_digital.py` | Elementary | 1.1 People | 68 | 55 |
 | `e07bd_digital.py` | Elementary | 7B + 7D Transport | 282 | 251 |
 | `e09ab_digital.py` | Elementary | 9A + 9B Clothes and shopping | 293 | 237 |
@@ -99,7 +101,7 @@ come from the Material Bank `_NEW BOOKLET STYLE` copies: the Desktop
 "redesigns" have the same exercises, but their section bars share a table
 with what follows, so they would not split into parts. The other Elementary
 and Beginner booklets are the Desktop new-design copies, which split cleanly;
-E11AC, B02B, B02C and B03A are only in the Material Bank. A booklet with the
+E11AC, B02B, B02C, B03A, B03C and B04A are only in the Material Bank. A booklet with the
 older cover (the unit number in a box, the goals under "By the end of this
 booklet") calls `Handout.cover(...)` so the page reads its name and goals.
 
