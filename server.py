@@ -134,6 +134,7 @@ def page(title, body, active="", music=False):
 <main>{body}</main>
 {tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
 <script src="/static/nav.js" defer></script>
+<script src="/static/listen.js" defer></script>
 <script src="/static/materials.js" defer></script>
 <script src="/static/grade.js" defer></script>
 <script src="/static/prompts.js" defer></script>
@@ -2453,7 +2454,8 @@ def student_page(title, body, music=True):
 <script src="/static/write.js" defer></script>
 <script src="/static/book.js" defer></script>
 <script src="/static/shrink.js" defer></script>
-<script src="/static/handout.js" defer></script></body></html>"""
+<script src="/static/handout.js" defer></script>
+<script src="/static/listen.js" defer></script></body></html>"""
 
 
 # The student's page in five sections, the way an app on their phone would
@@ -2922,36 +2924,104 @@ def portal_materials(db, s, token, query):
 BLANK_AT = re.compile(r'<input class="bk-blank" data-q="(\d+)"')
 # The booklets say which track a listening section needs - "this is track
 # 10.02" - and the coursebook names its files the same way, so the player can
-# be put in the right place without anybody typing a filename.
-TRACK_AT = re.compile(r"track\s*(\d{1,2}\.\d{2})", re.I)
+# be put in the right place without anybody typing a filename. A booklet
+# retold in Uzbek says "bu 3.18-trek"; a listening in several recordings says
+# "09.03–09.05-treklar" or "10.10 va 10.13-treklar"; and a few write
+# "track 4.8" for 4.08.
+_T = r"\d{1,2}\.\d{1,2}"
+TRACK_AT = re.compile(
+    r"tracks?\s*(?P<a>%s)(?:\s*(?:[–—-]|to)\s*(?P<b>%s)|\s*(?:and|&)\s*(?P<c>%s))?(?!\d)"
+    r"|(?P<a2>%s)(?:\s*[–—]\s*(?P<b2>%s)|\s+va\s+(?P<c2>%s))?\s*-\s*trek" % ((_T,) * 6), re.I)
 PARA = re.compile(r"<p\b[^>]*>.*?</p>", re.S)
+PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="lx-pl" d="M8 5.5v13l10.5-6.5z"/>' \
+            '<path class="lx-pa" d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z"/></svg>'
 
 
-def add_players(html, level, who=""):
-    """Put a player after the paragraph that names a track.
+def named_tracks(text):
+    """Every (unit, number) a piece of text names as a track, in order: a
+    range "09.03–09.05" is all three, "10.10 va 10.13" the two."""
+    out = []
+    for m in TRACK_AT.finditer(text):
+        first = m.group("a") or m.group("a2")
+        upto = m.group("b") or m.group("b2")
+        also = m.group("c") or m.group("c2")
+        u1, n1 = (int(x) for x in first.split("."))
+        out.append((u1, n1))
+        if upto:
+            u2, n2 = (int(x) for x in upto.split("."))
+            if u2 == u1 and n1 < n2 <= n1 + 12:
+                out += [(u1, k) for k in range(n1 + 1, n2 + 1)]
+            else:
+                out.append((u2, n2))
+        if also:
+            out.append(tuple(int(x) for x in also.split(".")))
+    return out
+
+
+# Where a booklet names the wrong recording, checked against the coursebook's
+# audio scripts: the track it names, and the ones its questions are really
+# about. An empty list keeps the button off - 9A&B gives the people in the
+# recording Uzbek names, so the recording would not match its questions.
+TRACK_FIXES = {
+    "Unit 3A & 3C — Money": {(3, 3): [(3, 2), (3, 3)]},          # the interview is 3.02, the lines 3.03
+    "Unit 3B & 3D — Money": {(3, 11): [(3, 7)]},                 # Daniel on 'Ways of Life'
+    "Unit 4B & 4D — Celebrations": {(4, 8): [(4, 6)]},          # Mike and Harry in Tokyo
+    "Unit 9A & 9B — Clothes and shopping": {(9, 3): [], (9, 4): [], (9, 5): []},
+}
+
+
+def shelf_track(level, unit, num):
+    """The name a track has on its level's shelf - uploads have used both
+    4.08 and 04.08 - or None when it has not been put there."""
+    for name in ("%d.%02d" % (unit, num), "%02d.%02d" % (unit, num)):
+        if os.path.isfile(os.path.join(core.AUDIO_DIR, level, name + ".mp3")):
+            return name
+    return None
+
+
+def add_players(html, level, who="", title=None):
+    """Put a Listen button after the paragraph that names a track.
 
     Word splits a run wherever it likes, so "track 10.02" arrives as
     "track 1" in one span and "0.02" in the next, and a regex over the markup
     finds nothing. The paragraph's text is read with the tags taken out, and
-    the player is added after the paragraph that mentions it.
+    the button is added after the paragraph that mentions it. A track that is
+    not on the site gets no button - the booklet already says the teacher will
+    read the script - and the teacher, looking through, is told it is missing.
     """
     if not level:
         return html
     seen = set()
+    fixes = TRACK_FIXES.get(title, {})
 
     def after(m):
         block = m.group(0)
         text = re.sub(r"<[^>]+>", "", block)
-        found = [t for t in TRACK_AT.findall(text) if t not in seen]
-        if not found:
-            return block
+        found = []
+        for unit, num in (t for named in named_tracks(text) for t in fixes.get(named, [named])):
+            if (unit, num) not in seen:
+                seen.add((unit, num))
+                found.append((unit, num))
         players = ""
-        for track in found:
-            seen.add(track)
-            players += ('<p><audio class="bkaudio" controls preload="none" '
-                        'src="/audio/%s/%s.mp3%s"></audio></p>'
-                        % (urllib.parse.quote(level), track,
-                           "?s=" + urllib.parse.quote(who) if who else ""))
+        for unit, num in found:
+            shown = "%d.%02d" % (unit, num)
+            name = shelf_track(level, unit, num)
+            if not name:
+                if not who:
+                    players += ('<p class="lx-missing">Track %s is not on the site yet, so students '
+                                'see no Listen button here.</p>' % shown)
+                continue
+            src = "/audio/%s/%s.mp3%s" % (urllib.parse.quote(level), name,
+                                          "?s=" + urllib.parse.quote(who) if who else "")
+            players += ('<div class="lx" data-src="%s" data-track="%s">'
+                        '<button type="button" class="lx-play" aria-label="Play track %s">%s</button>'
+                        '<div class="lx-mid"><span class="lx-row"><span class="lx-label">%s</span><span class="lx-time"></span></span>'
+                        '<span class="lx-bar" role="slider" tabindex="0" aria-label="Where in the recording"'
+                        ' aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></div>'
+                        '<button type="button" class="lx-back" aria-label="Back 5 seconds">'
+                        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5'
+                        'a7 7 0 1 0 7-7z"/></svg><b>5</b></button></div>'
+                        % (E(src), shown, shown, PLAY_ICON, "Listen · " + shown if len(found) > 1 else "Listen"))
         return block + players
 
     return PARA.sub(after, html)
@@ -3458,7 +3528,7 @@ def hx_key(answer):
     return "it was right as it was" if first == "✓" else first
 
 
-def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
+def fill_layout(layout, qs, given=None, marks=None, level=None, who="", title=None):
     """Put the student's own boxes into the booklet's blanks.
 
     The booklet was rendered with `data-q="7"` where its seventh blank is, so
@@ -3482,7 +3552,7 @@ def fill_layout(layout, qs, given=None, marks=None, level=None, who=""):
                 f' data-q="{m.group(1)}"')
 
     filled = fill_choices(BLANK_AT.sub(box, layout), qs, given, marks)
-    return add_players(filled, level, who)
+    return add_players(filled, level, who, title)
 
 
 def portal_handouts(db, s, token, query):
@@ -3663,7 +3733,8 @@ def handout_view(db, token, t, qs, attempt, query):
             "SELECT question_id, correct FROM dresponses WHERE attempt_id=?", (attempt["id"],))}
     layout = '<div class="booklet">' + hx_dress(markup) + "</div>"
     layout, _secs, exercises = handout_controls(layout, pqs, given, marks)
-    filled = fill_layout(layout, pqs, given, marks, level=audio_shelf(t, level), who=token)
+    filled = fill_layout(layout, pqs, given, marks, level=audio_shelf(t, level), who=token,
+                         title=t["title"])
     if locked:
         answer = {str(q["id"]): q["answer"] for q, _o in pqs}
         filled = re.sub(r'(<input class="bk-blank wrong" name="q(\d+)"[^>]*>)',
@@ -9362,7 +9433,7 @@ def view_handout_look(req, db, tid):
     layout = '<div class="booklet">' + hx_dress(markup) + "</div>"
     layout, _secs, _ex = handout_controls(layout, pqs, given, marks)
     level = core.level_name(db, t["level_id"]) or ""
-    sheet = fill_layout(layout, pqs, given, marks, level=audio_shelf(t, level))
+    sheet = fill_layout(layout, pqs, given, marks, level=audio_shelf(t, level), title=t["title"])
     here = f"/tests/{tid}/look?answers={'1' if show else '0'}"
     steps = "".join(
         f'<a class="tab{" on" if i == idx else ""}" href="{here}&amp;part={i + 1}">{i + 1} {E(p[1])}</a>'

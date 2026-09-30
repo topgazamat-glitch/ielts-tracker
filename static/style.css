@@ -2074,8 +2074,58 @@ main.portal:has(.booksheet) { max-width: 940px; }
 .grid .stat.busy .v { color: var(--warn); }
 .grid .stat.busy .note { color: var(--warn); }
 
-/* the coursebook track, where the booklet asks for it */
-.booklet .bkaudio { width: 100%; max-width: 420px; margin: var(--sp-2) 0; }
+/* the class recording, where the booklet asks for it: a Listen button in the
+   listening section, and - once it is playing and the button has scrolled
+   away - the same controls under the top bar, so the questions can be
+   answered as it plays. The sheet stays white in dark mode, so the button in
+   it keeps a light palette of its own; the bar in the header follows the
+   theme like the header does. */
+.lx { display: flex; align-items: center; gap: 10px;
+  --lx-bg: #ffffff; --lx-line: #dccfe3; --lx-ink: #1c0f22; --lx-soft: #7a6784;
+  --lx-brand: #701589; --lx-track: #ece3f0; }
+.booklet .lx { margin: 10px 0 4px; padding: 8px 12px 8px 8px; max-width: 460px;
+  background: var(--lx-bg); border: 1px solid var(--lx-line); border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(28, 15, 34, .06); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.lx button { flex: none; display: grid; place-items: center; padding: 0; border: 0; cursor: pointer;
+  background: none; color: var(--lx-ink); font: inherit; }
+.lx button:focus-visible, .lx .lx-bar:focus-visible { outline: 2px solid var(--lx-brand); outline-offset: 2px; }
+.lx .lx-play { width: 44px; height: 44px; border-radius: 50%; background: var(--lx-brand); color: #fff;
+  transition: transform .08s var(--ease); }
+.lx .lx-play:active { transform: scale(.94); }
+.lx .lx-play svg { width: 22px; height: 22px; fill: currentColor; }
+.lx .lx-pa, .lx.on .lx-pl { display: none; }
+.lx.on .lx-pa { display: inline; }
+.lx .lx-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lx .lx-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.lx .lx-label { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; color: var(--lx-ink); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a thin line to look at, a tall strip to put a thumb on */
+.lx .lx-bar { position: relative; display: block; height: 18px; cursor: pointer; touch-action: manipulation; }
+.lx .lx-bar::before, .lx .lx-bar i { content: ""; position: absolute; left: 0; top: 7px; height: 4px;
+  border-radius: 2px; }
+.lx .lx-bar::before { right: 0; background: var(--lx-track); }
+.lx .lx-bar i { width: 0; background: var(--lx-brand); }
+.lx .lx-back { position: relative; width: 36px; height: 36px; border-radius: 50%; color: var(--lx-soft); }
+.lx .lx-back svg { width: 26px; height: 26px; fill: currentColor; }
+.lx .lx-back b { position: absolute; top: 13px; left: 0; right: 0; font-size: 8.5px; font-weight: 700;
+  text-align: center; }
+.lx .lx-back:active { color: var(--lx-brand); }
+.lx .lx-time { flex: none; font-size: 12.5px; color: var(--lx-soft);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lx-dock { --lx-bg: var(--surface); --lx-line: var(--line); --lx-ink: var(--ink); --lx-soft: var(--ink-3);
+  --lx-brand: var(--accent); --lx-track: var(--line-soft);
+  max-width: 1120px; margin: 0 auto; padding: 6px var(--sp-4) 6px var(--sp-3); box-sizing: border-box;
+  border-top: 1px solid var(--line); background: var(--surface); }
+.lx-dock[hidden] { display: none; }
+.lx-dock .lx-play { width: 38px; height: 38px; }
+.lx-dock .lx-play svg { width: 19px; height: 19px; }
+.lx-dock .lx-label { font-size: 13px; font-weight: 600; }
+.lx-dock .lx-close { width: 32px; height: 32px; border-radius: 50%; color: var(--lx-soft); }
+.lx-dock .lx-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; }
+.lx-missing { margin: 8px 0; padding: 6px 10px; border-radius: 8px; font-size: 13px;
+  background: #fff4de; color: #7a4d00; border: 1px solid #f0d9a8; }
+@media (prefers-reduced-motion: reduce) { .lx .lx-play { transition: none; } }
 
 /* ------------------------------------------------------------- exam conditions
  * The clock sits above the paper and stays there while it scrolls, because a

@@ -219,8 +219,11 @@
     return song;
   }
 
+  // quiet while a class recording plays, whatever the button says
+  var hushed = false;
+
   function start() {
-    if (!on) return;
+    if (!on || hushed) return;
     var el = songEl();
     if (el) {
       // play() rejects until the visitor has interacted with the page; the
@@ -270,6 +273,11 @@
       paint();
     },
     nudge: function () { if (on) start(); },      // called on the first click
+    // a listening recording is playing (true) or has stopped (false)
+    hush: function (h) {
+      hushed = !!h;
+      if (hushed) stop(); else start();
+    },
     state: function () {
       return {on: on, audio: ac ? ac.state : "none",
               song: window.SONG ? window.SONG.name : null,
