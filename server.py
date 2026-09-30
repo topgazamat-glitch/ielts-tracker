@@ -112,6 +112,92 @@ SIDE_EARLY = ('<script>try{if(localStorage.getItem("side")==="rail")'
               'document.documentElement.classList.add("still")</script>')
 
 
+def side_link(href, name, icon, on, badge=""):
+    cls = ' class="on"' if on else ""
+    return (f'<a href="{href}"{cls} data-tip="{E(name)}">{icon}'
+            f'<span class="side-label">{E(name)}</span>{badge}</a>')
+
+
+def side_nav(groups):
+    """The sections, each with its pages under it: the section you are in
+    shows them, any other opens with its arrow - a page that could only be
+    found from inside its section was a page nobody found.
+    groups: [(name, home, icon, on, badge, [(href, label, on, badge)])]"""
+    out = []
+    lit = ' class="on" aria-current="page"'
+    for name, home, icon, on, badge, pages in groups:
+        link = side_link(home, name, icon, on, badge)
+        if len(pages) < 2:
+            out.append(f'<div class="side-group">{link}</div>')
+            continue
+        subs = "".join(f'<a href="{h}"{lit if here else ""}>{E(l)}{b}</a>' for h, l, here, b in pages)
+        out.append(
+            f'<div class="side-group{" open" if on else ""}" data-sec="{E(name)}">'
+            f'<div class="side-row">{link}'
+            f'<button type="button" class="side-more" aria-expanded="{"true" if on else "false"}"'
+            f' aria-label="{E(name)} pages"><svg viewBox="0 0 24 24" aria-hidden="true">'
+            f'<path d="M9 6l6 6-6 6"/></svg></button></div>'
+            f'<div class="side-sub"><div class="side-sub-in" role="group" aria-label="{E(name)}">'
+            f'<p class="side-sub-head">{E(name)}</p>{subs}</div></div></div>')
+    return "".join(out)
+
+
+def top_tabs(name, pages):
+    """The pages of the section, across the top of the work."""
+    if len(pages) < 2:
+        return ""
+    here = ' class="on" aria-current="page"'
+    links = "".join(f'<a href="{h}"{here if on else ""}>{E(l)}{b}</a>' for h, l, on, b in pages)
+    return (f'<nav class="toptabs" aria-label="{E(name)}">{links}'
+            f'<span class="tab-glide" aria-hidden="true"></span></nav>')
+
+
+MUSIC_ROW = ('<div class="side-music"><button type="button" id="musicbtn" class="musicbtn"'
+             ' onclick="Music.toggle()" title="Music" data-tip="Music"></button>'
+             '<span id="songname" class="songname side-label" hidden></span></div>')
+
+
+def shell(title, body, *, nav, foot, heading, tabs, home="/", role="Teacher", scripts=(),
+          main_class="", after="", banner="", tune="", body_class="shell"):
+    """The frame both sides of the site share: the rail down the left, the
+    bar with the section's pages over the work, the work beneath."""
+    main_attr = f' class="{main_class}"' if main_class else ""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{E(title)} · OlimovAzamat</title>
+{SIDE_EARLY}
+<link rel="stylesheet" href="/static/style.css"></head><body class="{body_class}">
+<aside class="side" id="side" aria-label="Main menu">
+  <div class="side-head">
+    <a class="side-brand" href="{home}" data-tip="OlimovAzamat"><span class="mark">O</span>
+      <span class="side-label">OlimovAzamat<small>{E(role)}</small></span></a>
+    <button type="button" class="side-toggle" id="sidetoggle" aria-controls="side" aria-expanded="true"
+            title="Hide the menu  [" aria-label="Hide the menu"><svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15M15.5 10l-2 2 2 2"/></svg><svg
+      class="side-x" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <nav class="side-nav" aria-label="Sections">{nav}</nav>
+  <div class="side-foot">{foot}</div>
+</aside>
+<div class="side-scrim" id="sidescrim"></div>
+<div class="stage">
+{banner}<header class="topbar">
+  <div class="topbar-in">
+    <button type="button" class="side-open" id="sideopen" aria-controls="side" aria-expanded="false"
+            aria-label="Show the menu"><svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <div class="topbar-title">{E(heading)}</div>
+    {tabs}
+  </div>
+</header>
+<main{main_attr}>{body}</main>
+{after}
+</div>
+{tune}{"".join(f'<script src="/static/{js}" defer></script>' for js in scripts)}
+</body></html>"""
+
+
 def page(title, body, active="", music=False):
     """The teacher's shell: the sections down the left, the pages of the one
     you are in across the top of the work, the work beneath. The sidebar
@@ -123,89 +209,18 @@ def page(title, body, active="", music=False):
     section = SECTION_OF.get(active, "")
     if active == "Settings":
         section = "Settings"
-
-    def side_link(href, name, on):
-        cls = ' class="on"' if on else ""
-        return (f'<a href="{href}"{cls} data-tip="{E(name)}">{side_icon(name)}'
-                f'<span class="side-label">{E(name)}</span></a>')
-
-    # Every page is in the rail, under its section: the section you are in
-    # shows its pages, any other opens with its arrow - a page that could only
-    # be found from inside its section was a page nobody found.
-    def side_group(name, home, pages):
-        on = name == section
-        if len(pages) == 1:
-            return f'<div class="side-group">{side_link(home, name, on)}</div>'
-        lit = ' class="on" aria-current="page"'
-        subs = "".join(f'<a href="{h}"{lit if (on and l == active) else ""}>{E(l)}</a>' for h, l in pages)
-        return (f'<div class="side-group{" open" if on else ""}" data-sec="{E(name)}">'
-                f'<div class="side-row">{side_link(home, name, on)}'
-                f'<button type="button" class="side-more" aria-expanded="{"true" if on else "false"}"'
-                f' aria-label="{E(name)} pages"><svg viewBox="0 0 24 24" aria-hidden="true">'
-                f'<path d="M9 6l6 6-6 6"/></svg></button></div>'
-                f'<div class="side-sub"><div class="side-sub-in" role="group" aria-label="{E(name)}">'
-                f'<p class="side-sub-head">{E(name)}</p>{subs}</div></div></div>')
-
-    items = "".join(side_group(name, home, pages) for name, home, pages in SECTIONS)
-    music_row = ""
-    if music or tune:
-        music_row = ('<div class="side-music"><button type="button" id="musicbtn" class="musicbtn"'
-                     ' onclick="Music.toggle()" title="Music" data-tip="Music"></button>'
-                     '<span id="songname" class="songname side-label" hidden></span></div>')
-
-    tabs = ""
-    for name, _home, pages in SECTIONS:
-        if name == section and len(pages) > 1:
-            here = ' class="on" aria-current="page"'
-            links = "".join(f'<a href="{h}"{here if l == active else ""}>{E(l)}</a>' for h, l in pages)
-            tabs = (f'<nav class="toptabs" aria-label="{E(name)}">{links}'
-                    f'<span class="tab-glide" aria-hidden="true"></span></nav>')
-    heading = section or title
-
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>{E(title)} · OlimovAzamat</title>
-{SIDE_EARLY}
-<link rel="stylesheet" href="/static/style.css"></head><body class="shell">
-<aside class="side" id="side" aria-label="Main menu">
-  <div class="side-head">
-    <a class="side-brand" href="/" data-tip="OlimovAzamat"><span class="mark">O</span>
-      <span class="side-label">OlimovAzamat<small>Teacher</small></span></a>
-    <button type="button" class="side-toggle" id="sidetoggle" aria-controls="side" aria-expanded="true"
-            title="Hide the menu  [" aria-label="Hide the menu"><svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15M15.5 10l-2 2 2 2"/></svg><svg
-      class="side-x" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </div>
-  <nav class="side-nav" aria-label="Sections">{items}</nav>
-  <div class="side-foot">
-    {music_row}{side_link("/settings", "Settings", section == "Settings")}
-    <a href="/logout" data-tip="Sign out">{side_icon("Sign out")}<span class="side-label">Sign out</span></a>
-  </div>
-</aside>
-<div class="side-scrim" id="sidescrim"></div>
-<div class="stage">
-{demo_banner()}<header class="topbar">
-  <div class="topbar-in">
-    <button type="button" class="side-open" id="sideopen" aria-controls="side" aria-expanded="false"
-            aria-label="Show the menu"><svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-    <div class="topbar-title">{E(heading)}</div>
-    {tabs}
-  </div>
-</header>
-<main>{body}</main>
-</div>
-{tune}{'<script src="/static/music.js" defer></script>' if (music or tune) else ''}
-<script src="/static/shell.js" defer></script>
-<script src="/static/nav.js" defer></script>
-<script src="/static/listen.js" defer></script>
-<script src="/static/materials.js" defer></script>
-<script src="/static/grade.js" defer></script>
-<script src="/static/prompts.js" defer></script>
-<script src="/static/roster.js" defer></script>
-<script src="/static/marks.js" defer></script>
-</body></html>"""
+    groups = [(name, home, side_icon(name), name == section, "",
+               [(h, l, name == section and l == active, "") for h, l in pages])
+              for name, home, pages in SECTIONS]
+    tabs = next((top_tabs(name, [(h, l, l == active, "") for h, l in pages])
+                 for name, _home, pages in SECTIONS if name == section), "")
+    foot = ((MUSIC_ROW if (music or tune) else "")
+            + side_link("/settings", "Settings", side_icon("Settings"), section == "Settings")
+            + side_link("/logout", "Sign out", side_icon("Sign out"), False))
+    scripts = (["music.js"] if (music or tune) else []) + [
+        "shell.js", "nav.js", "listen.js", "materials.js", "grade.js", "prompts.js", "roster.js", "marks.js"]
+    return shell(title, body, nav=side_nav(groups), foot=foot, heading=section or title, tabs=tabs,
+                 scripts=scripts, banner=demo_banner(), tune=tune)
 
 
 def stat(k, v, sub="", busy=False):
@@ -2549,7 +2564,10 @@ PORTAL = [
 
 
 def student_shell(s, db, token, tab, body, top="", music=True):
-    """One page, five sections, everything the bot can do."""
+    """One page, five sections, everything the bot can do - in the same
+    frame as the teacher's: the sections down the left on a laptop, the
+    section's pages across the top, and on a phone the bar of five along the
+    bottom, where a thumb finds it."""
     level = core.level_name(db, core.level_of(db, s["group_id"]))
     section = next((key for key, _l, pages in PORTAL
                     if any(p == tab for p, _ in pages)), "home")
@@ -2558,28 +2576,40 @@ def student_shell(s, db, token, tab, body, top="", music=True):
     # be impossible to miss: a count on the section, and on its tab
     unseen = core.unseen_feedback(db, s["id"])
     badge = f'<i class="badge">{unseen}</i>' if unseen else ""
-    nav = "".join(
-        f'<a class="{"on" if key == section else ""}" href="{base}{pages[0][0]}">'
+
+    def icon(key):
+        return ICONS[key].replace("<svg ", '<svg class="side-ico" aria-hidden="true" ', 1)
+
+    def pages_of(pages):
+        return [(base + p, label, p == tab, badge if p == "feedback" else "") for p, label in pages]
+
+    groups = [(label, base + pages[0][0], icon(key), key == section, badge if key == "home" else "",
+               pages_of(pages)) for key, label, pages in PORTAL]
+    title, pages = next((label, pages) for key, label, pages in PORTAL if key == section)
+    initial = E((s["name"] or "?").strip()[:1].upper())
+    group = E(group_name(db, s["group_id"])) + (" · " + E(level) if level else "")
+    who = (f'<div class="side-who" data-tip="{E(s["name"])}"><span class="avatar">{initial}</span>'
+           f'<span class="side-label"><b>{E(s["name"])}</b><small>{group}</small></span></div>')
+    bar = "".join(
+        f'<a class="{"on" if key == section else ""}" href="{base}{pages_[0][0]}">'
         f'{ICONS[key]}{badge if key == "home" else ""}<span>{label}</span></a>'
-        for key, label, pages in PORTAL)
-    pages = next(pages for key, _l, pages in PORTAL if key == section)
-    sub = ""
-    if len(pages) > 1:
-        sub = ('<div class="tabs stretch psub">'
-               + "".join(f'<a class="tab{" on" if p == tab else ""}" href="{base}{p}">'
-                         f'{label}{badge if p == "feedback" else ""}</a>'
-                         for p, label in pages) + "</div>")
+        for key, label, pages_ in PORTAL)
+    # on a phone the rail is out of sight, so who this is stays on the page
     head = f"""<div class="whoami">
-  <div class="avatar">{E((s["name"] or "?").strip()[:1].upper())}</div>
+  <div class="avatar">{initial}</div>
   <div>
     <div class="name">{E(s["name"])}</div>
-    <div class="sub">{E(group_name(db, s["group_id"]))}
-      {"· " + E(level) if level else ""}</div>
+    <div class="sub">{group}</div>
   </div>
-</div>
-<nav class="pnav" aria-label="Sections">{nav}</nav>
-{sub}"""
-    return html_response(student_page(s["name"], top + head + body, music=music))
+</div>"""
+    tune = song_tag() if music else ""
+    scripts = (["music.js"] if music else []) + [
+        "shell.js", "nav.js", "write.js", "book.js", "shrink.js", "handout.js", "listen.js"]
+    return html_response(shell(
+        s["name"], top + head + body, nav=side_nav(groups), foot=who + (MUSIC_ROW if music else ""),
+        heading=title, tabs=top_tabs(title, pages_of(pages)), home=base + "home", role="Student",
+        scripts=scripts, main_class="portal", after=f'<nav class="pnav" aria-label="Sections">{bar}</nav>',
+        tune=tune, body_class="shell student"))
 
 
 def portal_home(db, s, token, flash, pick=""):

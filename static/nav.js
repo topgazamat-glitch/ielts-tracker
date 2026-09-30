@@ -106,8 +106,21 @@
     });
   }
 
+  // a count - feedback not yet read - may have gone since the page before
+  function counts(links, from) {
+    Array.prototype.forEach.call(links, function (a, i) {
+      var old = a.querySelector(".badge"), fresh = from[i] && from[i].querySelector(".badge");
+      if (old && (!fresh || old.textContent !== fresh.textContent)) { a.removeChild(old); old = null; }
+      if (fresh && !old) { a.appendChild(document.importNode(fresh, true)); }
+    });
+  }
+
   function swapShell(doc) {
     light(document.querySelectorAll(".side a[href]"), doc.querySelectorAll(".side a[href]"));
+    counts(document.querySelectorAll(".side a[href]"), doc.querySelectorAll(".side a[href]"));
+    // the students' bar of five along the bottom of a phone
+    light(document.querySelectorAll(".pnav a"), doc.querySelectorAll(".pnav a"));
+    counts(document.querySelectorAll(".pnav a"), doc.querySelectorAll(".pnav a"));
     var here = document.querySelector(".topbar-in"), there = doc.querySelector(".topbar-in");
     var same = false;
     if (here && there) {
@@ -116,6 +129,7 @@
       same = !!(title && newTitle && title.textContent === newTitle.textContent && !!tabs === !!newTabs);
       if (same && tabs) {
         light(tabs.querySelectorAll("a[href]"), newTabs.querySelectorAll("a[href]"));
+        counts(tabs.querySelectorAll("a[href]"), newTabs.querySelectorAll("a[href]"));
       } else if (!same) {
         if (title && newTitle) { title.textContent = newTitle.textContent; }
         if (tabs) { tabs.parentNode.removeChild(tabs); }

@@ -38,8 +38,8 @@ print("   each with an icon:", bar.count("<svg") == 5)
 assert bar.count("<svg") == 5
 print("   Homework is lit on the home tab:", 'class="on" href="' in bar and bar.index('class="on"') < bar.index("Learn"))
 assert bar.index('class="on"') < bar.index("Learn")
-print("   its own strip: Send · Writing:", "psub" in pg and ">Send<" in pg and ">Writing<" in pg)
-assert ">Send<" in pg and ">Writing<" in pg
+print("   its own pages across the top: Send · Writing:", 'class="toptabs"' in pg and ">Send<" in pg and ">Writing<" in pg)
+assert 'class="toptabs"' in pg and ">Send<" in pg and ">Writing<" in pg
 print("   the old ten-tab strip is gone:", pg.count('class="tab') <= 4)
 assert pg.count('class="tab') <= 4          # the strip plus Send · Writing · Feedback
 
@@ -54,18 +54,21 @@ for tab, section in where.items():
     print("   %-9s -> %-9s %s" % (tab, lit, "ok" if lit == section else "WRONG"))
     assert lit == section
 pg = get("handouts")
-strip = re.search(r'<div class="tabs stretch psub">(.*?)</div>', pg, re.S).group(1)
-print("   inside Learn the strip is Materials · Handouts · Tests, with Handouts lit:",
+strip = re.search(r'<nav class="toptabs"[^>]*>(.*?)</nav>', pg, re.S).group(1)
+lit = re.search(r'<a href="([^"]*)" class="on"', strip)
+print("   inside Learn the pages across the top are Materials · Handouts · Tests, with Handouts lit:",
       re.findall(r">([^<]+)</a>", strip) == ["Materials", "Handouts", "Tests"]
-      and 'class="tab on" href="' in strip and "tab=handouts" in strip.split('class="tab on"')[1][:60])
+      and lit is not None and lit.group(1).endswith("tab=handouts"))
 assert re.findall(r">([^<]+)</a>", strip) == ["Materials", "Handouts", "Tests"]
+assert lit is not None and lit.group(1).endswith("tab=handouts")
 pg = get("profile")
-print("   a one-page section has no strip:", "psub" not in pg)
-assert "psub" not in pg
+print("   a one-page section has no pages across the top:", 'class="toptabs"' not in pg)
+assert 'class="toptabs"' not in pg
 
-print("\n3. THE HEADER IS ONE ROW")
-print("   name and music button share the bar:", '<header class="top"><div class="bar">' in pg)
-assert '<header class="top"><div class="bar">' in pg
+print("\n3. THE SAME FRAME AS THE TEACHER'S")
+print("   the rail, with the student's name at its foot:", '<aside class="side"' in pg and "side-who" in pg
+      and "Shirin" in pg.split('class="side-foot"')[1][:600])
+assert '<aside class="side"' in pg and "Shirin" in pg.split('class="side-foot"')[1][:600]
 css = open(os.path.join(ROOT, "static", "style.css")).read()
 print("   the bar sits at the bottom on a phone:", "position: fixed; left: 0; right: 0; bottom: 0" in css.split(".pnav {", 2)[-1][:600])
 assert ".pnav" in css and "safe-area-inset-bottom" in css

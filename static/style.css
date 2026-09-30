@@ -3096,6 +3096,56 @@ html.rail .side-sub { display: none; }
 }
 @media (min-width: 861px) { .side-scrim { display: none; } }
 
+/* ---- the students' page in the same frame
+   A laptop: the rail with the student's name at its foot, the section's pages
+   across the top. A phone: the bar of five along the bottom, in the rail's
+   plum, and the pages across the top - no drawer, a thumb finds the bar. */
+.side .badge { box-shadow: 0 0 0 2px #25062f; }
+.side-group > a .badge, .side-row > a .badge { position: absolute; right: 42px; top: 50%;
+  transform: translateY(-50%); }
+.side-group > a .badge { right: 12px; }
+html.rail .side-group > a .badge, html.rail .side-row > a .badge { right: auto; left: 30px; top: 6px;
+  transform: none; }
+.side-sub a .badge { margin-left: var(--sp-2); }
+.toptabs a .badge { margin-left: 6px; }
+.side-who { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; min-height: 52px;
+  margin-bottom: var(--sp-1); color: #fff; }
+.side-who .avatar { justify-self: center; display: grid; place-items: center; width: 34px; height: 34px;
+  border-radius: 50%; font-size: 14px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #9049a3, #701589); box-shadow: 0 0 0 2px rgba(255, 255, 255, .14); }
+.side-who b { display: block; font-size: 14px; font-weight: 620; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.side-who small { display: block; font-size: 12px; color: rgba(255, 255, 255, .55); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+html.rail .side-who { position: relative; }
+
+/* the column the students' pages are drawn in, and the bar over it, line up */
+.student .topbar-in { max-width: 600px; }
+.student:has(main.portal .booksheet) .topbar-in { max-width: 940px; }
+.student:has(main.portal .booksheet.handout) .topbar-in,
+.student:has(main.portal .hx-hero) .topbar-in { max-width: 980px; }
+
+@media (min-width: 861px) {
+  .student .pnav, .student main .whoami { display: none; }
+}
+@media (max-width: 860px) {
+  .student .side-open { display: none; }
+  .student .pnav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; margin: 0; gap: var(--sp-1);
+    border: 0; border-radius: 0;
+    padding: 6px var(--sp-2) calc(6px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, #2c0839 0%, #1d0526 100%);
+    box-shadow: 0 -10px 30px rgba(20, 6, 28, .16);
+  }
+  .student .pnav a { color: rgba(255, 255, 255, .62); border-radius: 12px; }
+  .student .pnav a:hover { color: #fff; }
+  .student .pnav a.on { color: #fff; background: rgba(255, 255, 255, .12); box-shadow: none; }
+  .student .pnav a.on svg { color: #ffd36e; }
+  .student .pnav a .badge { box-shadow: 0 0 0 2px #25062f; }
+  .student main.portal { padding-bottom: calc(var(--sp-7) + var(--pnav-h) + env(safe-area-inset-bottom)); }
+  .student .topbar-in { max-width: none; }
+}
+
 @media (prefers-color-scheme: dark) {
   .side { background: radial-gradient(130% 55% at 0% 0%, rgba(255, 211, 110, .06), transparent 62%),
                       linear-gradient(180deg, #1f0a29 0%, #130618 100%);
