@@ -1058,10 +1058,6 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
 
 @media (prefers-color-scheme: dark) {
   .todo .todo-head { color: var(--brand-lift); }
-  .grid .stat { color: #100d15; }
-  .grid .stat .k { color: rgba(16,13,21,.7); }
-  .grid .stat .v { color: #100d15; }
-  .grid .stat .v small { color: rgba(16,13,21,.66); }
   .todo.urgent .todo-head, .todo.urgent .sub { color: var(--warn); }
 }
 
@@ -1070,9 +1066,6 @@ button.ghost.danger:hover { background: var(--warn-soft); color: var(--warn); }
   .pill.watch, .pill.gold { background: var(--gold-soft); color: var(--gold);
     border-color: #4a3a12; }
   .pill.good { background: #12301f; color: var(--ok); border-color: #1e4c31; }
-  .grid .stat:nth-child(4) { color: #241b00; }
-  .grid .stat:nth-child(4) .k { color: rgba(36,27,0,.7); }
-  .grid .stat:nth-child(4) .v { color: #241b00; }
 }
 
 .standing {
@@ -3159,4 +3152,140 @@ html.rail .side-who { position: relative; }
 @media print {
   .side, .side-scrim, .topbar { display: none !important; }
   .stage { margin: 0 !important; }
+}
+
+/* ============================================================================
+   The work
+   One language for every page beside the rail: a title with room around it,
+   sections headed with a fine rule running after the name, white cards with
+   soft depth instead of hard outlines, figures with a small drawing of what
+   they count, tables with air, and buttons of one height. The rail is plum;
+   the page stays light and calm, and the plum is kept for what is chosen.
+   ========================================================================== */
+
+:root {
+  --card-line: #e9e2ef;
+  --card-shadow: 0 1px 2px rgba(28, 15, 34, .04), 0 10px 28px -14px rgba(50, 10, 62, .16);
+  --card-shadow-up: 0 2px 4px rgba(28, 15, 34, .05), 0 18px 40px -14px rgba(50, 10, 62, .26);
+  --r-card: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --card-line: var(--line); --card-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset;
+          --card-shadow-up: 0 12px 32px rgba(0, 0, 0, .45); }
+}
+
+.stage main { padding-top: 36px; }
+
+/* a page's title, and the line that says what the page is for */
+main > h1 { font-size: 30px; font-weight: 720; letter-spacing: -.032em; line-height: 1.15;
+  margin: 0 0 6px; text-wrap: balance; }
+main > h1 + p.sub { font-size: 15px; line-height: 1.55; margin: 0 0 28px; max-width: 72ch; }
+.pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4) var(--sp-5);
+  flex-wrap: wrap; margin: 0 0 28px; }
+.pagehead h1 { font-size: 30px; font-weight: 720; letter-spacing: -.032em; line-height: 1.15; margin: 0; }
+.pagehead .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.eyebrow { margin: 0 0 6px; font-size: 12.5px; font-weight: 650; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--brand); }
+
+/* a section of the page: its name, then a hairline to the edge */
+main > h2 { display: flex; align-items: center; gap: var(--sp-3); font-size: 16px; font-weight: 660;
+  letter-spacing: -.015em; margin: 40px 0 14px; color: var(--ink); }
+main > h2::after { content: ""; flex: 1; min-width: var(--sp-5); height: 1px; background: var(--line-soft); }
+main > h2:first-of-type { margin-top: 32px; }
+main > h1 + h2, main > .pagehead + h2, main > h1 + p.sub + h2 { margin-top: 8px; }
+
+/* cards: white, soft depth, no hard outline */
+.card, .tablewrap, .grid .stat, .todo {
+  border-color: var(--card-line); box-shadow: var(--card-shadow); }
+.card { border-radius: var(--r-card); padding: 20px 22px; margin-bottom: 18px; }
+.card.calm { background: color-mix(in srgb, var(--ok) 7%, var(--surface)); border-color: color-mix(in srgb, var(--ok) 22%, var(--card-line)); }
+a.card { display: block; color: inherit; transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
+a.card:hover { text-decoration: none; transform: translateY(-2px); box-shadow: var(--card-shadow-up); }
+
+/* the figures: what they count, drawn small in a tinted square */
+.grid { gap: 16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px; }
+.grid .stat { position: relative; border-radius: var(--r-card); padding: 18px 20px; background: var(--surface);
+  --tone: #701589; }
+.grid .stat .k { padding-right: 46px; font-size: 12px; font-weight: 640; letter-spacing: .06em; color: var(--ink-3); }
+.grid .stat .v { margin-top: 12px; font-size: 34px; font-weight: 720; letter-spacing: -.035em; color: var(--ink); }
+.grid .stat .note { margin-top: 4px; font-size: 13px; color: var(--ink-3); }
+.look-ico { position: absolute; top: 15px; right: 15px; display: grid; place-items: center; width: 38px; height: 38px;
+  border-radius: 12px; color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, transparent); }
+.look-ico svg, .t-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9;
+  stroke-linecap: round; stroke-linejoin: round; }
+.stat.t-plum { --tone: #701589; } .stat.t-blue { --tone: #0b69ad; } .stat.t-green { --tone: #0b8a4c; }
+.stat.t-amber { --tone: #b07400; } .stat.t-rose { --tone: #c02a3c; }
+.grid .stat.busy { background: var(--surface); border-color: color-mix(in srgb, #c02a3c 30%, var(--card-line)); }
+.grid .stat.busy .v { color: #c02a3c; }
+@media (prefers-color-scheme: dark) {
+  .stat.t-plum { --tone: #d9a2ec; } .stat.t-blue { --tone: #6fb6f0; } .stat.t-green { --tone: #4fd494; }
+  .stat.t-amber { --tone: #f2c24e; } .stat.t-rose { --tone: #ff8a8f; }
+  .grid .stat.busy .v { color: #ff8a8f; }
+}
+
+/* today's work: a card each, a drawing, the count, the way in */
+.todos { gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom: 8px; }
+.todo { display: grid; grid-template-columns: 46px minmax(0, 1fr) 18px; align-items: center; gap: 14px;
+  padding: 16px 18px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--card-line);
+  border-left-width: 1px; color: var(--ink);
+  transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
+.todo:hover { transform: translateY(-2px); box-shadow: var(--card-shadow-up); border-color: var(--card-line); }
+.t-ico { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px;
+  background: var(--accent-soft); color: var(--brand); }
+.t-text { display: block; min-width: 0; }
+.todo .todo-head { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); }
+.todo .sub { display: block; margin: 2px 0 0; font-size: 13.5px; color: var(--ink-3); }
+.t-go { width: 18px; height: 18px; fill: none; stroke: var(--ink-3); stroke-width: 2; stroke-linecap: round;
+  stroke-linejoin: round; transition: transform .2s var(--ease), stroke .2s var(--ease); }
+.todo:hover .t-go { transform: translateX(3px); stroke: var(--brand); }
+.todo.urgent { background: var(--surface); border-color: var(--card-line); }
+.todo.urgent .t-ico { background: var(--warn-soft); color: #c02a3c; }
+.todo.urgent .todo-head { color: #c02a3c; }
+.todo.urgent .sub { color: var(--ink-3); }
+@media (prefers-color-scheme: dark) {
+  .todo.urgent .todo-head, .todo.urgent .t-ico { color: #ff8a8f; }
+  .todo.urgent .sub { color: var(--ink-3); }
+  .t-ico { color: var(--brand-lift); }
+}
+
+/* tables: air in the rows, a quiet head, the row under the pointer lit */
+.tablewrap { border-radius: var(--r-card); }
+.tablewrap th { padding: 12px 18px; font-size: 11.5px; font-weight: 650; letter-spacing: .07em;
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); border-bottom-color: var(--card-line); }
+.tablewrap td { padding: 14px 18px; }
+.tablewrap tr:hover td { background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface)); }
+
+/* buttons of one height; a text action is a word, not an underlined link */
+button, a.btn { padding: 9px 16px; line-height: 20px; border-radius: 10px; }
+a.btn.ghost, button.ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+a.btn.ghost:hover, button.ghost:hover { background: var(--surface-2); color: var(--ink); border-color: var(--accent-line); }
+.linky { padding: 2px 4px; margin: 0 -4px; border-radius: 6px; text-decoration: none; font-weight: 600; line-height: inherit; }
+.linky:hover { background: var(--accent-soft); text-decoration: none; }
+.linky.danger { color: var(--warn); }
+.linky.danger:hover { background: var(--warn-soft); }
+
+/* a row's actions stay a table cell - a flex box there broke the row's lines */
+td.rowacts { display: table-cell; text-align: right; white-space: nowrap; }
+td.rowacts > * { display: inline-block; vertical-align: middle; margin: 0 0 0 var(--sp-3); }
+td.rowacts > :first-child { margin-left: 0; }
+
+/* fields and switches */
+input, select, textarea { border-radius: 10px; }
+.tabs { border-radius: 12px; padding: 4px; border-color: var(--card-line);
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface)); }
+.tabs .tab { border-radius: 9px; padding: 6px 12px; }
+.flash { border-radius: 12px; }
+
+@media (max-width: 720px) {
+  .stage main { padding-top: var(--sp-5); }
+  main > h1, .pagehead h1 { font-size: 25px; }
+  .pagehead { margin-bottom: var(--sp-5); }
+  /* two figures a row on a phone, not one tall column */
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .grid .stat { padding: 14px 15px; }
+  .grid .stat .k { padding-right: 36px; font-size: 11px; }
+  .grid .stat .v { margin-top: 10px; font-size: 26px; }
+  .grid .stat .note { font-size: 12px; }
+  .look-ico { top: 11px; right: 11px; width: 32px; height: 32px; border-radius: 10px; }
+  .look-ico svg { width: 17px; height: 17px; }
 }

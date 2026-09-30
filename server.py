@@ -223,12 +223,50 @@ def page(title, body, active="", music=False):
                  scripts=scripts, banner=demo_banner(), tune=tune)
 
 
-def stat(k, v, sub="", busy=False):
-    """One figure. Colour means something here or it is not used: the only
-    tile that changes is the queue, and only when it has grown."""
+# A small drawing for each kind of figure, in the rail's stroke.
+LOOK_ICONS = {
+    "inbox": SIDE_ICONS["Homework"],
+    "users": SIDE_ICONS["Students"],
+    "chart": SIDE_ICONS["Insights"],
+    "book": SIDE_ICONS["Materials"],
+    "calendar": SIDE_ICONS["Today"],
+    "check": '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.8-5"/>',
+    "clock": '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    "alert": '<path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4M12 17h.01"/>',
+    "flame": '<path d="M12 3.5c.8 2.8 4.5 4.6 4.5 8.8a4.5 4.5 0 0 1-9 0c0-1.9.9-3.3 2-4.3.4 1.4 1.3 2.1 2.3 2.1'
+             '-.3-2.4-.4-4.2.2-6.6z"/>',
+    "message": '<path d="M4.5 5.5h15v10.5H9l-4.5 3.5z"/><path d="M8.5 9.5h7M8.5 12.5h4.5"/>',
+    "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
+}
+# which drawing and colour a figure takes, from the words of its label
+STAT_LOOKS = [
+    (("wait", "grading", "queue", "pending", "to mark"), "inbox", "amber"),
+    (("marked", "graded", "checked"), "check", "green"),
+    (("streak",), "flame", "amber"),
+    (("left", "risk", "missed", "late", "flag", "behind"), "alert", "rose"),
+    (("student", "people", "class", "group", "here", "active"), "users", "blue"),
+    (("average", "score", "mark", "band", "exam", "result", "rating"), "chart", "plum"),
+    (("homework", "done", "completion", "complete", "sent", "handed"), "check", "green"),
+    (("week", "day", "time", "longest", "oldest"), "clock", "amber"),
+    (("word", "vocab", "test", "material", "file", "handout"), "book", "blue"),
+]
+
+
+def look_icon(name, cls="look-ico"):
+    return (f'<span class="{cls}" aria-hidden="true"><svg viewBox="0 0 24 24">'
+            f'{LOOK_ICONS.get(name, LOOK_ICONS["chart"])}</svg></span>')
+
+
+def stat(k, v, sub="", busy=False, icon=None, tone=None):
+    """One figure, with a small drawing of what it counts. Colour means
+    something here or it is not used: the only tile that turns red is the
+    queue, and only when it has grown."""
+    words = (k or "").lower()
+    guess = next(((i, t) for keys, i, t in STAT_LOOKS if any(w in words for w in keys)), ("chart", "plum"))
+    icon, tone = icon or guess[0], ("rose" if busy else tone or guess[1])
     s = f'<div class="note">{E(sub)}</div>' if sub else ""
     cls = "stat busy" if busy else "stat"
-    return (f'<div class="{cls}"><div class="k">{E(k)}</div>'
+    return (f'<div class="{cls} t-{tone}">{look_icon(icon)}<div class="k">{E(k)}</div>'
             f'<div class="v">{v}</div>{s}</div>')
 
 
@@ -366,10 +404,28 @@ def view_overview(req, db):
     return html_response(page("Overview", body, "Overview"))
 
 
+TODO_ICONS = {"/queue": "inbox", "/homework": "calendar", "/ratings": "alert", "/questions": "message"}
+
+
 def todo(href, headline, detail, urgent=False):
-    return (f'<a class="todo{" urgent" if urgent else ""}" href="{href}">'
-            f'<div class="todo-head">{headline}</div>'
-            f'<div class="sub gap-1">{detail}</div></a>')
+    icon = next((i for start, i in TODO_ICONS.items() if href.startswith(start)), "arrow")
+    return (f'<a class="todo{" urgent" if urgent else ""}" href="{href}">{look_icon(icon, "t-ico")}'
+            f'<span class="t-text"><span class="todo-head">{headline}</span>'
+            f'<span class="sub">{detail}</span></span>'
+            f'<svg class="t-go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>')
+
+
+def today_head(db, pending):
+    """The day, by name, and the two things most often done from here."""
+    cfg = core.load_config()
+    here = core.now() + timedelta(hours=cfg["timezone_offset_hours"])
+    part = "morning" if here.hour < 12 else "afternoon" if here.hour < 18 else "evening"
+    name = cfg.get("teacher_name") or "Azamat"
+    grade = (f'<a class="btn" href="/queue">Grade {pending}</a>' if pending
+             else '<a class="btn ghost" href="/queue">Grade</a>')
+    return (f'<div class="pagehead"><div><p class="eyebrow">{here.strftime("%A, %-d %B")}</p>'
+            f'<h1>Good {part}, {E(name)}</h1></div>'
+            f'<div class="actions">{grade}<a class="btn ghost" href="/assignments">Set homework</a></div></div>')
 
 
 def today_block(db, pending):
@@ -428,10 +484,10 @@ def today_block(db, pending):
                       "Students asked you something")
 
     if not items:
-        return ('<h1>Today</h1><div class="card"><p>'
+        return (today_head(db, pending) + '<div class="card calm"><p>'
                 'Nothing is waiting. Everything is graded and every class is up to '
                 'date.</p></div>')
-    return f'<h1>Today</h1><div class="todos">{items}</div>'
+    return today_head(db, pending) + f'<div class="todos">{items}</div>'
 
 
 def disk_breakdown_note():
