@@ -3952,3 +3952,68 @@ button.pl-go:active { transform: scale(.98); }
 .solo-stage form button.big { background: #fff; color: #2a0838; font-weight: 800; border-radius: 16px; }
 @media (min-width: 900px) { .solo-stage { max-width: 640px; margin: 0 auto; padding: 22px 22px 24px; } }
 @media (min-width: 721px) { .podium { max-width: 520px; margin-left: auto; margin-right: auto; } }
+
+/* the certificate: IELTS Zone's eagle at the head, faint behind the scores,
+   and on the stamp where a centre would put its own */
+.cert-logo { width: 3.6cqw; height: 3.6cqw; object-fit: contain; }
+.cert-brand { gap: 1cqw; color: #33003f; font-weight: 700; letter-spacing: .2em; }
+.cert-watermark img { width: 42cqw; height: 42cqw; object-fit: contain; opacity: .045; }
+.cert-stamp { position: absolute; right: 5.2cqw; bottom: 6.2cqw; width: 13cqw; height: 13cqw; color: #5b1475;
+  opacity: .78; transform: rotate(-12deg); pointer-events: none; }
+.cert-stamp svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.cert-stamp img { position: absolute; left: 31%; top: 31%; width: 38%; height: 38%; object-fit: contain; }
+
+/* ============================================================================
+   My goal, as a score report: IELTS Zone's own paper - lilac waves, a line of
+   tiny "TARGET · NOT A TEST RESULT" print all over it, and a ribbon - with
+   the student's details, a box per part, and the stamp of the school
+   ========================================================================== */
+.cert.tr { background: linear-gradient(160deg, #fdfbff 0%, #f6f0fa 55%, #efe6f5 100%); color: #1f0d27;
+  font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; border-radius: 8px; }
+.tr-paper { position: absolute; inset: 0; width: 100%; height: 100%; color: #5b1475; }
+.tr-waves { opacity: .07; }
+.tr-microprint { opacity: .06; }
+.tr-ribbon { position: absolute; top: 3.2cqw; right: -6.4cqw; width: 26cqw; padding: .7cqw 0; transform: rotate(35deg);
+  text-align: center; font-size: 1.7cqw; font-weight: 800; letter-spacing: .4em; color: #fff;
+  background: linear-gradient(90deg, #c8961e, #f2c94c, #c8961e); box-shadow: 0 .3cqw .8cqw rgba(60, 30, 0, .25); }
+.tr-inner { position: relative; height: 100%; display: flex; flex-direction: column; gap: 1.4cqw; padding: 3.4cqw 4.4cqw 2.4cqw; }
+.tr-head { display: flex; align-items: center; justify-content: space-between; gap: 2cqw; padding-bottom: 1.4cqw;
+  border-bottom: .25cqw solid #33003f; }
+.tr-brand { display: flex; align-items: center; gap: 1.4cqw; }
+.tr-brand img { width: 6.4cqw; height: 6.4cqw; object-fit: contain; }
+.tr-brand b { display: block; font-size: 2.9cqw; font-weight: 800; letter-spacing: .16em; color: #33003f; }
+.tr-brand span { display: block; margin-top: .3cqw; font-size: 2.2cqw; font-weight: 600; color: #5b1475; }
+.tr-kind { display: flex; flex-direction: column; align-items: flex-end; margin-right: 7cqw; font-size: 1.4cqw;
+  text-transform: uppercase; letter-spacing: .12em; color: #7a6784; }
+.tr-kind b { margin-top: .3cqw; font-size: 1.9cqw; letter-spacing: .04em; color: #1f0d27; font-variant-numeric: tabular-nums; }
+.tr-sec h4, .tr-comment h4 { margin: 0 0 .8cqw; font-size: 1.35cqw; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
+  color: #5b1475; }
+.tr-who { display: flex; gap: 2.4cqw; align-items: stretch; }
+.tr-fields { flex: 1; display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: .9cqw 1.2cqw; }
+.tr-f { display: flex; flex-direction: column; gap: .2cqw; padding: .6cqw 1cqw; border-radius: .6cqw;
+  background: rgba(255, 255, 255, .72); border: .12cqw solid #dccfe3; }
+.tr-f.wide { grid-column: 1 / -1; }
+.tr-f span { font-size: 1.15cqw; text-transform: uppercase; letter-spacing: .1em; color: #7a6784; }
+.tr-f b { font-size: 2cqw; font-weight: 700; color: #1f0d27; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-photo .cert-photo { width: 9.6cqw; height: 12cqw; border-radius: .5cqw; }
+.tr-scores { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1cqw; }
+.tr-box { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .4cqw; padding: 1.1cqw .5cqw 1.2cqw;
+  border-radius: .8cqw; background: #fff; border: .15cqw solid #cdb7da; text-align: center; }
+.tr-k { font-size: 1.2cqw; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #7a6784; }
+.tr-v { font-size: 4.2cqw; font-weight: 800; line-height: 1; color: #33003f; font-variant-numeric: tabular-nums; }
+.tr-box.overall { background: linear-gradient(160deg, #4a1160, #2a0838); border-color: #2a0838; }
+.tr-box.overall .tr-k { color: rgba(255, 255, 255, .8); }
+.tr-box.overall .tr-v { color: #ffd166; }
+.tr-box.cefr { background: #fbf6e6; border-color: #e3cf96; }
+.tr-box.cefr .tr-v { color: #8a6413; }
+.tr-foot { position: relative; display: flex; align-items: flex-end; gap: 2cqw; margin-top: auto; }
+.tr-comment { flex: 1; padding: 1.2cqw 1.4cqw; border-radius: .8cqw; background: rgba(255, 255, 255, .72); border: .12cqw solid #dccfe3; }
+.tr-comment p { margin: 0 0 .6cqw; font-size: 1.75cqw; line-height: 1.45; color: #3c2a45; }
+.tr-sign { display: flex; align-items: baseline; gap: 1.2cqw; }
+.tr-sign .sig { font: 2.6cqw/1 'Snell Roundhand', 'Apple Chancery', 'Segoe Script', cursive; color: #3c1149; }
+.tr-sign .line { flex: 0 0 14cqw; border-bottom: .12cqw solid #8d7a9a; }
+.tr-sign .who { white-space: nowrap; font-size: 1.25cqw; text-transform: uppercase; letter-spacing: .1em; color: #7a6784; }
+.cert-stamp.tr-stamp { position: relative; right: auto; bottom: auto; flex: none; width: 12.5cqw; height: 12.5cqw; margin: 0 1.5cqw 0 0; }
+.tr-note { margin: 0; font-size: 1.2cqw; line-height: 1.35; text-align: center; color: #7a6784; }
+@media print { .cert.tr { background: #fdfbff; } }
+.tr-head { padding-right: 9cqw; }

@@ -5137,71 +5137,73 @@ def portal_goal(db, s, token, flash=""):
     target = (goal["target_date"] if goal and goal["target_date"] else "")
 
     if overall is not None:
-        rows = "".join(
-            f'<div class="sk"><span class="sk-name">{core.BAND_LABELS[k]}</span>'
-            f'<span class="sk-dots"></span>'
-            f'<span class="sk-band">{scores[k]:g}</span></div>'
-            for k in core.BAND_SECTIONS)
-        number = "OA-%s-%04d" % ((goal["updated_at"] or "")[:4] or "2026", s["id"])
         issued = (goal["updated_at"] or "")[:10]
-        card = f"""<div class="cert-wrap"><div class="cert" id="cert">
-  <svg class="cert-guilloche" viewBox="0 0 800 600" preserveAspectRatio="none"
-       aria-hidden="true">
-    <defs><pattern id="weave" width="26" height="26" patternUnits="userSpaceOnUse">
-      <path d="M0 13 Q6.5 0 13 13 T26 13" fill="none" stroke="currentColor"
-            stroke-width=".7"/>
-      <path d="M13 0 Q26 6.5 13 13 T13 26" fill="none" stroke="currentColor"
-            stroke-width=".7"/>
-    </pattern></defs>
-    <rect x="8" y="8" width="784" height="584" fill="url(#weave)" opacity=".5"/>
-    <rect x="8" y="8" width="784" height="584" fill="none" stroke="currentColor"
-          stroke-width="2"/>
-    <rect x="18" y="18" width="764" height="564" fill="none" stroke="currentColor"
-          stroke-width=".8"/>
-    <g fill="none" stroke="currentColor" stroke-width="1.2">
-      <path d="M18 54 q0-36 36-36 M30 54 q0-24 24-24"/>
-      <path d="M782 54 q0-36-36-36 M770 54 q0-24-24-24"/>
-      <path d="M18 546 q0 36 36 36 M30 546 q0 24 24 24"/>
-      <path d="M782 546 q0 36-36 36 M770 546 q0 24-24 24"/>
-    </g>
+        given = first_name(s["name"]) or s["name"]
+        family = " ".join(w for w in (s["name"] or "").split() if w != given) or "—"
+        cefr = ("C2" if overall >= 8.5 else "C1" if overall >= 7 else "B2" if overall >= 5.5
+                else "B1" if overall >= 4 else "A2")
+        boxes = "".join(
+            f'<div class="tr-box"><span class="tr-k">{core.BAND_LABELS[k]}</span>'
+            f'<span class="tr-v">{scores[k]:g}</span></div>' for k in core.BAND_SECTIONS)
+        # the paper itself says what it is: a line of tiny print, all over it,
+        # that no crop and no edit takes out without taking the page with it
+        micro = "IELTS ZONE &#183; TARGET &#183; NOT A TEST RESULT &#183; "
+        card = f"""<div class="cert-wrap"><div class="cert tr" id="cert">
+  <svg class="tr-paper" viewBox="0 0 800 600" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <pattern id="tr-micro" width="300" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(-18)">
+        <text x="0" y="6.5" font-size="5.2" font-family="Helvetica, Arial, sans-serif" font-weight="700"
+              textLength="300" lengthAdjust="spacing" fill="currentColor">{micro}{micro}</text></pattern>
+      <pattern id="tr-wave" width="40" height="20" patternUnits="userSpaceOnUse">
+        <path d="M0 10 Q10 0 20 10 T40 10" fill="none" stroke="currentColor" stroke-width=".6"/></pattern>
+    </defs>
+    <rect width="800" height="600" fill="url(#tr-wave)" class="tr-waves"/>
+    <rect width="800" height="600" fill="url(#tr-micro)" class="tr-microprint"/>
+    <rect x="10" y="10" width="780" height="580" rx="6" fill="none" stroke="currentColor" stroke-width="2.4"/>
+    <rect x="17" y="17" width="766" height="566" rx="4" fill="none" stroke="currentColor" stroke-width=".8"/>
   </svg>
-  <div class="cert-watermark">OA</div>
-  <div class="cert-inner">
-    <div class="cert-brand"><span class="cert-mark">O</span>OlimovAzamat</div>
-    <div class="cert-kicker">Certificate of Achievement</div>
-    <div class="cert-rule"><span></span>&#10022;<span></span></div>
-    <p class="cert-lede">This is to certify that</p>
-    <div class="cert-holder">{E(s["name"])}</div>
-    <p class="cert-lede">of {E(group_name(db, s["group_id"]))}
-      {"· " + E(level) if level else ""} achieved the following band scores</p>
-    <div class="cert-main">
-      {photo}
-      <div class="cert-skills">{rows}</div>
-      <div class="cert-seal">
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <defs><radialGradient id="foil" cx="35%" cy="30%">
-            <stop offset="0%" stop-color="{FOIL["light"]}"/>
-            <stop offset="45%" stop-color="{FOIL["mid"]}"/>
-            <stop offset="100%" stop-color="{FOIL["deep"]}"/></radialGradient></defs>
-          <circle cx="60" cy="60" r="52" fill="url(#foil)"/>
-          <circle cx="60" cy="60" r="44" fill="none" stroke="#fff" stroke-opacity=".55"/>
-          <circle cx="60" cy="60" r="52" fill="none" stroke="{FOIL["edge"]}" stroke-width="1.5"/>
-        </svg>
-        <div class="cert-sealtext"><span class="k">Overall</span>
-          <span class="v">{overall:g}</span></div>
+  <div class="tr-ribbon" aria-hidden="true">TARGET</div>
+  <div class="tr-inner">
+    <header class="tr-head">
+      <div class="tr-brand"><img src="/static/zone-logo.png" alt=""><div><b>IELTS ZONE</b>
+        <span>Target Score Report</span></div></div>
+    </header>
+    <section class="tr-sec">
+      <h4>Student</h4>
+      <div class="tr-who">
+        <div class="tr-fields">
+          <div class="tr-f"><span>Family name</span><b>{E(family)}</b></div>
+          <div class="tr-f"><span>First name</span><b>{E(given)}</b></div>
+          <div class="tr-f"><span>Goal set</span><b>{E(issued)}</b></div>
+          <div class="tr-f"><span>Class</span><b>{E(group_name(db, s["group_id"]))}</b></div>
+          <div class="tr-f"><span>Course level</span><b>{E(level or "—")}</b></div>
+          <div class="tr-f"><span>My exam date</span><b>{E(target) if target else "not chosen yet"}</b></div>
+        </div>
+        <div class="tr-photo">{photo}</div>
       </div>
-    </div>
-    <div class="cert-descriptor">{E(core.band_words(overall))}</div>
-    <div class="cert-sign">
-      <div><div class="sig">Azamat</div><div class="line"></div><span>Teacher</span></div>
-      <div><div class="sig"></div><div class="line"></div>
-        <span>Issued {E(issued)}</span></div>
-    </div>
-    <div class="cert-serial">No. {E(number)}
-      {"· exam date " + E(target) if target else ""}</div>
-    <div class="cert-note">Awarded by OlimovAzamat for a mock examination.
-      This is not an IELTS Test Report Form and is not issued by IELTS,
-      British Council, IDP or Cambridge.</div>
+    </section>
+    <section class="tr-sec">
+      <h4>Target band scores</h4>
+      <div class="tr-scores">{boxes}
+        <div class="tr-box overall"><span class="tr-k">Overall target</span><span class="tr-v">{overall:g}</span></div>
+        <div class="tr-box cefr"><span class="tr-k">CEFR level</span><span class="tr-v">{cefr}</span></div>
+      </div>
+    </section>
+    <section class="tr-foot">
+      <div class="tr-comment"><h4>Teacher's comment</h4>
+        <p>{E(core.band_words(overall))} &mdash; the band {E(given)} is working towards.
+        Every piece of homework brings it closer.</p>
+        <div class="tr-sign"><span class="sig">Azamat</span><span class="line"></span><span class="who">Teacher, IELTS Zone</span></div>
+      </div>
+      <div class="cert-stamp tr-stamp" aria-hidden="true"><img src="/static/zone-logo.png" alt="">
+        <svg viewBox="0 0 100 100"><defs><path id="stamp-ring" d="M50 50 m-38 0 a38 38 0 1 1 76 0 a38 38 0 1 1 -76 0"/></defs>
+        <circle cx="50" cy="50" r="47" fill="none" stroke="currentColor" stroke-width="2.2"/>
+        <circle cx="50" cy="50" r="29" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text font-size="10" font-weight="700" fill="currentColor">
+        <textPath href="#stamp-ring" textLength="232" lengthAdjust="spacing">IELTS ZONE &#8226; MY GOAL &#8226; IELTS ZONE &#8226; MY GOAL &#8226;</textPath></text></svg></div>
+    </section>
+    <p class="tr-note">A target set at IELTS Zone &mdash; not a test result. This is not an IELTS Test Report Form
+      and is not issued by IELTS, British Council, IDP or Cambridge.</p>
   </div>
 </div>
 </div>
@@ -5213,10 +5215,10 @@ def portal_goal(db, s, token, flash=""):
                 'sections and your card will appear here.</p></div>')
 
     return f"""{flash}
-<h2>My certificate</h2>
-<p class="sub">Set the band you are aiming for — or the one you got in a mock exam —
-and your certificate appears below. The overall band is worked out the way IELTS
-works it out: a quarter rounds up to the next half band.</p>
+<h2>My goal</h2>
+<p class="sub">Choose the band you are aiming for in each part, and your target certificate
+appears below &mdash; print it and keep it where you study. The overall band is worked out
+the way IELTS works it out: a quarter rounds up to the next half band.</p>
 {card}
 <div class="card"><form method="post" action="/s/{E(token)}/goal"
       enctype="multipart/form-data">
@@ -11514,6 +11516,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = ("text/css" if name.endswith(".css")
                  else "application/javascript" if name.endswith(".js")
                  else "audio/mpeg" if name.endswith(".mp3")
+                 else "image/png" if name.endswith(".png")
                  else "application/octet-stream")
         self._send(200, [("Content-Type", ctype), ("Content-Length", str(len(data))),
                          ("Cache-Control", "max-age=300")], data)
