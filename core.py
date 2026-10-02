@@ -6323,7 +6323,9 @@ def destination_test(db, text):
     return row["id"] if row else None
 
 
-WORKBOOK_LINE = re.compile(r"workbook\s*unit\s*(\d+)\s*(?:[—–-]\s*)?(A\s*&\s*C|B\s*&\s*D|academic)?", re.I)
+# a pair of lessons (A&C, B&D), the Academic Skills unit, or - at Beginner, where
+# lessons come one at a time - a single lesson: "Workbook unit 4B", "unit 4 B"
+WORKBOOK_LINE = re.compile(r"workbook\s*unit\s*(\d+)\s*(?:[—–-]\s*)?(A\s*&\s*C|B\s*&\s*D|academic|[A-D]\b)?", re.I)
 
 
 def workbook_test(db, text, level_id):
@@ -6337,6 +6339,8 @@ def workbook_test(db, text, level_id):
         like = "%%Unit %d ASRP%%" % unit
     elif pair in ("A&C", "B&D"):
         like = "%%Unit %d%s & %d%s%%" % (unit, pair[0], unit, pair[2])
+    elif pair in ("A", "B", "C", "D"):
+        like = "%%Unit %d%s —%%" % (unit, pair)
     else:
         return None
     row = db.execute(

@@ -146,6 +146,14 @@ plan = json.loads(teacher.open(base + "/assignments/unit.json?" + urllib.parse.u
     {"group_id": g1, "unit": 1, "pair": "A&C", "kind": "none"}), timeout=30).read())
 check("the Set homework form knows the workbook unit is on the site",
       plan["items"][0]["kind"] == "workbook" and plan["items"][0]["test_id"] == wbu)
+beg = db.execute("SELECT id FROM levels WHERE name='Beginner'").fetchone()["id"]
+wb4b = core.load_test(db, json.load(open(os.path.join(ROOT, "handouts", "wb_b_04b.json"))))
+for text, level, want in [("Workbook unit 4B", beg, wb4b), ("workbook unit 4 B", beg, wb4b),
+                          ("Workbook unit 4B — do it on the site", beg, wb4b), ("Workbook unit 4A", beg, None),
+                          ("Workbook unit 4B", pre, None), ("Workbook unit 4 Academic Skills", beg, None),
+                          ("Workbook unit 1 A&C", pre, wbu)]:
+    check("a single Beginner lesson: %r at level %d -> %s" % (text, level, "the unit" if want else "nothing"),
+          core.workbook_test(db, text, level) == want)
 check("the Tests page has a Workbook section with it", "Workbook · Unit 1A &amp; 1C" in
       teacher.open(base + "/tests", timeout=30).read().decode())
 srv.shutdown()
