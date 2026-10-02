@@ -65,6 +65,10 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 | `e12bd_digital.py` | Elementary | 12B + 12D Travel | 153 | 116 |
 | `p01ac_digital.py` | Pre-Intermediate | 1A + 1C Communication | 191 | 159 |
 | `p01bd_digital.py` | Pre-Intermediate | 1B + 1D Communication | 192 | 145 |
+| `p01ac_new_digital.py` | Pre-Intermediate | 1A + 1C Communicating (new style) | 181 | 149 |
+| `p01bd_new_digital.py` | Pre-Intermediate | 1B + 1D Communicating (new style) | 177 | 148 |
+| `p02ac_new_digital.py` | Pre-Intermediate | 2A + 2C Travel and tourism (new style) | 165 | 136 |
+| `p02bd_new_digital.py` | Pre-Intermediate | 2B + 2D Travel and tourism (new style) | 181 | 150 |
 | `p02ac_digital.py` | Pre-Intermediate | 2A + 2C Travel and tourism | 163 | 129 |
 | `p02bd_digital.py` | Pre-Intermediate | 2B + 2D Travel and tourism | 154 | 123 |
 | `p03ac_digital.py` | Pre-Intermediate | 3A + 3C Money | 154 | 129 |
@@ -224,3 +228,21 @@ build of the same booklet (`BOOK_THEME=teal node build_b04b.js <dir>`, kept in
 the level's `_NEW BOOKLET STYLE/digital source/`) and unwraps those one-cell
 tables first - see `b04b_digital.py`. They have no "You will learn to" box, so
 the script adds one (in Uzbek for Beginner) where the site's cover reads it.
+
+P01AC and P01BD (tests 133 and 134, October 2026) are the first Pre-Intermediate
+ones: Uzbek goals, instruction lines and explanation boxes, as on the older
+Pre-Intermediate handouts. Where the paper has a table to write words into
+(adjective groups, stress patterns, long or short vowels) the phone gets one line
+per word with the choices to tap. They replace tests 87 and 88, which are hidden,
+not deleted - their exercises were different, so no answers could be carried over.
+
+**Every right form of an answer (from 2 October 2026).** He found right answers marked
+wrong: a short form where the key had the full one, figures where it had words, an
+answer with "a" in front. `variants.ok()` writes every form into the key - short and
+full forms, figures and words (`numbers=True`), with or without *a / the*
+(`articles=True`), British and American spelling - and is used box by box, never where
+the form is the point (a spelling task, past forms, "write the number in words"). Where
+two answers are both right English (*get on / off* the bus), the box takes both; where
+a right answer can be worded too many ways to list, the box is the teacher's to read.
+The keys of tests 133 and 134 were widened in place on 2 October; the answer-key form
+no longer cuts an answer at 120 characters.
