@@ -51,6 +51,7 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 | `b03b_digital.py` | Beginner | 3B Food and drink | 188 | 116 |
 | `b03c_digital.py` | Beginner | 3C Food and drink | 176 | 150 |
 | `b04a_digital.py` | Beginner | 4A My life and my family | 168 | 118 |
+| `b04b_digital.py` | Beginner | 4B My life and my family (new style) | 195 | 135 |
 | `u011_digital.py` | Elementary | 1.1 People | 68 | 55 |
 | `e07bd_digital.py` | Elementary | 7B + 7D Transport | 282 | 251 |
 | `e09ab_digital.py` | Elementary | 9A + 9B Clothes and shopping | 293 | 237 |
@@ -213,3 +214,13 @@ closes only the document it opened itself, found by counting documents
 rather than by name, because some files open untitled. Word's sandbox lets it
 write to the Desktop but not a temporary folder, and it asks before replacing
 a file, so an old PDF is deleted first.
+
+# The new-style booklets (from October 2026)
+
+The booklets built after the Material Bank's BRIEF §0 (B04B first) are drawn
+in a purple theme and wrap every exercise in a one-cell table that keeps it on
+one page of paper. The site reads the teal theme, so their script reads a TEAL
+build of the same booklet (`BOOK_THEME=teal node build_b04b.js <dir>`, kept in
+the level's `_NEW BOOKLET STYLE/digital source/`) and unwraps those one-cell
+tables first - see `b04b_digital.py`. They have no "You will learn to" box, so
+the script adds one (in Uzbek for Beginner) where the site's cover reads it.
