@@ -6314,6 +6314,13 @@ DEFAULT_LESSONS = [("A&C", "A & C", []), ("B&D", "B & D", []),
 LESSON_PLANS = {
     "Beginner": [("A", "Lesson A", []), ("B", "Lesson B", []),
                  ("C", "Lesson C + Review + Unit test", ["review", "unittest"])],
+    "Elementary": [("A&C", "A & C", []), ("B&D", "B & D", []),
+                   ("ASRP", "Academic Skills + Reading Plus + Review", ["review"])],
+    "Pre-Intermediate": [("A&C", "A & C", []), ("B&D", "B & D", []),
+                         ("ASRP", "Academic Skills + Reading Plus + Review", ["review"])],
+    "Intermediate": [("A", "Lesson A", []), ("B", "Lesson B", []),
+                     ("C&D", "C & D + Review", ["review"]),
+                     ("ASRP", "Academic Skills + Reading Plus", [])],
 }
 EXTRA_TITLES = {"review": "Review \u2014 unit {unit}",
                 "unittest": "Unit {unit} progress test"}
@@ -6365,7 +6372,8 @@ def destination_test(db, text):
 
 # a pair of lessons (A&C, B&D), the Academic Skills unit, or - at Beginner, where
 # lessons come one at a time - a single lesson: "Workbook unit 4B", "unit 4 B"
-WORKBOOK_LINE = re.compile(r"workbook\s*unit\s*(\d+)\s*(?:[—–-]\s*)?(A\s*&\s*C|B\s*&\s*D|academic|[A-D]\b)?", re.I)
+WORKBOOK_LINE = re.compile(r"workbook\s*unit\s*(\d+)\s*(?:[—–-]\s*)?(A\s*&\s*C|B\s*&\s*D|C\s*&\s*D|academic|[A-D]\b)?",
+                           re.I)
 
 
 def workbook_test(db, text, level_id):
@@ -6377,7 +6385,7 @@ def workbook_test(db, text, level_id):
     unit, pair = int(m.group(1)), (m.group(2) or "").upper().replace(" ", "")
     if pair.startswith("ACADEMIC"):
         like = "%%Unit %d ASRP%%" % unit
-    elif pair in ("A&C", "B&D"):
+    elif pair in ("A&C", "B&D", "C&D"):
         like = "%%Unit %d%s & %d%s%%" % (unit, pair[0], unit, pair[2])
     elif pair in ("A", "B", "C", "D"):
         like = "%%Unit %d%s —%%" % (unit, pair)
@@ -6422,6 +6430,7 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
     # come with the unit's review
     asrp = (pair or "").upper() == "ASRP"
     single = (pair or "").upper() in ("A", "B", "C", "D")    # one lesson, as at Beginner
+    cd = (pair or "").upper() == "C&D"                        # Intermediate's third lesson
     wb_title = ("Workbook unit %s — Academic Skills, Reading Plus and Review" % unit if asrp
                 else "Workbook unit %s%s" % (unit, pair.upper()) if single
                 else "Workbook unit %s %s" % (unit, pair))
@@ -6438,21 +6447,25 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
     if level_id:
         # the digital handout for these two lessons first - 4B & 4D, not 4A & 4C,
         # and the Academic Skills + Reading Plus pack only when that is asked for
-        like = "%ASRP%" if asrp else "%%%s%s%%" % (unit, (pair or "A")[0].upper())
+        like = ("%ASRP%" if asrp else "%%%sC & %sD%%" % (unit, unit) if cd
+                else "%%%s%s%%" % (unit, (pair or "A")[0].upper()))
         booklet = db.execute(
             "SELECT id, title FROM dtests WHERE level_id=? AND number=?"
-            " AND layout IS NOT NULL ORDER BY IFNULL(kind,'test')='handout' DESC,"
+            " AND layout IS NOT NULL AND series IS NULL"          # a workbook or Destination unit is not the handout
+            " ORDER BY IFNULL(kind,'test')='handout' DESC,"
             " title LIKE ? DESC, (title LIKE '%ASRP%')=? DESC, published DESC, id DESC LIMIT 1",
             (level_id, unit, like, 1 if asrp else 0)).fetchone()
         # a pair may fall back on the unit's other handout (older titles say "4.1", not
         # "4A"); one lesson takes only its own - lesson A must not tick 4B's handout
-        if single and booklet and "%s%s" % (unit, pair.upper()) not in booklet["title"]:
+        if booklet and ((single and "%s%s" % (unit, pair.upper()) not in booklet["title"])
+                        or (cd and "%sC & %sD" % (unit, unit) not in booklet["title"])):
             booklet = None
     out["items"].append({
         "kind": "booklet",
         "test_id": booklet["id"] if booklet else None,
         "title": (booklet["title"].replace(" (booklet)", "") if booklet
-                  else "12-page handout \u2014 unit %s%s" % (unit, pair.upper() if single else ""))})
+                  else "12-page handout \u2014 unit %s%s" % (unit, pair.upper() if single
+                                                             else "C & %sD" % unit if cd else ""))})
 
     # what this level's lesson brings besides: lesson C at Beginner, the review and the test
     extras = next((x for v, _l, x in lessons_for(level) if v == pair), [])

@@ -49,8 +49,12 @@ print("1. EACH LEVEL HAS ITS OWN LESSONS")
 check("Beginner: A, B, and C with the review and the test",
       [v for v, _l, _x in core.lessons_for("Beginner")] == ["A", "B", "C"]
       and core.lessons_for("Beginner")[2][2] == ["review", "unittest"])
-check("the others: in pairs, as before",
-      [v for v, _l, _x in core.lessons_for("Elementary")] == ["A&C", "B&D", "ASRP"])
+check("Elementary and Pre-Intermediate: A & C, B & D, then Academic Skills with the review",
+      all([v for v, _l, _x in core.lessons_for(lv)] == ["A&C", "B&D", "ASRP"]
+          and core.lessons_for(lv)[2][2] == ["review"] for lv in ("Elementary", "Pre-Intermediate")))
+check("Intermediate: A, B, C & D with the review, then Academic Skills",
+      [v for v, _l, _x in core.lessons_for("Intermediate")] == ["A", "B", "C&D", "ASRP"]
+      and core.lessons_for("Intermediate")[2][2] == ["review"] and core.lessons_for("Intermediate")[3][2] == [])
 
 print("\n2. THE PLAN FOR ONE BEGINNER LESSON")
 plan = core.unit_homework(db, gb, 4, pair="B", kind="none")
@@ -83,6 +87,38 @@ check("once it is there, the plan links it",
 check("only on its own level and unit", core.unit_extra_test(db, "Unit 4 progress test", ele) is None
       and core.unit_extra_test(db, "Unit 5 progress test", beg) is None)
 check("a workbook line is not a unit test", core.unit_extra_test(db, "Workbook unit 4C", beg) is None)
+
+print("\n3b. INTERMEDIATE'S C & D")
+inter = db.execute("SELECT id FROM levels WHERE name='Intermediate'").fetchone()["id"]
+gi = db.execute("INSERT INTO groups (name, join_code, created_at, level_id) VALUES ('116','I1',?,?)",
+                (core.iso(now), inter)).lastrowid
+lay = json.load(open(os.path.join(ROOT, "handouts", "b04b.json")))
+def shelf(title, series=None):
+    tid = core.load_test(db, {"level": "Intermediate", "number": 9, "title": title, "kind": "handout",
+                              "layout": lay["layout"], "passages": {}, "questions": lay["questions"]})
+    db.execute("UPDATE dtests SET published=1, series=? WHERE id=?", (series, tid))
+    return tid
+old_ac = shelf("Unit 9A & 9C — Entertainment")           # the older pair, which C & D must not take
+cd_book = shelf("Unit 9C & 9D — Entertainment")
+cd_wb = shelf("Workbook · Unit 9C & 9D — Entertainment", "workbook")
+db.commit()
+plan_cd = core.unit_homework(db, gi, 9, pair="C&D", kind="none")
+check("C & D: workbook, handout, review", [i["kind"] for i in plan_cd["items"]] == ["workbook", "booklet", "review"])
+check("its workbook line finds the C & D workbook",
+      plan_cd["items"][0]["title"] == "Workbook unit 9 C&D" and plan_cd["items"][0]["test_id"] == cd_wb)
+check("its handout is the C & D one, not 9A & 9C", plan_cd["items"][1]["test_id"] == cd_book)
+db.execute("DELETE FROM dtests WHERE id=?", (cd_book,)); db.commit()
+check("without a C & D handout it is a line, not the A & C one",
+      core.unit_homework(db, gi, 9, pair="C&D", kind="none")["items"][1]
+      == {"kind": "booklet", "test_id": None, "title": "12-page handout — unit 9C & 9D"})
+check("lesson A at Intermediate takes the older 9A & 9C, which holds lesson 9A, while there is no 9A of its own",
+      core.unit_homework(db, gi, 9, pair="A", kind="none")["items"][1]["test_id"] == old_ac)
+check("the workbook is never taken for the handout",
+      all(i["test_id"] != cd_wb for i in core.unit_homework(db, gi, 9, pair="C&D", kind="none")["items"][1:]))
+check("the Academic Skills lesson at Intermediate has no review line",
+      [i["kind"] for i in core.unit_homework(db, gi, 9, pair="ASRP", kind="none")["items"]] == ["workbook", "booklet"])
+check("at Elementary it has", [i["kind"] for i in core.unit_homework(db, ge, 9, pair="ASRP", kind="none")["items"]]
+      == ["workbook", "booklet", "review"])
 
 print("\n4. ON THE PAGE, AND SET")
 import threading, time, urllib.request, urllib.parse, http.cookiejar
