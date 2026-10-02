@@ -1995,9 +1995,16 @@ def view_assignments(req, db, error="", keep=None):
             'set, students would never see it, and the league would count it as missed. '
             'Everything you typed is still below &mdash; change the date and set it again.</div>'
             if error == "past" else "")
-    pairs = "".join(f'<option value="{E(v)}"{" selected" if kept("pair", "A&C") == v else ""}>{E(l)}</option>'
-                    for v, l in (("A&C", "A & C"), ("B&D", "B & D"),
-                                 ("ASRP", "Academic Skills + Reading Plus + Review")))
+    # the lessons a unit is taught in follow the class's level (core.LESSON_PLANS):
+    # Beginner A / B / C, the others in pairs; the page swaps them when the class changes
+    first = next((g for g in groups if str(g["id"]) == kept("group_id")), groups[0] if groups else None)
+    first_level = core.level_name(db, first["level_id"]) if first else ""
+    lessons = core.lessons_for(first_level)
+    want = kept("pair", lessons[0][0])
+    pairs = "".join(f'<option value="{E(v)}"{" selected" if want == v else ""}>{E(l)}</option>'
+                    for v, l, _x in lessons)
+    plans_json = E(json.dumps({lv: [[v, l] for v, l, _x in core.lessons_for(lv)]
+                               for lv in core.LEVELS + [""]}))
     body = f"""<h1>Set homework</h1>{warn}
 <p class="sub">Everything already set is on the <a class="linky" href="/homework">Homework</a>
 page, where you see who has done it, change it or delete it.</p>
@@ -2012,13 +2019,14 @@ page, where you see who has done it, change it or delete it.</p>
   <div class="inline">
     <label class="f">Unit<input type="number" name="unit" id="u_unit" min="1" max="20"
       value="{E(kept("unit"))}" style="width:80px"></label>
-    <label class="f">Lessons<select name="pair" id="u_pair">{pairs}</select></label>
+    <label class="f">Lessons<select name="pair" id="u_pair" data-plans="{plans_json}">{pairs}</select></label>
     <label class="f">Destination<input name="destination" id="u_dest" value="{E(kept("destination"))}"
       placeholder="e.g. Destination B1, Unit 7" style="width:240px" list="destlist"></label>
   </div>
   {dest_on_site(db)}
-  <p class="sub flush" id="u_note">Pick the unit and the lessons: the workbook, the Destination
-  unit and the handout fill in below. A Destination unit you type is remembered for next time.</p>
+  <p class="sub flush" id="u_note">Pick the unit and the lesson: the workbook, the handout (and,
+  where the level has them, the review and the unit test) fill in below &mdash; change or delete
+  anything before you set it. A Destination unit you type is remembered for next time.</p>
 </div>
 
 <div class="f">Digital handouts <span class="sub">&mdash; tick as many as this homework has</span>
@@ -10751,7 +10759,7 @@ def act_new_list(req, db):
              1 if f.get("rubric", [""])[0] == "1" else 0,
              mine, minutes if mine else None, min_words if mine else None,
              booklets.get(title.strip().lower()) or core.destination_test(db, title)
-             or core.workbook_test(db, title, level_id)),
+             or core.workbook_test(db, title, level_id) or core.unit_extra_test(db, title, level_id)),
         ).lastrowid)
     db.commit()
     if publish_now and f.get("announce", [""])[0] == "1":

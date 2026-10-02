@@ -6304,6 +6304,46 @@ UNIT_PLAN = [
     ("practice", "Practice test {test}"),
 ]
 
+# How each level's units are taught, lesson by lesson: (value, what Set homework
+# calls it, what that lesson's homework holds beyond the workbook and the handout).
+# Beginner lessons come one at a time, and lesson C brings the unit's review and
+# its test; the other levels are taught in pairs. A level not named here takes
+# DEFAULT_LESSONS. Change a level's lessons here - nothing else needs to know.
+DEFAULT_LESSONS = [("A&C", "A & C", []), ("B&D", "B & D", []),
+                   ("ASRP", "Academic Skills + Reading Plus + Review", [])]
+LESSON_PLANS = {
+    "Beginner": [("A", "Lesson A", []), ("B", "Lesson B", []),
+                 ("C", "Lesson C + Review + Unit test", ["review", "unittest"])],
+}
+EXTRA_TITLES = {"review": "Review \u2014 unit {unit}",
+                "unittest": "Unit {unit} progress test"}
+
+
+def lessons_for(level):
+    """[(value, label, extras)] for a level's name."""
+    return LESSON_PLANS.get(level or "", DEFAULT_LESSONS)
+
+
+# "Review — unit 4", "Unit 4 progress test": a line naming a unit's review or test
+REVIEW_LINE = re.compile(r"^\s*review\b.*?\bunit\s*(\d+)", re.I)
+UNITTEST_LINE = re.compile(r"\bunit\s*(\d+)\s*(?:progress\s*)?test\b", re.I)
+
+
+def unit_extra_test(db, text, level_id):
+    """The digital review or unit test a line of homework names, on this level -
+    a test with series 'review' or 'unittest' and that unit's number - or None
+    while there is none on the site (the line is then ticked from photos)."""
+    if not level_id:
+        return None
+    for series, pattern in (("review", REVIEW_LINE), ("unittest", UNITTEST_LINE)):
+        m = pattern.search(text or "")
+        if m:
+            row = db.execute("SELECT id FROM dtests WHERE series=? AND level_id=? AND number=?"
+                             " ORDER BY published DESC, id DESC LIMIT 1",
+                             (series, level_id, int(m.group(1)))).fetchone()
+            return row["id"] if row else None
+    return None
+
 
 DESTINATION_LINE = re.compile(r"destination\s*(a1|a2|b1|b2|c1\s*(?:&|and)?\s*c2|c1)\b.*?\bunit\s*(\d+)",
                               re.I)
@@ -6381,8 +6421,10 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
     # the workbook comes first; the Academic Skills and Reading Plus lessons
     # come with the unit's review
     asrp = (pair or "").upper() == "ASRP"
-    wb_title = ("Workbook unit %s — Academic Skills, Reading Plus and Review" % unit
-                if asrp else "Workbook unit %s %s" % (unit, pair))
+    single = (pair or "").upper() in ("A", "B", "C", "D")    # one lesson, as at Beginner
+    wb_title = ("Workbook unit %s — Academic Skills, Reading Plus and Review" % unit if asrp
+                else "Workbook unit %s%s" % (unit, pair.upper()) if single
+                else "Workbook unit %s %s" % (unit, pair))
     out["items"].append({"kind": "workbook", "title": wb_title,
                          "test_id": workbook_test(db, wb_title, level_id)})
     # then the Destination unit that goes with it, remembered once typed
@@ -6402,11 +6444,22 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
             " AND layout IS NOT NULL ORDER BY IFNULL(kind,'test')='handout' DESC,"
             " title LIKE ? DESC, (title LIKE '%ASRP%')=? DESC, published DESC, id DESC LIMIT 1",
             (level_id, unit, like, 1 if asrp else 0)).fetchone()
+        # a pair may fall back on the unit's other handout (older titles say "4.1", not
+        # "4A"); one lesson takes only its own - lesson A must not tick 4B's handout
+        if single and booklet and "%s%s" % (unit, pair.upper()) not in booklet["title"]:
+            booklet = None
     out["items"].append({
         "kind": "booklet",
         "test_id": booklet["id"] if booklet else None,
         "title": (booklet["title"].replace(" (booklet)", "") if booklet
-                  else "12-page handout \u2014 unit %s" % unit)})
+                  else "12-page handout \u2014 unit %s%s" % (unit, pair.upper() if single else ""))})
+
+    # what this level's lesson brings besides: lesson C at Beginner, the review and the test
+    extras = next((x for v, _l, x in lessons_for(level) if v == pair), [])
+    for kind_ in extras:
+        title = EXTRA_TITLES[kind_].format(unit=unit)
+        out["items"].append({"kind": kind_, "title": title,
+                             "test_id": unit_extra_test(db, title, level_id)})
 
     if kind == "none":
         if practice:

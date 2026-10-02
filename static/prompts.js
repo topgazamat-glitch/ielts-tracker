@@ -101,6 +101,21 @@
     let auto = items.value;        // what was last filled in, so typing over it is respected
     let plan = null, picked = false, where = "";
 
+    // the lessons follow the class's level: Beginner A / B / C, the others in pairs
+    function relesson() {
+      let plans = {};
+      try { plans = JSON.parse(pair.dataset.plans || "{}"); } catch (e) { return; }
+      const opt = group.selectedOptions[0];
+      const lvl = (opt && opt.getAttribute("data-level-name")) || "";
+      const want = plans[lvl] || plans[""] || [];
+      const now = Array.from(pair.options).map((o) => o.value).join("|");
+      if (!want.length || now === want.map((w) => w[0]).join("|")) return;
+      const keep = pair.value;
+      pair.innerHTML = "";
+      want.forEach(([v, l]) => pair.add(new Option(l, v, false, v === keep)));
+    }
+    relesson();
+
     function lines() {
       const out = [];
       (plan ? plan.items : []).forEach((i) => {
@@ -108,6 +123,7 @@
         if (i.kind === "booklet" && picked) return;     // the handout box says it
         out.push(i.title);
         if (i.kind === "workbook" && (dest.value || "").trim()) out.push(dest.value.trim());
+        // a review or unit test with a digital version links itself when the line is set
       });
       return out.join("\n");
     }
@@ -146,11 +162,14 @@
         write();
         const destOn = plan.items.some((i) => i.kind === "destination" && i.test_id);
         const wbOn = plan.items.some((i) => i.kind === "workbook" && i.test_id);
+        const extraOn = plan.items.filter((i) => (i.kind === "review" || i.kind === "unittest") && i.test_id)
+                                  .map((i) => i.kind === "review" ? "review" : "unit test");
         note.textContent = (picked
           ? "Filled in. Students do the handout on the site, or send photos of the paper."
           : "Filled in. There is no digital handout for this unit yet, so it is a line to tick.")
           + (wbOn ? " The workbook unit is on the site too." : "")
-          + (destOn ? " The Destination unit is on the site too." : "");
+          + (destOn ? " The Destination unit is on the site too." : "")
+          + (extraOn.length ? " The " + extraOn.join(" and ") + " too." : "");
         // the writing question's level and unit, already chosen
         const lvl = group.selectedOptions[0] && group.selectedOptions[0].getAttribute("data-level-name");
         const sl = $("sug_level"), su = $("sug_unit");
@@ -160,7 +179,7 @@
     }
     unit.addEventListener("change", fill);
     pair.addEventListener("change", fill);
-    group.addEventListener("change", () => { if ((unit.value || "").trim()) fill(); });
+    group.addEventListener("change", () => { relesson(); if ((unit.value || "").trim()) fill(); });
     dest.addEventListener("input", () => { if (plan) write(); });
     // a Destination unit on the site, put in the box with a tap
     form.querySelectorAll(".destpick").forEach((b) => b.addEventListener("click", () => {
