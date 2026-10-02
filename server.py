@@ -238,6 +238,30 @@ LOOK_ICONS = {
     "message": '<path d="M4.5 5.5h15v10.5H9l-4.5 3.5z"/><path d="M8.5 9.5h7M8.5 12.5h4.5"/>',
     "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
 }
+# more drawings, for the shelves of files: what a section holds, what a file is
+LOOK_ICONS.update({
+    "headphones": '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.6"/>'
+                  '<rect x="16.5" y="14" width="4" height="6" rx="1.6"/>',
+    "file": '<path d="M7 3.5h7l4.5 4.5v12a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5z"/>'
+            '<path d="M14 3.5V8h4.5M8.5 12.5h7M8.5 16h5"/>',
+    "image": '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/>'
+             '<path d="M20.5 16l-5-5-8.5 8.5"/>',
+    "video": '<rect x="3.5" y="6" width="12.5" height="12" rx="2.5"/><path d="M16 10.5l4.5-2.5v8l-4.5-2.5"/>',
+    "slides": '<rect x="3.5" y="4.5" width="17" height="11.5" rx="2"/><path d="M12 16v3.5M8.5 19.5h7"/>',
+    "trophy": '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5v1.5A3 3 0 0 0 8 10.5M16 6h3v1.5a3 3 0 0 1-3 3M12 13v4M8.5 20h7M10 17h4"/>',
+    "clipboard": '<rect x="5.5" y="5" width="13" height="15.5" rx="2"/><path d="M9 5V3.8h6V5M8.5 11l2 2 4-4M8.5 16.5h7"/>',
+    "cap": '<path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.5v4c1.5 1.4 3.4 2 5.5 2s4-.6 5.5-2v-4M21.5 9.5v5"/>',
+    "list": '<path d="M9 7h11M9 12h11M9 17h11"/><circle cx="4.8" cy="7" r=".9"/><circle cx="4.8" cy="12" r=".9"/>'
+            '<circle cx="4.8" cy="17" r=".9"/>',
+    "user": '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    "layers": '<path d="M12 4l8.5 4.5L12 13 3.5 8.5z"/><path d="M3.5 12.5L12 17l8.5-4.5M3.5 16.5L12 21l8.5-4.5"/>',
+    "trash": '<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2a1.5 1.5 0 0 0 1.5 1.3h6.2a1.5 1.5 0 0 0 1.5-1.3L17.5 7'
+             'M10 11v6M14 11v6"/>',
+    "upload": '<path d="M12 15.5V4.5M7.5 9L12 4.5 16.5 9"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/>',
+    "search": '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.4-4.4"/>',
+    "folder": '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+    "chevron": '<path d="M9 6l6 6-6 6"/>',
+})
 # which drawing and colour a figure takes, from the words of its label
 STAT_LOOKS = [
     (("wait", "grading", "queue", "pending", "to mark"), "inbox", "amber"),
@@ -2767,7 +2791,7 @@ def portal_home(db, s, token, flash, pick=""):
   <div class="pbar"><i style="width:{pct}%"></i></div>
   <ul class="checklist">{rows}</ul></div>"""
     if not lists:
-        lists = '<div class="card"><p>Nothing set at the moment.</p></div>'
+        lists = '<div class="card empty-card"><p>Nothing set at the moment.</p></div>'
 
     drafts = ""
     for d in db.execute(
@@ -2921,7 +2945,7 @@ def portal_feedback(db, s, token):
     fresh = [r for r in rows if not r["seen"]]
     core.mark_feedback_seen(db, s["id"])
     if not rows:
-        return ('<h2>Feedback</h2><div class="card"><p class="flush">Nothing marked yet. '
+        return ('<h2>Feedback</h2><div class="card empty-card"><p class="flush">Nothing marked yet. '
                 'When your teacher marks a piece of homework, what they said about it '
                 'appears here.</p></div>')
     cards = ""
@@ -2952,7 +2976,7 @@ def portal_feedback(db, s, token):
 def portal_materials(db, s, token, query):
     level_id = core.level_of(db, s["group_id"])
     if not level_id:
-        return ('<div class="card"><p>Your class has no level yet. '
+        return ('<div class="card empty-card"><p>Your class has no level yet. '
                 'Ask your teacher.</p></div>')
     coll = (query.get("c", [None])[0] or "")
     sect = query.get("s", [None])[0]
@@ -2961,16 +2985,26 @@ def portal_materials(db, s, token, query):
     unit = int(unit) if unit and unit.isdigit() else None
     base = f"/s/{E(token)}?tab=materials"
 
+    def n_files(n):
+        return "Empty" if not n else "%d file%s" % (n, "" if n == 1 else "s")
+
+    def steps(*bits):
+        """Where you are on the shelves, each step a way back up."""
+        sep = '<span class="crumb-sep" aria-hidden="true">›</span>'
+        out = [f'<a href="{href}">{E(label)}</a>' for label, href in bits[:-1]]
+        out.append(f'<span class="here">{E(bits[-1][0])}</span>')
+        return '<nav class="crumbs">' + sep.join(out) + "</nav>"
+
+    top = ("Materials", base)
     if coll not in core.COLLECTIONS:
         counts = core.collection_counts(db, level_id)
         cards = "".join(
-            f'<a class="tile" href="{base}&amp;c={key}">'
-            f'<div class="tile-title">{E(core.collection_label(key))}</div>'
-            f'<div class="sub">{counts.get(key, 0)} files</div></a>'
+            shelf_card(f"{base}&amp;c={key}", E(core.collection_label(key)), n_files(counts.get(key, 0)),
+                       *COLLECTION_LOOKS.get(key, ("folder", "plum")), empty=not counts.get(key))
             for key in core.COLLECTION_ORDER)
-        return f'<h2>Materials</h2><div class="tiles">{cards}</div>'
+        return f'<h2>Materials</h2>{shelf_grid(cards)}'
 
-    crumb = f'<a class="crumb" href="{base}">Materials</a> › {E(core.collection_label(coll))}'
+    shelf = (core.collection_label(coll), f"{base}&amp;c={coll}")
 
     # the practice shelf is twenty buttons, and each holds a whole test - the
     # paper, its recording and its answers, so nothing has to be cross-referred
@@ -2978,106 +3012,98 @@ def portal_materials(db, s, token, query):
         have = core.units_across(db, level_id, coll)
         if unit is None:
             cards = "".join(
-                f'<a class="tile small{"" if n in have else " empty"}" '
-                f'href="{base}&amp;c={coll}&amp;u={n}">'
-                f'<div class="tile-title">Test {n}</div>'
-                f'<div class="sub">'
-                f'{have[n]} file{"" if have.get(n) == 1 else "s"}</div></a>'
-                if n in have else
-                f'<a class="tile small empty" href="{base}&amp;c={coll}&amp;u={n}">'
-                f'<div class="tile-title">Test {n}</div>'
-                f'<div class="sub">empty</div></a>'
+                shelf_card(f"{base}&amp;c={coll}&amp;u={n}", f"Test {n}", n_files(have.get(n, 0)),
+                           "clipboard", "amber", empty=n not in have, small=True)
                 for n in core.tests_in_collection(coll))
-            return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
+            return steps(top, shelf) + shelf_grid(cards, small=True)
         rows = core.files_in_test(db, level_id, coll, unit)
         order = {name: i for i, name in enumerate(core.sections(coll))}
         rows = sorted(rows, key=lambda m: (order.get(m["category"], 99), m["title"]))
-        crumb += f' › <a class="crumb" href="{base}&amp;c={coll}">Test {unit}</a>'
-        if not rows:
-            return (f'<p class="sub">{crumb}</p><div class="card">'
-                    f'<p>Nothing here yet.</p></div>')
-        parts = ""
-        for m in rows:
-            kind = m["category"] or "File"
-            src = f'/materials/{m["id"]}/file?s={E(token)}'
-            player = (f'<audio controls preload="none" class="voice" src="{src}"></audio>'
-                      if (m["mime"] or "").startswith("audio") else "")
-            parts += (f'<div class="testfile"><div>'
-                      f'<span class="pill mute">{E(kind)}</span> '
-                      f'<a href="{src}">{E(m["title"])}</a>'
-                      f'<div class="sub">{E(core.human_size(m["size"]))}</div></div>'
-                      f'{player}</div>')
-        return f'<p class="sub">{crumb}</p><div class="card">{parts}</div>'
+        return steps(top, shelf, (f"Test {unit}", "")) + student_files(rows, token, show_cat=True)
 
+    names = core.sections(coll)
     if query.get("audio") and sect is None:
         counts = core.level_counts(db, level_id, coll)
-        names = core.sections(coll)
         cards = ""
-        for label, section in (("Class book", "Listening audios"),
-                               ("Work book", "Workbook audios")):
+        for label, section in (("Class book", "Listening audios"), ("Work book", "Workbook audios")):
             if section in names:
-                cards += (f'<a class="tile" href="{base}&amp;c={coll}'
-                          f'&amp;s={names.index(section)}">'
-                          f'<div class="tile-title">{E(label)}</div>'
-                          f'<div class="sub">'
-                          f'{counts.get(section, 0)} files</div></a>')
-        return (f'<p class="sub">{crumb} › Listening audios</p>'
-                f'<div class="tiles">{cards}</div>')
+                cards += shelf_card(f"{base}&amp;c={coll}&amp;s={names.index(section)}", label,
+                                    n_files(counts.get(section, 0)), *SECTION_LOOKS[section],
+                                    empty=not counts.get(section))
+        return steps(top, shelf, ("Listening audios", "")) + shelf_grid(cards)
     if sect is None:
         counts = core.level_counts(db, level_id, coll)
         cards = ""
-        for i, name in enumerate(core.sections(coll)):
+        for i, name in enumerate(names):
             if name == "Workbook audios":
                 continue                     # reached through Listening audios
             if name == "Listening audios":
                 total = counts.get(name, 0) + counts.get("Workbook audios", 0)
-                cards += (f'<a class="tile" href="{base}&amp;c={coll}&amp;audio=1">'
-                          f'<div class="tile-title">{E(name)}</div>'
-                          f'<div class="sub">{total} files</div></a>')
+                cards += shelf_card(f"{base}&amp;c={coll}&amp;audio=1", E(name), n_files(total),
+                                    *SECTION_LOOKS[name], empty=not total)
                 continue
-            cards += (f'<a class="tile" href="{base}&amp;c={coll}&amp;s={i}">'
-                      f'<div class="tile-title">{E(name)}</div>'
-                      f'<div class="sub">'
-                      f'{counts.get(name, 0)} files</div></a>')
-        return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
+            cards += shelf_card(f"{base}&amp;c={coll}&amp;s={i}", E(name), n_files(counts.get(name, 0)),
+                                *SECTION_LOOKS.get(name, ("folder", "plum")), empty=not counts.get(name))
+        return steps(top, shelf) + shelf_grid(cards)
 
-    names = core.sections(coll)
     if not 0 <= sect < len(names):
-        return f'<p class="sub">{crumb}</p>'
+        return steps(top, shelf)
     category = names[sect]
-    crumb += f' › <a class="crumb" href="{base}&amp;c={coll}">{E(category)}</a>'
+    place = (category, f"{base}&amp;c={coll}&amp;s={sect}")
     units = core.units_in(db, level_id, coll, category)
 
     if units and unit is None:
         numbers = core.units_for_level(db, level_id)
         if 0 in units:
             numbers = [0] + numbers
+        icon, tone = SECTION_LOOKS.get(category, ("folder", "plum"))
         cards = "".join(
-            f'<a class="tile small{"" if n in units else " empty"}" '
-            f'href="{base}&amp;c={coll}&amp;s={sect}&amp;u={n}">'
-            f'<div class="tile-title">{"Welcome" if n == 0 else "Unit %d" % n}</div>'
-            f'<div class="sub">{units.get(n, 0)} files</div></a>'
+            shelf_card(f"{base}&amp;c={coll}&amp;s={sect}&amp;u={n}", "Welcome" if n == 0 else "Unit %d" % n,
+                       n_files(units.get(n, 0)), tone=tone, badge=("W" if n == 0 else str(n)),
+                       empty=n not in units, small=True)
             for n in numbers)
-        return f'<p class="sub">{crumb}</p><div class="tiles">{cards}</div>'
+        return steps(top, shelf, place) + shelf_grid(cards, small=True)
 
     if unit is not None:
         mats = core.materials_in_unit(db, level_id, coll, category, unit)
-        crumb += " › " + ("Welcome" if unit == 0 else "Unit %d" % unit)
+        trail = steps(top, shelf, place, ("Welcome" if unit == 0 else "Unit %d" % unit, ""))
     else:
         mats = core.materials_at_level(db, level_id, coll, category)
+        trail = steps(top, shelf, (category, ""))
+    return trail + student_files(mats, token)
+
+
+def student_files(mats, token, show_cat=False):
+    """A shelf's files for a student: a recording plays in its own row, with
+    the same player as the booklets; anything else opens with a tap."""
     if not mats:
-        return f'<p class="sub">{crumb}</p><div class="card"><p>Nothing here yet.</p></div>'
-    parts = []
+        return ('<div class="empty-state">' + look_icon("folder", "empty-ico")
+                + '<p><strong>Nothing here yet.</strong><br>Your teacher has not put anything on this shelf.</p></div>')
+    rows = ""
     for m in mats:
-        icon = "&#9834;" if (m["mime"] or "").startswith("audio") else "&#128196;"
-        note = f'<span class="sub">{E(m["note"])}</span>' if m["note"] else ""
-        parts.append(
-            f'<a class="filerow" href="/materials/{m["id"]}/file?s={E(token)}">'
-            f'<span class="ficon">{icon}</span>'
-            f'<span class="fname">{E(m["title"])}{note}</span>'
-            f'<span class="fsize">{E(core.human_size(m["size"]))}</span></a>')
-    rows = "".join(parts)
-    return f'<p class="sub">{crumb}</p><div class="filelist">{rows}</div>'
+        label, icon, tone = file_kind(m["original_name"] or m["filename"])
+        src = f'/materials/{m["id"]}/file?s={E(token)}'
+        meta = " · ".join(x for x in ((m["category"] if show_cat else ""), core.human_size(m["size"])) if x)
+        note = f'<span class="f-note">{E(m["note"])}</span>' if m["note"] else ""
+        if label == "Audio" or (m["mime"] or "").startswith("audio"):
+            rows += (f'<li class="frow listen"><div class="lx" data-src="{src}" data-track="{E(m["title"])}"'
+                     f' data-label="{E(m["title"])}">'
+                     f'<button type="button" class="lx-play" aria-label="Play {E(m["title"])}">{PLAY_ICON}</button>'
+                     f'<div class="lx-mid"><span class="lx-row"><span class="lx-label">{E(m["title"])}</span>'
+                     f'<span class="lx-time">{E(meta)}</span></span>'
+                     f'<span class="lx-bar" role="slider" tabindex="0" aria-label="Where in the recording"'
+                     f' aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span>{note}</div>'
+                     f'<button type="button" class="lx-back" aria-label="Back 5 seconds">'
+                     f'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5'
+                     f'a7 7 0 1 0 7-7z"/></svg><b>5</b></button></div></li>')
+            continue
+        rows += (f'<li class="frow"><span class="f-ico t-{tone}" title="{label}"><svg viewBox="0 0 24 24"'
+                 f' aria-hidden="true">{LOOK_ICONS[icon]}</svg></span>'
+                 f'<span class="f-main"><a class="f-name" href="{src}">{E(m["title"])}</a>'
+                 f'<span class="f-meta">{E(label)} · {E(meta)}</span>{note}</span>'
+                 f'<a class="f-open" href="{src}" aria-label="Open {E(m["title"])}">'
+                 f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["chevron"]}</svg></a></li>')
+    return f'<div class="files view"><ul class="filelist">{rows}</ul></div>'
 
 
 BLANK_AT = re.compile(r'<input class="bk-blank" data-q="(\d+)"')
@@ -3727,45 +3753,7 @@ def portal_handouts(db, s, token, query):
     hid = int(hid) if hid and hid.isdigit() else None
 
     if hid is None:
-        # a handout set as homework to this class opens for it even when it is
-        # not open to everyone as practice; and they come in the order of the
-        # course, each one after a set booklet shut until that is finished
-        shelf = core.handout_shelf(db, s)
-        if not shelf:
-            return ('<h2>Handouts</h2><div class="card"><p class="flush">'
-                    'Nothing here yet. Your teacher will put your booklets '
-                    'on this page.</p></div>')
-        cards = ""
-        for b, first in shelf:
-            if first:
-                cards += (f'<div class="tile small shut" aria-disabled="true">'
-                          f'<div class="tile-title">{LOCK_SVG}{E(b["title"])}</div>'
-                          f'<div class="sub">Opens when you finish {E(short_title(first))}</div></div>')
-                continue
-            layout = db.execute("SELECT layout FROM dtests WHERE id=?",
-                                (b["id"],)).fetchone()["layout"] or ""
-            _intro, parts = handout_parts(layout)
-            att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
-                             " ORDER BY id DESC LIMIT 1", (b["id"], s["id"])).fetchone()
-            done = core.handout_parts_done(db, att["id"]) if att else {}
-            left = [p for p in parts if p[0] not in done]
-            if not done:
-                note = f'{len(parts)} parts &middot; not started'
-            elif left:
-                note = (f'Part {len(done) + 1} of {len(parts)} next: {E(left[0][1])}')
-            else:
-                right = sum(r["right_n"] for r in done.values())
-                marked = sum(r["right_n"] + r["wrong_n"] for r in done.values())
-                note = f'Finished &middot; {right} of {marked} right'
-            cards += (f'<a class="tile small" href="{base}&amp;h={b["id"]}">'
-                      f'<div class="tile-title">{E(b["title"])}</div>'
-                      f'<div class="sub">{note}</div></a>')
-        return (f'<h2>Handouts</h2><p class="sub">Your booklets, one part at a '
-                f'time. Nothing is timed and what you write is saved as you go. '
-                f'Answer every box in a part and check it: you see how you did '
-                f'straight away, and the next part opens. A booklet set as '
-                f'homework has to be finished before the next one opens.</p>'
-                f'<div class="tiles">{cards}</div>')
+        return handout_shelf_page(db, s, token, base)
 
     t = db.execute("SELECT * FROM dtests WHERE id=? AND IFNULL(kind,'test')='handout'",
                    (hid,)).fetchone()
@@ -3785,6 +3773,85 @@ def portal_handouts(db, s, token, query):
         attempt = db.execute("SELECT * FROM dattempts WHERE id=?",
                              (aid,)).fetchone()
     return handout_view(db, token, t, qs, attempt, query)
+
+
+def handout_shelf_page(db, s, token, base):
+    """The student's booklets: the one to carry on with at the top, then every
+    booklet as a card that says how far they are - a bar of its parts, the
+    homework deadline when it is set, the score when it is done - and the
+    locked ones saying which booklet opens them. (A handout set as homework to
+    this class opens for it even when it is not open to everyone as practice;
+    they come in the order of the course, each one after a set booklet shut
+    until that is finished.)"""
+    shelf = core.handout_shelf(db, s)
+    if not shelf:
+        return ('<h2>Handouts</h2><div class="empty-state">' + look_icon("book", "empty-ico")
+                + '<p><strong>Nothing here yet.</strong><br>Your teacher will put your booklets on this page.</p></div>')
+    cfg = core.load_config()
+    due = {}
+    for r in db.execute("SELECT test_id, due_at FROM assignments WHERE group_id=? AND published=1"
+                        " AND test_id IS NOT NULL", (s["group_id"],)):
+        if r["due_at"] and (r["test_id"] not in due or r["due_at"] > due[r["test_id"]]):
+            due[r["test_id"]] = r["due_at"]
+    cards, carry, finished, total = "", None, 0, 0
+    for b, first in shelf:
+        total += 1
+        badge = str(b["number"]) if b["number"] else (short_title(b)[:2] or "·")
+        if first:
+            cards += (f'<div class="hs-card shut" aria-disabled="true"><span class="hs-badge" title="Unit">{E(badge)}</span>'
+                      f'<span class="hs-body"><span class="hs-name">{E(b["title"])}</span>'
+                      f'<span class="hs-state">{LOCK_SVG}Opens when you finish {E(short_title(first))}</span></span></div>')
+            continue
+        layout = db.execute("SELECT layout FROM dtests WHERE id=?", (b["id"],)).fetchone()["layout"] or ""
+        _intro, parts = handout_parts(layout)
+        att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
+                         " ORDER BY id DESC LIMIT 1", (b["id"], s["id"])).fetchone()
+        done = core.handout_parts_done(db, att["id"]) if att else {}
+        left = [p for p in parts if p[0] not in done]
+        n_parts = max(len(parts), 1)
+        pct = round(100 * len(done) / n_parts)
+        homework = ""
+        if b["id"] in due:
+            day, rel = due_words(due[b["id"]], cfg)
+            late = rel.endswith("ago") or rel == "yesterday"
+            homework = (f'<span class="hs-pill{" late" if late else ""}">Homework · '
+                        f'{"was due" if late else "due"} {E(rel)}</span>')
+        if not done:
+            state = f"{len(parts)} parts · not started"
+            cls = "new"
+        elif left:
+            state = f"Part {len(done) + 1} of {len(parts)} next: {E(left[0][1])}"
+            cls = "going"
+        else:
+            right = sum(r["right_n"] for r in done.values())
+            marked = sum(r["right_n"] + r["wrong_n"] for r in done.values())
+            state = f'{look_icon("check", "hs-done")}Finished · {right} of {marked} right'
+            cls = "done"
+            finished += 1
+        if left and (carry is None or (b["id"] in due and carry[0]["id"] not in due)):
+            carry = (b, left[0], len(done), len(parts), b["id"] in due)
+        cards += (f'<a class="hs-card {cls}" href="{base}&amp;h={b["id"]}"><span class="hs-badge">{E(badge)}</span>'
+                  f'<span class="hs-body"><span class="hs-name">{E(b["title"])}</span>{homework}'
+                  f'<span class="hs-bar" role="img" aria-label="{len(done)} of {len(parts)} parts checked">'
+                  f'<i style="width:{pct}%"></i></span><span class="hs-state">{state}</span></span></a>')
+    hero = ""
+    if carry:
+        b, part, n_done, n_parts, is_hw = carry
+        pct = round(100 * n_done / max(n_parts, 1))
+        hero = (f'<a class="hs-next" href="{base}&amp;h={b["id"]}">'
+                f'<span class="hs-next-k">{"Homework · " if is_hw else ""}{"Carry on" if n_done else "Start"}</span>'
+                f'<span class="hs-next-t">{E(b["title"])}</span>'
+                f'<span class="hs-next-p">Part {n_done + 1} of {n_parts} · {E(part[1])}</span>'
+                f'<span class="hs-bar light"><i style="width:{pct}%"></i></span>'
+                f'<span class="hs-next-go">{"Carry on" if n_done else "Open it"}'
+                f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["arrow"]}</svg></span></a>')
+    return (f'<h2>Handouts</h2>{hero}'
+            f'<p class="hs-sum"><strong>{finished} of {total}</strong> finished · one part at a time, nothing is timed,'
+            f' and what you write is saved as you go.</p>'
+            f'<div class="hs-shelf">{cards}</div>'
+            f'<details class="hs-how"><summary>How handouts work</summary><p>Answer every box in a part and check it:'
+            f' you see how you did straight away, and the next part opens. A booklet set as homework has to be'
+            f' finished before the next one opens.</p></details>')
 
 
 def short_title(t):
@@ -4214,23 +4281,46 @@ def portal_tests(db, s, token, query):
         tests = core.digital_tests(db, level_id, published_only=True)
         done = {a["test_id"]: a for a in core.student_attempts(db, s["id"])}
         if not tests:
-            return ('<h2>Tests</h2><div class="card"><p>'
-                    'No tests yet. Your teacher will put one here.</p></div>')
-        cards = ""
+            return ('<h2>Tests</h2><div class="empty-state">' + look_icon("clipboard", "empty-ico")
+                    + '<p><strong>No tests yet.</strong><br>Your teacher will put one here.</p></div>')
+        cfg = core.load_config()
+        due = {}
+        for r in db.execute("SELECT test_id, due_at FROM assignments WHERE group_id=? AND published=1"
+                            " AND test_id IS NOT NULL", (s["group_id"],)):
+            if r["due_at"] and (r["test_id"] not in due or r["due_at"] > due[r["test_id"]]):
+                due[r["test_id"]] = r["due_at"]
+        cards, sat = "", 0
         for t in tests:
             a = done.get(t["id"])
-            sub = (f'{a["score"]} of {a["total"]}' if a else "%d questions" % t["n"])
-            cards += (f'<a class="tile small" href="{base}&amp;t={t["id"]}">'
-                      f'<div class="tile-title">{E(t["title"])}</div>'
-                      f'<div class="sub">{sub}</div></a>')
+            homework = ""
+            if t["id"] in due and not a:
+                day, rel = due_words(due[t["id"]], cfg)
+                late = rel.endswith("ago") or rel == "yesterday"
+                homework = (f'<span class="hs-pill{" late" if late else ""}">Homework · '
+                            f'{"was due" if late else "due"} {E(rel)}</span>')
+            if a:
+                sat += 1
+                pct = round(100 * a["score"] / a["total"]) if a["total"] else 0
+                state = f'{look_icon("check", "hs-done")}Done · {a["score"]} of {a["total"]} right'
+                bar = f'<span class="hs-bar" role="img" aria-label="{pct}% right"><i style="width:{pct}%"></i></span>'
+                cls = "done"
+            else:
+                state = f'{t["n"]} questions · not taken yet'
+                bar, cls = "", "new"
+            cards += (f'<a class="hs-card {cls}" href="{base}&amp;t={t["id"]}"><span class="hs-badge ico">'
+                      f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["clipboard"]}</svg></span>'
+                      f'<span class="hs-body"><span class="hs-name">{E(t["title"])}</span>{homework}{bar}'
+                      f'<span class="hs-state">{state}</span></span></a>')
         past = ""
         for a in core.student_attempts(db, s["id"])[:8]:
-            past += (f'<li>{E(a["title"])} &mdash; <strong>{a["score"]}</strong> of '
-                     f'{a["total"]} <span class="sub">'
+            pct = round(100 * a["score"] / a["total"]) if a["total"] else 0
+            past += (f'<li class="rs-row"><span class="rs-score">{pct}%</span>'
+                     f'<span class="rs-name">{E(a["title"])}</span>'
+                     f'<span class="rs-meta"><strong>{a["score"]}</strong> of {a["total"]} · '
                      f'{E((a["finished_at"] or "")[:10])}</span></li>')
-        return (f'<h2>Tests</h2><div class="tiles">{cards}</div>'
-                + (f'<h2 style="margin-top:22px">Your results</h2>'
-                   f'<ul class="attn">{past}</ul>' if past else ""))
+        return (f'<h2>Tests</h2><p class="hs-sum"><strong>{sat} of {len(tests)}</strong> taken · marked the moment'
+                f' you hand it in.</p><div class="hs-shelf">{cards}</div>'
+                + (f'<h2>Your results</h2><ul class="rs-list">{past}</ul>' if past else ""))
 
     t = db.execute("SELECT * FROM dtests WHERE id=? AND published=1", (tid,)).fetchone()
     if not t:
@@ -4486,7 +4576,7 @@ def portal_write(db, s, token, query):
             "SELECT * FROM submissions WHERE student_id=? AND kind='text'",
             (s["id"],))}
         if not open_tasks:
-            return ('<h2>Writing</h2><div class="card"><p>No writing task open just '
+            return ('<h2>Writing</h2><div class="card empty-card"><p>No writing task open just '
                     'now. When your teacher sets one it appears here.</p></div>')
         cards = ""
         for a in open_tasks:
@@ -4801,7 +4891,7 @@ def portal_class(db, s, token, scope="class"):
     champ = core.championship(db)
     if not champ["started"]:
         return f"""<h2>Championship</h2>
-<div class="card"><p>The championship has not started yet.
+<div class="card empty-card"><p>The championship has not started yet.
 Your teacher will start it soon.</p></div>
 <h2>Where you are</h2>
 {standing_line(db, s) or '<p class="sub">Nothing marked yet.</p>'}"""
@@ -4947,7 +5037,7 @@ an average score of {fmt(st["average"])} out of 10, and
 <h2>In the classroom</h2>
 <div class="grid">{mark_cards}</div>
 <div class="tablewrap">{"<table>" + recent + "</table>" if recent
-   else '<div class="card"><p class="sub">No lessons marked yet.</p></div>'}</div>
+   else '<div class="card empty-card"><p class="sub">No lessons marked yet.</p></div>'}</div>
 <h2>Homework, piece by piece</h2>
 <div class="card">{charts.score_line(st["timeline"], band=band)}
 <div class="legend"><span><i style="background:var(--accent)"></i>their trend</span>
@@ -5253,7 +5343,7 @@ table starts again every Monday; a step you have passed stays passed.</p>
             return (f"<h2>{KIND_NAME[kind]}</h2><p class=\"sub\">Pick a book. Each "
                     f"one is a ladder: pass a step to open the next.</p>"
                     + (f'<div class="tiles">{cards}</div>' if cards else
-                       '<div class="card"><p class="flush">No lists here yet. Your '
+                       '<div class="card empty-card"><p class="flush">No lists here yet. Your '
                        'teacher will add some.</p></div>')
                     + f'<p class="gap-4"><a class="tab" href="{base}">Back to Play</a></p>')
 
@@ -5281,7 +5371,7 @@ table starts again every Monday; a step you have passed stays passed.</p>
                 + (f'<p class="sub">Step {min(done + 1, len(chain))} of {len(chain)} '
                    f'&middot; {done} passed</p>' if chain else "")
                 + (f'<div class="steps">{steps}</div>' if steps else
-                   '<div class="card"><p class="flush">No lists here yet. Your '
+                   '<div class="card empty-card"><p class="flush">No lists here yet. Your '
                    'teacher will add some.</p></div>')
                 + f'<p class="gap-4"><a class="tab" href="{back}">Back</a></p>')
 
@@ -5316,10 +5406,10 @@ table starts again every Monday; a step you have passed stays passed.</p>
 {banner}
 <div class="playpick">{doors}</div>
 <h3 class="gap-4">This week's champions</h3>
-<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
-<th class="num">Passed</th><th class="num">Points</th></tr>
-{rows or '<tr><td colspan="4" class="sub">Nobody has played yet this week.</td></tr>'}
-</table></div>
+{f'''<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
+<th class="num">Passed</th><th class="num">Points</th></tr>{rows}</table></div>''' if rows else
+ '<div class="empty-state">' + look_icon("trophy", "empty-ico")
+ + '<p><strong>Nobody has played yet this week.</strong><br>Pass a step and your name goes here first.</p></div>'}
 <p class="sub gap-3">Each section is a ladder: pass a step to open the next one.
 Passing means {core.SOLO_PASS}% right &mdash; {core.pass_mark(core.SOLO_ROUND)} out of
 {core.SOLO_ROUND}. The table counts the steps you passed this week and starts again
@@ -6378,7 +6468,7 @@ def rating_table(db, rows, show_group=False):
 def improved_table(db, rows):
     """Ranked on gain alone - the one table a weaker student can win."""
     if not rows:
-        return ('<div class="card"><p class="sub">Nothing to compare '
+        return ('<div class="card empty-card"><p class="sub">Nothing to compare '
                 'yet. It needs a student who went up, with at least two graded pieces '
                 'this month and two the month before.</p></div>')
     out = ""
@@ -6543,7 +6633,7 @@ def view_reteach(req, db):
                  f'{core.RETEACH_MIN_SEEN} times between them and the class is '
                  f'getting it right {core.RETEACH_HARD}% of the time or less.</p>')
     else:
-        words = ('<div class="card"><p class="flush">Nothing to report yet. '
+        words = ('<div class="card empty-card"><p class="flush">Nothing to report yet. '
                  'Words appear here once the class has answered them enough '
                  'times for the figure to mean anything.</p></div>')
 
@@ -6567,7 +6657,7 @@ def view_reteach(req, db):
                  f'<p class="sub gap-2">Passing a step is {core.SOLO_PASS}% right. '
                  f'A step needs four rounds before it is judged.</p>')
     else:
-        steps = ('<div class="card"><p class="flush">Nobody in this class has '
+        steps = ('<div class="card empty-card"><p class="flush">Nobody in this class has '
                  'finished enough rounds in Play yet.</p></div>')
 
     # ---- the students
@@ -6601,7 +6691,7 @@ def view_reteach(req, db):
                       f'<div class="sub">{why}</div></div></div>')
         students = herd + f'<div class="card">{cards}</div>'
     else:
-        students = herd or ('<div class="card"><p class="flush">Nobody in this '
+        students = herd or ('<div class="card empty-card"><p class="flush">Nobody in this '
                             'class is slipping quietly.</p></div>')
 
     body = f"""<h1>What to reteach</h1>
@@ -7167,7 +7257,7 @@ def scores_panel(db, gid, students, q):
 
     if not tid:
         return (adder + (f'<div class="steps gap-3">{listing}</div>' if listing
-                else '<div class="card"><p class="flush">No class tests for '
+                else '<div class="card empty-card"><p class="flush">No class tests for '
                      'this class yet.</p></div>'))
 
     test = db.execute("SELECT * FROM class_tests WHERE id=?", (tid,)).fetchone()
@@ -7309,7 +7399,7 @@ keeps its reason.</p></div></details>
 <h2 class="gap-4">Who has left</h2>
 {'<div class="tablewrap"><table class="rank"><tr><th>Student</th><th>Class</th>'
  '<th>When</th><th>Why</th></tr>' + rows + '</table></div>' if rows else
- '<div class="card"><p class="flush">Nobody recorded yet. From now on, every '
+ '<div class="card empty-card"><p class="flush">Nobody recorded yet. From now on, every '
  'time a student stops coming, put them here — a retention rate cannot be '
  'worked out from anything else, and in six months this is the only place '
  'the answer will exist.</p></div>'}"""
@@ -7755,7 +7845,7 @@ def view_parents(req, db):
     {button}
   </div>
   {why_not}
-  {cards or '<div class="card"><p class="flush">No classes with students yet.</p></div>'}
+  {cards or '<div class="card empty-card"><p class="flush">No classes with students yet.</p></div>'}
 </form>
 <h2>Write to all parents</h2>
 <div class="card"><form method="post" action="/parents/say">
@@ -9047,23 +9137,97 @@ def view_export(req, db):
                  ("Content-Length", str(len(payload)))], payload
 
 
+# ------------------------------------------------------------- the shelves
+# Materials is a tree: level, collection, section, unit. Every step is a set of
+# cards that say what they hold and how much room it takes; the last step is the
+# files, each a row that can be ticked, and a page of them can go in one go.
+
+SECTION_LOOKS = {
+    "Unit handouts": ("file", "plum"), "Listening audios": ("headphones", "blue"),
+    "Workbook audios": ("headphones", "green"), "Reading plus": ("book", "amber"),
+    "Academic skills": ("cap", "plum"), "Unit vocabularies": ("list", "green"),
+    "Unit tests": ("clipboard", "rose"), "Reading": ("book", "amber"), "Listening": ("headphones", "blue"),
+    "Vocabulary": ("list", "green"), "Grammar": ("layers", "plum"), "Writing": ("file", "amber"),
+    "Paper": ("file", "plum"), "Audio": ("headphones", "blue"), "Answer key": ("check", "green"),
+}
+COLLECTION_LOOKS = {"empower": ("book", "plum"), "selfstudy": ("user", "blue"), "practice": ("clipboard", "amber")}
+LEVEL_TONES = ["green", "blue", "plum", "amber", "rose", "plum"]
+FILE_KINDS = [  # (extensions, what it is, drawing, colour)
+    ((".mp3", ".m4a", ".wav", ".ogg", ".aac", ".wma"), "Audio", "headphones", "blue"),
+    ((".pdf",), "PDF", "file", "rose"),
+    ((".doc", ".docx", ".odt", ".rtf", ".txt"), "Document", "file", "plum"),
+    ((".ppt", ".pptx", ".key", ".odp"), "Slides", "slides", "amber"),
+    ((".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"), "Picture", "image", "green"),
+    ((".mp4", ".mov", ".avi", ".mkv", ".webm"), "Video", "video", "amber"),
+]
+
+
+def file_kind(name):
+    low = (name or "").lower()
+    for exts, label, icon, tone in FILE_KINDS:
+        if low.endswith(exts):
+            return label, icon, tone
+    return "File", "file", "plum"
+
+
+def size_of(rows):
+    return sum(r["size"] or 0 for r in rows)
+
+
+def files_meta(rows):
+    """'20 files · 40.2 MB', or 'Empty'."""
+    n = len(rows)
+    if not n:
+        return "Empty"
+    return "%d file%s · %s" % (n, "" if n == 1 else "s", core.human_size(size_of(rows)))
+
+
+def shelf_card(href, name, meta, icon=None, tone="plum", empty=False, badge=None, small=False):
+    """A step down the tree: a drawing (or a level's letters), the name, what it holds."""
+    mark = (f'<span class="lvl-badge">{E(badge)}</span>' if badge
+            else look_icon(icon) if icon else "")
+    return (f'<a class="shelf t-{tone}{" empty" if empty else ""}{" small" if small else ""}" href="{href}">'
+            f'{mark}<span class="shelf-text"><span class="shelf-name">{name}</span>'
+            f'<span class="shelf-meta">{E(meta)}</span></span>'
+            f'<svg class="shelf-go" viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["chevron"]}</svg></a>')
+
+
+def shelf_grid(cards, small=False):
+    return f'<div class="shelves{" small" if small else ""}">{cards}</div>'
+
+
 def crumbs(db, level_id, coll, cat, unit, base):
-    bits = [f'<a class="crumb" href="{base[:-1]}">All sections</a>']
+    """Where you are, every step a way back up."""
+    bits = [f'<a href="/materials">All levels</a>']
+    if level_id:
+        bits.append(f'<a href="{base[:-1]}">{E(core.level_name(db, level_id) or "")}</a>')
     if coll:
-        bits.append(f'<a class="crumb" href="{base}c={coll}">'
-                    f'{E(core.collection_label(coll))}</a>')
+        bits.append(f'<a href="{base}c={coll}">{E(core.collection_label(coll))}</a>')
     if cat:
-        bits.append(f'<a class="crumb" href="{base}c={coll}&amp;s={E(cat)}">{E(cat)}</a>')
+        bits.append(f'<a href="{base}c={coll}&amp;s={urllib.parse.quote(cat)}">{E(cat)}</a>')
     if unit is not None:
-        bits.append("Welcome" if unit == 0
+        bits.append("No unit" if unit == -1 else "Welcome" if unit == 0
                     else "%s %d" % (core.unit_word(coll), unit))
-    return '<p class="sub">' + " &rsaquo; ".join(bits) + "</p>"
+    last = bits.pop()
+    sep = '<span class="crumb-sep" aria-hidden="true">›</span>'
+    here = re.sub(r"<a [^>]*>(.*)</a>", r"\1", last)
+    return ('<nav class="crumbs">' + sep.join(bits + [f'<span class="here">{here}</span>']) + "</nav>")
 
 
-def tile(href, title, sub, small=False, empty=False):
-    return (f'<a class="tile{" small" if small else ""}{" empty" if empty else ""}"'
-            f' href="{href}"><div class="tile-title">{title}</div>'
-            f'<div class="sub">{sub}</div></a>')
+def wipe_form(back, rows, scope, what):
+    """The one button that empties the place you are looking at - this level's
+    own files only (shared files stay; they are deleted by ticking them)."""
+    if not rows:
+        return ""
+    fields = "".join(f'<input type="hidden" name="{k}" value="{E(str(v))}">' for k, v in scope.items() if v is not None)
+    n = len(rows)
+    label = "Delete all %d file%s here" % (n, "" if n == 1 else "s")
+    return (f'<form class="wipe" method="post" action="/materials/delete">'
+            f'<input type="hidden" name="back" value="{E(back)}"><input type="hidden" name="what" value="scope">'
+            f'{fields}<div class="wipe-text"><strong>{E(what)}</strong>'
+            f'<span>{E(files_meta(rows))} · files shared with every level stay</span></div>'
+            f'<button class="danger-btn" data-arm="Delete {n} file{"" if n == 1 else "s"} for good? Tap again">'
+            f'{look_icon("trash", "btn-ico")}{label}</button></form>')
 
 
 def unit_files(db, level_id, coll, cat, unit):
@@ -9078,45 +9242,126 @@ def unit_files(db, level_id, coll, cat, unit):
 
 def level_tiles(db, levels):
     """No level picked yet - show the shelves rather than every file at once."""
-    cards = ""
-    for l in levels:
-        n = len(core.materials_at_level(db, l["id"]))
-        cards += tile(f'/materials?level={l["id"]}', E(l["name"]),
-                      "%d files" % n, empty=not n)
-    return ('<p class="sub">Pick a level, or search above.</p>'
-            f'<div class="tiles">{cards}</div>')
+    cards, total = "", []
+    for k, l in enumerate(levels):
+        rows = core.materials_at_level(db, l["id"])
+        total += [r for r in rows if r["level_id"] == l["id"]]
+        initials = "".join(w[0] for w in re.findall(r"[A-Za-z]+", l["name"]))[:2].upper()
+        cards += shelf_card(f'/materials?level={l["id"]}', E(l["name"]), files_meta(rows),
+                            tone=LEVEL_TONES[k % len(LEVEL_TONES)], empty=not rows, badge=initials)
+    shared = [r for r in db.execute("SELECT * FROM materials WHERE active=1 AND level_id IS NULL")]
+    every = total + shared
+    summary = (f'<p class="shelf-sum">{look_icon("folder", "sum-ico")}<span><strong>{len(every)} files</strong>'
+               f' on the shelves · {E(core.human_size(size_of(every)))}'
+               + (f' · {len(shared)} shared with every level' if shared else "") + "</span></p>")
+    return summary + shelf_grid(cards)
 
 
 def shelf_tiles(db, level_id, base):
     """Collections first - the same three steps students take in the bot."""
-    counts = core.collection_counts(db, level_id)
-    cards = "".join(
-        tile(f'{base}c={k}', E(core.collection_label(k)), "%d files" % counts.get(k, 0))
-        for k in core.COLLECTION_ORDER)
-    return f'<div class="tiles">{cards}</div>'
+    cards = ""
+    for k in core.COLLECTION_ORDER:
+        rows = core.materials_at_level(db, level_id, k)
+        icon, tone = COLLECTION_LOOKS.get(k, ("folder", "plum"))
+        cards += shelf_card(f'{base}c={k}', E(core.collection_label(k)), files_meta(rows),
+                            icon=icon, tone=tone, empty=not rows)
+    own = core.materials_scope(db, level_id)
+    name = core.level_name(db, level_id) or "this level"
+    return (crumbs(db, level_id, None, None, None, base) + shelf_grid(cards)
+            + wipe_form(base[:-1], own, {"level": level_id}, "Everything at %s" % name))
 
 
 def section_tiles(db, level_id, coll, base):
-    counts = core.level_counts(db, level_id, coll)
-    cards = "".join(
-        tile(f'{base}c={coll}&amp;s={urllib.parse.quote(name)}', E(name),
-             "%d files" % counts.get(name, 0), empty=not counts.get(name))
-        for name in core.sections(coll))
-    return (crumbs(db, level_id, coll, "", None, base)
-            + f'<div class="tiles">{cards}</div>')
+    cards = ""
+    for name in core.sections(coll):
+        rows = core.materials_at_level(db, level_id, coll, name)
+        icon, tone = SECTION_LOOKS.get(name, ("folder", "plum"))
+        cards += shelf_card(f'{base}c={coll}&amp;s={urllib.parse.quote(name)}', E(name), files_meta(rows),
+                            icon=icon, tone=tone, empty=not rows)
+    own = core.materials_scope(db, level_id, coll)
+    return (crumbs(db, level_id, coll, "", None, base) + shelf_grid(cards)
+            + wipe_form(f"{base}c={coll}", own, {"level": level_id, "c": coll},
+                        "Everything in %s" % core.collection_label(coll)))
 
 
 def test_tiles(db, level_id, coll, base):
-    """Twenty buttons - Test 1 to Test 20 - each holding everything for that test."""
-    have = core.units_across(db, level_id, coll)
+    """Twenty cards - Test 1 to Test 20 - each holding everything for that test."""
     href = f'{base}c={coll}'
-    cards = "".join(
-        tile(f'{href}&amp;u={n}', "Test %d" % n,
-             "%d file%s" % (have[n], "" if have[n] == 1 else "s") if n in have else "empty",
-             small=True, empty=n not in have)
-        for n in core.tests_in_collection(coll))
-    return (crumbs(db, level_id, coll, None, None, base)
-            + f'<div class="tiles">{cards}</div>')
+    cards = ""
+    for n in core.tests_in_collection(coll):
+        rows = core.files_in_test(db, level_id, coll, n)
+        cards += shelf_card(f'{href}&amp;u={n}', "Test %d" % n, files_meta(rows), small=True, empty=not rows)
+    own = core.materials_scope(db, level_id, coll)
+    return (crumbs(db, level_id, coll, None, None, base) + shelf_grid(cards, small=True)
+            + wipe_form(href, own, {"level": level_id, "c": coll}, "Every practice test at this level"))
+
+
+def unit_tiles(db, level_id, coll, cat, base):
+    numbers = core.units_for_level(db, level_id)
+    units = core.units_in(db, level_id, coll, cat)
+    if 0 in units:
+        numbers = [0] + numbers
+    href = f'{base}c={coll}&amp;s={urllib.parse.quote(cat)}'
+    cards = ""
+    for n in numbers:
+        rows = core.materials_in_unit(db, level_id, coll, cat, n)
+        cards += shelf_card(f'{href}&amp;u={n}', "Welcome" if n == 0 else "Unit %d" % n, files_meta(rows),
+                            small=True, empty=not rows)
+    loose = [m for m in core.materials_at_level(db, level_id, coll, cat) if not m["unit"]]
+    if loose:
+        cards += shelf_card(f'{href}&amp;u=-1', "No unit", files_meta(loose), small=True)
+    own = core.materials_scope(db, level_id, coll, cat)
+    return (crumbs(db, level_id, coll, cat, None, base) + shelf_grid(cards, small=True)
+            + wipe_form(f"{base}c={coll}&s={urllib.parse.quote(cat)}", own, {"level": level_id, "c": coll, "s": cat},
+                        "Everything in %s" % cat))
+
+
+def file_rows(db, mats, back, show_place=True, show_cat=False):
+    """The files themselves: tick any, tick all, delete the ticked in one go;
+    each row says what the file is and where it is filed."""
+    if not mats:
+        return ('<div class="empty-state">' + look_icon("folder", "empty-ico")
+                + '<p><strong>Nothing here yet.</strong><br>Add a file with the button at the top.</p></div>')
+    rows = ""
+    for m in mats:
+        label, icon, tone = file_kind(m["original_name"] or m["filename"])
+        place = [m["category"]] if show_cat and m["category"] else []
+        if show_place:
+            place.append(core.level_name(db, m["level_id"]) or "All levels")
+        if m["unit"]:
+            place.append("%s %d" % (core.unit_word(m["collection"]), m["unit"]))
+        if m["book"]:
+            place.append(core.book_label(m["book"]))
+        if m["group_id"]:
+            place.append("only " + group_name(db, m["group_id"]))
+        place.append(m["original_name"] or "")
+        note = f'<span class="f-note">{E(m["note"])}</span>' if m["note"] else ""
+        rows += (f'<li class="frow"><label class="pick"><input type="checkbox" name="id" value="{m["id"]}"'
+                 f' data-size="{m["size"] or 0}" aria-label="Tick {E(m["title"])}"></label>'
+                 f'<span class="f-ico t-{tone}" title="{label}"><svg viewBox="0 0 24 24" aria-hidden="true">'
+                 f'{LOOK_ICONS[icon]}</svg></span>'
+                 f'<span class="f-main"><a class="f-name" href="/materials/{m["id"]}/file">{E(m["title"])}</a>'
+                 f'<span class="f-meta"><span class="f-msize">{E(core.human_size(m["size"]))} · </span>'
+                 f'{E(" · ".join(p for p in place if p))}</span>{note}</span>'
+                 f'<span class="f-size">{E(core.human_size(m["size"]))}</span><span class="f-acts">'
+                 + (f'<button type="button" class="f-play" data-play aria-label="Play {E(m["title"])}">'
+                    f'<svg viewBox="0 0 24 24" aria-hidden="true"><path class="pl" d="M8 5.5v13l10.5-6.5z"/>'
+                    f'<path class="pa" d="M8 5.5v13M16 5.5v13"/></svg></button>'
+                    f'<audio class="f-audio" preload="none" src="/materials/{m["id"]}/file"></audio>'
+                    if label == "Audio" else "")
+                 + f'<button class="f-del" name="one" value="{m["id"]}" title="Delete {E(m["title"])}"'
+                 f' aria-label="Delete {E(m["title"])}" data-arm="Delete?">'
+                 f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["trash"]}</svg></button></span></li>')
+    n = len(mats)
+    return (f'<form class="files" method="post" action="/materials/delete" data-files>'
+            f'<input type="hidden" name="back" value="{E(back)}">'
+            f'<div class="files-head"><label class="pick all"><input type="checkbox" data-all>'
+            f'<span>Select all</span></label>'
+            f'<span class="files-count" data-count data-total="{E(files_meta(mats))}">{E(files_meta(mats))}</span>'
+            f'<button class="danger-btn" name="what" value="picked" data-picked disabled'
+            f' data-arm="Delete the ticked files for good? Tap again">'
+            f'{look_icon("trash", "btn-ico")}<span data-label>Delete selected</span></button></div>'
+            f'<ul class="filelist">{rows}</ul></form>')
 
 
 def test_files(db, level_id, coll, unit, base):
@@ -9124,44 +9369,13 @@ def test_files(db, level_id, coll, unit, base):
     rows = core.files_in_test(db, level_id, coll, unit)
     order = {name: i for i, name in enumerate(core.sections(coll))}
     rows = sorted(rows, key=lambda m: (order.get(m["category"], 99), m["title"]))
-    if not rows:
-        body = ('<div class="card"><p class="sub">Nothing here yet.'
-                '</p></div>')
-    else:
-        items = ""
-        for m in rows:
-            kind = m["category"] or "File"
-            size = "%.1f MB" % ((m["size"] or 0) / 1048576.0)
-            player = ""
-            if is_audio(m["original_name"] or m["filename"]):
-                player = (f'<audio controls preload="none" class="voice"'
-                          f' src="/materials/{m["id"]}/file"></audio>')
-            items += (f'<div class="testfile"><div>'
-                      f'<span class="pill mute">{E(kind)}</span> '
-                      f'<a href="/materials/{m["id"]}/file">{E(m["title"])}</a>'
-                      f'<div class="sub">{E(size)}</div></div>{player}</div>')
-        body = f'<div class="card">{items}</div>'
-    return crumbs(db, level_id, coll, None, unit, base) + body
+    back = f"{base}c={coll}&u={unit}"
+    own = core.materials_scope(db, level_id, coll, None, unit)
+    return (crumbs(db, level_id, coll, None, unit, base) + file_rows(db, rows, back, show_place=False, show_cat=True)
+            + wipe_form(back, own, {"level": level_id, "c": coll, "u": unit}, "Everything for Test %d" % unit))
 
 
-def unit_tiles(db, level_id, coll, cat, base):
-    units = core.units_in(db, level_id, coll, cat)
-    numbers = core.units_for_level(db, level_id)
-    if 0 in units:
-        numbers = [0] + numbers
-    href = f'{base}c={coll}&amp;s={urllib.parse.quote(cat)}'
-    cards = "".join(
-        tile(f'{href}&amp;u={n}', "Welcome" if n == 0 else "Unit %d" % n,
-             "%d files" % units.get(n, 0), small=True, empty=n not in units)
-        for n in numbers)
-    loose = [m for m in core.materials_at_level(db, level_id, coll, cat) if not m["unit"]]
-    if loose:
-        cards += tile(f'{href}&amp;u=-1', "No unit", "%d files" % len(loose), small=True)
-    return (crumbs(db, level_id, coll, cat, None, base)
-            + f'<div class="tiles">{cards}</div>')
-
-
-def material_hits(db, q, level_id):
+def material_hits(db, q, level_id, back):
     """Type a track number and get the file - faster than walking the tree."""
     like = "%" + q.replace("%", "") + "%"
     sql = ("SELECT * FROM materials WHERE active=1 AND (title LIKE ? OR original_name LIKE ?)")
@@ -9169,32 +9383,15 @@ def material_hits(db, q, level_id):
     if level_id:
         sql += " AND (level_id IS NULL OR level_id IS ?)"
         args.append(level_id)
-    mats = db.execute(sql + " ORDER BY title LIMIT 200", args).fetchall()
-    head = f'<p class="sub">{len(mats)} match{"" if len(mats) == 1 else "es"} for "{E(q)}"</p>'
-    return material_table(db, mats, head)
+    mats = db.execute(sql + " ORDER BY title LIMIT 500", args).fetchall()
+    head = (f'<p class="shelf-sum">{look_icon("search", "sum-ico")}<span><strong>{len(mats)}'
+            f' match{"" if len(mats) == 1 else "es"}</strong> for “{E(q)}”'
+            + (" (the first 500)" if len(mats) == 500 else "") + "</span></p>")
+    return head + file_rows(db, mats, back, show_cat=True)
 
 
-def material_table(db, mats, head):
-    if not mats:
-        return head + ('<div class="card"><p>Nothing here yet.</p></div>')
-    rows = ""
-    for m in mats:
-        scope = core.level_name(db, m["level_id"]) or "All levels"
-        if m["unit"]:
-            scope += " · Unit %d" % m["unit"]
-        if m["book"]:
-            scope += " · " + core.book_label(m["book"])
-        if m["group_id"]:
-            scope += " · " + group_name(db, m["group_id"])
-        note = (f'<div class="sub gap-1">{E(m["note"])}</div>'
-                if m["note"] else "")
-        rows += (f'<tr><td><a href="/materials/{m["id"]}/file">{E(m["title"])}</a>{note}</td>'
-                 f'<td>{E(scope)}</td><td class="sub">{E(m["original_name"] or "")}</td>'
-                 f'<td>{E(core.human_size(m["size"]))}</td>'
-                 f'<td><form method="post" action="/materials/{m["id"]}/delete">'
-                 f'<button class="ghost">Remove</button></form></td></tr>')
-    return (head + '<div class="tablewrap"><table><tr><th>Title</th><th>Level</th>'
-            '<th>File</th><th>Size</th><th></th></tr>' + rows + "</table></div>")
+def material_table(db, mats, head, back):
+    return head + file_rows(db, mats, back, show_place=False)
 
 
 def view_materials(req, db):
@@ -9205,7 +9402,7 @@ def view_materials(req, db):
 
     def tab(href, label, on):
         return f'<a class="tab{" on" if on else ""}" href="{href}">{E(label)}</a>'
-    tabs = ('<div class="tabs">' + tab("/materials", "All levels", only is None)
+    tabs = ('<div class="tabs levels">' + tab("/materials", "All levels", only is None)
             + "".join(tab(f'/materials?level={l["id"]}', l["name"], only == l["id"])
                       for l in levels) + "</div>")
 
@@ -9219,32 +9416,42 @@ def view_materials(req, db):
     if not base.endswith(("?", "&")):
         base += "&"
 
-    search = f'''<div class="card" style="padding:12px 14px">
-<form method="get" action="/materials" class="inline">
+    # this very view, so that a delete brings you back to it, not to the top
+    here = "/materials?" + urllib.parse.urlencode(
+        [(k, v) for k, v in (("level", only), ("q", q), ("c", coll), ("s", cat), ("u", unit)) if v not in (None, "")])
+    search = f'''<form method="get" action="/materials" class="shelf-search" role="search">
   {f'<input type="hidden" name="level" value="{only}">' if only else ""}
-  <input name="q" value="{E(q)}" placeholder="Search by name, e.g. 8.03 or transcripts"
-         style="min-width:280px">
-  <button class="ghost">Search</button>
-  {f'<a class="mini" href="{base[:-1]}">Clear</a>' if q else ""}
-</form></div>'''
+  {look_icon("search", "search-ico")}
+  <input name="q" value="{E(q)}" placeholder="Search by name or file, e.g. 8.03 or transcripts" aria-label="Search the shelves">
+  {f'<a class="search-clear" href="{base[:-1]}">Clear</a>' if q else ""}
+</form>'''
 
     if q:
-        blocks = search + material_hits(db, q, only)
+        blocks = material_hits(db, q, only, here)
     elif not only:
-        blocks = search + level_tiles(db, levels)
+        blocks = level_tiles(db, levels)
     elif not coll or coll not in core.COLLECTIONS:
-        blocks = search + shelf_tiles(db, only, base)
+        blocks = shelf_tiles(db, only, base)
     elif core.is_test_shelf(coll):
-        blocks = search + (test_tiles(db, only, coll, base) if unit is None
-                           else test_files(db, only, coll, unit, base))
+        blocks = (test_tiles(db, only, coll, base) if unit is None
+                  else test_files(db, only, coll, unit, base))
     elif not cat:
-        blocks = search + section_tiles(db, only, coll, base)
+        blocks = section_tiles(db, only, coll, base)
     elif unit is None and core.units_in(db, only, coll, cat):
-        blocks = search + unit_tiles(db, only, coll, cat, base)
+        blocks = unit_tiles(db, only, coll, cat, base)
     else:
-        blocks = search + material_table(
-            db, unit_files(db, only, coll, cat, unit),
-            crumbs(db, only, coll, cat, unit, base))
+        rows = unit_files(db, only, coll, cat, unit)
+        own = core.materials_scope(db, only, coll, cat, unit)
+        what = "Everything in %s" % (cat if unit is None else "%s, %s" % (
+            cat, "no unit" if unit == -1 else "Welcome" if unit == 0 else "Unit %d" % unit))
+        blocks = (material_table(db, rows, crumbs(db, only, coll, cat, unit, base), here)
+                  + wipe_form(here, own, {"level": only, "c": coll, "s": cat, "u": unit}, what))
+    gone = (req["query"].get("gone", [""])[0] or "").strip()
+    freed = (req["query"].get("freed", [""])[0] or "").strip()
+    flash = (f'<div class="flash ok shelf-flash">Deleted {int(gone)} file{"" if gone == "1" else "s"}'
+             f' · {E(core.human_size(int(freed)))} freed</div>'
+             if gone.isdigit() and freed.isdigit() else "")
+    blocks = flash + search + blocks
 
     lopts = ('<option value="">All levels</option>'
              + "".join(f'<option value="{l["id"]}">{E(l["name"])}</option>' for l in levels))
@@ -9262,12 +9469,13 @@ def view_materials(req, db):
              + "".join(f'<option value="{k}">{E(v)}</option>'
                        for k, v in core.BOOKS.items()))
     sections_json = json.dumps({k: core.sections(k) for k in core.COLLECTION_ORDER})
-    body = f"""<h1>Materials</h1>
+    body = f"""<div class="pagehead"><div><h1>Materials</h1>
 <p class="sub">Filed by level, then collection, then section — the same tree students
-walk through in the bot.</p>
+walk through in the bot.</p></div>
+<div class="actions"><a class="btn" href="#addfile" data-open="addfile">{look_icon("upload", "btn-ico")}Add a file</a></div></div>
 {tabs}
 {blocks}
-<details class="adder"><summary>Add a file</summary>
+<details class="adder" id="addfile"><summary>Add a file</summary>
 <div class="card"><form method="post" action="/materials/new" enctype="multipart/form-data">
 <div class="inline" style="margin-bottom:12px">
 <label class="f">Title<input name="title" placeholder="Unit 5 handout" required></label>
@@ -9339,14 +9547,66 @@ def act_new_material(req, db):
 
 
 def act_delete_material(req, db, mid):
-    row = db.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
-    if row:
-        path = os.path.join(core.MATERIAL_DIR, row["filename"])
-        if os.path.exists(path):
-            os.remove(path)
-        db.execute("DELETE FROM materials WHERE id=?", (mid,))
-        db.commit()
-    return redirect("/materials")
+    """The old one-file button (kept for any page still carrying it): it now
+    comes back to where it was pressed."""
+    back = (req["form"].get("back", ["/materials"])[0] or "/materials")
+    gone, freed = core.delete_materials(db, [mid])
+    return redirect(_after_delete(back, gone, freed))
+
+
+def _after_delete(back, gone, freed):
+    back = back if back.startswith("/materials") else "/materials"
+    back = re.sub(r"[?&](gone|freed)=\d+", "", back)
+    return back + ("&" if "?" in back else "?") + "gone=%d&freed=%d" % (gone, freed)
+
+
+def act_delete_materials(req, db):
+    """Delete several files at once: the ticked ones, one row's own button, or
+    everything at the place the page shows (this level's own files only).
+    The page's button asks twice; without the page's script the question comes
+    as a page of its own, so nothing is ever deleted by one stray click."""
+    f = req["form"]
+    back = (f.get("back", ["/materials"])[0] or "/materials")
+    if not back.startswith("/materials"):
+        back = "/materials"
+    what = (f.get("what", [""])[0] or "")
+    one = (f.get("one", [""])[0] or "")
+    if one.isdigit():
+        ids = [int(one)]
+    elif what == "picked":
+        ids = [int(x) for x in f.get("id", []) if x.isdigit()]
+    elif what == "scope":
+        def num(k):
+            v = (f.get(k, [""])[0] or "").strip()
+            return int(v) if v.lstrip("-").isdigit() else None
+        level = num("level")
+        if level is None:
+            return redirect(back)                 # never "every level at once"
+        coll = (f.get("c", [""])[0] or "") or None
+        cat = (f.get("s", [""])[0] or "") or None
+        ids = [r["id"] for r in core.materials_scope(db, level, coll, cat, num("u"))]
+    else:
+        ids = []
+    rows = [r for r in (db.execute("SELECT * FROM materials WHERE id=?", (i,)).fetchone() for i in ids) if r]
+    if not rows:
+        return redirect(back)
+    if (f.get("confirm", [""])[0] or "") != "yes":
+        keep = "".join(f'<input type="hidden" name="{E(k)}" value="{E(v)}">'
+                       for k, vals in f.items() if k != "confirm" for v in vals)
+        names = "".join(f"<li>{E(r['title'])} <span class='sub'>{E(r['original_name'] or '')}</span></li>"
+                        for r in rows[:12])
+        more = f"<li class='sub'>and {len(rows) - 12} more</li>" if len(rows) > 12 else ""
+        body = (f'<div class="confirm-card">{look_icon("trash", "confirm-ico")}'
+                f'<h1>Delete {len(rows)} file{"" if len(rows) == 1 else "s"}?</h1>'
+                f'<p class="sub">{E(files_meta(rows))}. They come off the shelves and out of the bot for good;'
+                f' your own copies on the computer are not touched.</p><ul class="confirm-list">{names}{more}</ul>'
+                f'<form method="post" action="/materials/delete" class="inline">{keep}'
+                f'<input type="hidden" name="confirm" value="yes">'
+                f'<button class="danger-btn">{look_icon("trash", "btn-ico")}Yes, delete them</button>'
+                f'<a class="btn ghost" href="{E(back)}">Keep them</a></form></div>')
+        return html_response(page("Delete files", body, "Materials"))
+    gone, freed = core.delete_materials(db, [r["id"] for r in rows])
+    return redirect(_after_delete(back, gone, freed))
 
 
 def serve_material(db, mid, student=None):
@@ -9479,24 +9739,24 @@ def view_tests(req, db):
     body_rows = ""
     for t in rows:
         ready = t["n"] and t["n"] == t["keyed"]
-        state = ('<span class="pill">published</span>' if t["published"]
-                 else '<span class="pill mute">draft</span>')
-        key = (f'<span class="pill good">key complete</span>' if ready
-               else f'<span class="pill risk">{t["keyed"]} of {t["n"]} answers</span>')
+        state = ('<span class="hb-chip open">published</span>' if t["published"]
+                 else '<span class="hb-chip">draft</span>')
+        key = ('<span class="hb-chip set">key complete</span>' if ready
+               else f'<span class="hb-chip risk">{t["keyed"]} of {t["n"]} answers</span>')
         sat = db.execute("SELECT COUNT(*) c FROM dattempts WHERE test_id=?"
                          " AND finished_at IS NOT NULL", (t["id"],)).fetchone()["c"]
-        body_rows += (f'<tr><td><a href="/tests/{t["id"]}">{E(t["title"])}</a></td>'
-                      f'<td class="sub">{E(t["level"] or "any level")}</td>'
-                      f'<td>{t["n"]}</td><td>{key}</td><td>{state}</td>'
-                      f'<td class="sub">{sat} sat</td></tr>')
+        body_rows += (f'<li class="hb-row"><span class="hb-badge ico">'
+                      f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["clipboard"]}</svg></span>'
+                      f'<span class="hb-main"><a class="hb-title" href="/tests/{t["id"]}">{E(t["title"])}</a>'
+                      f'<span class="hb-meta">{E(t["level"] or "any level")} · {t["n"]} questions · {sat} sat'
+                      f' {key} {state}</span></span>'
+                      f'<span class="hb-acts"><a class="btn ghost small" href="/tests/{t["id"]}">Open</a></span></li>')
 
-    body = f"""{handouts_list(db)}<h1>Digital tests</h1>
+    body = f"""{handouts_list(db)}<h1 class="h1-next">Digital tests</h1>
 <p class="sub">A test taken on the phone and marked the moment it is handed in. The
 questions come out of the practice book; the answer key does not, so a test cannot be
 published until every answer has been set.</p>
-<div class="tablewrap"><table><tr><th>Test</th><th>Level</th><th>Questions</th>
-<th>Answer key</th><th></th><th></th></tr>
-{body_rows or '<tr><td colspan=6 class="sub">None yet.</td></tr>'}</table></div>
+{f'<ul class="hb-list boxed">{body_rows}</ul>' if body_rows else '<p class="hb-none">None yet.</p>'}
 <h2>Load a test</h2>
 <div class="card"><form method="post" action="/tests/new" enctype="multipart/form-data"
  class="inline">
@@ -9536,37 +9796,58 @@ def handouts_list(db):
             " WHERE a.test_id=? AND a.published=1 ORDER BY g.name", (t["id"],))]
         parts = len(handout_parts(t["layout"] or "")[1])
         n = db.execute("SELECT COUNT(*) FROM dquestions WHERE test_id=?", (t["id"],)).fetchone()[0]
-        where = ("set to " + ", ".join(sets)) if sets else (
-            "open to the level as practice" if t["published"] else "not set yet")
-        return (f'<tr><td><strong>{E(t["title"])}</strong></td>'
-                f'<td class="sub">{parts} parts &middot; {n} boxes</td>'
-                f'<td class="sub">{E(where)}</td>'
-                f'<td><a class="linky" href="/tests/{t["id"]}/look">Look through</a> '
-                f'&middot; <a class="linky" href="/tests/{t["id"]}">Key</a></td></tr>')
-    dest = "".join(row(t) for t in rows if t["series"] == "destination")
-    workbook = "".join(row(t) for t in rows if t["series"] == "workbook")
-    course = ""
-    level = None
+        if sets:
+            chip = '<span class="hb-chip set">set to %s</span>' % E(", ".join(sets))
+        elif t["published"]:
+            chip = '<span class="hb-chip open">open to the level as practice</span>'
+        else:
+            chip = '<span class="hb-chip">not set yet</span>'
+        badge = str(t["number"]) if t["number"] else "·"
+        return (f'<li class="hb-row"><span class="hb-badge">{E(badge)}</span>'
+                f'<span class="hb-main"><strong class="hb-title">{E(t["title"])}</strong>'
+                f'<span class="hb-meta">{parts} parts · {n} boxes {chip}</span></span>'
+                f'<span class="hb-acts"><a class="btn ghost small" href="/tests/{t["id"]}/look">Look through</a>'
+                f'<a class="btn ghost small" href="/tests/{t["id"]}">Key</a></span></li>')
+
+    def group(items, boxed=" boxed"):
+        return (f'<ul class="hb-list{boxed}">{"".join(row(t) for t in items)}</ul>' if items
+                else '<p class="hb-none">None on the site yet.</p>')
+
+    levels = []
     for t in rows:
         if t["series"]:
             continue
-        if t["level"] != level:
-            level = t["level"]
-            course += f'<tr><th colspan="4">{E(level or "any level")}</th></tr>'
-        course += row(t)
+        if not levels or levels[-1][0] != t["level"]:
+            levels.append((t["level"], []))
+        levels[-1][1].append(t)
+    course = ""
+    for k, (level, items) in enumerate(levels):
+        set_n = sum(1 for t in items if db.execute(
+            "SELECT 1 FROM assignments WHERE test_id=? AND published=1 LIMIT 1", (t["id"],)).fetchone())
+        tone = LEVEL_TONES[k % len(LEVEL_TONES)]
+        initials = "".join(w[0] for w in re.findall(r"[A-Za-z]+", level or "Any"))[:2].upper()
+        course += (f'<details class="hb-level t-{tone}"><summary><span class="lvl-badge">{E(initials)}</span>'
+                   f'<span class="shelf-text"><span class="shelf-name">{E(level or "any level")}</span>'
+                   f'<span class="shelf-meta">{len(items)} booklet{"" if len(items) == 1 else "s"}'
+                   + (f' · {set_n} set as homework' if set_n else "") + '</span></span>'
+                   f'<svg class="shelf-go" viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["chevron"]}</svg>'
+                   f'</summary>{group(items, "")}</details>')
     how = ("To set a Destination unit, write it in the Destination box on "
            '<a class="linky" href="/assignments">Set homework</a> the way the book names it - '
            "<em>Destination B1, Unit 12</em>. It opens only for the classes it is set to.")
+    total = sum(len(items) for _l, items in levels)
     return f"""<h1>Digital handouts</h1>
+<p class="sub">The course's booklets, done on the phone one part at a time, by level. Open a level to see
+where each booklet is set, look through it as a student does, or check its key.</p>
 <h2>Destination</h2>
 <p class="sub">{how}</p>
-<div class="tablewrap"><table>{dest or '<tr><td class="sub">None yet.</td></tr>'}</table></div>
+{group([t for t in rows if t["series"] == "destination"])}
 <h2>Workbook</h2>
 <p class="sub">A workbook unit on the site is linked from its homework line by itself - <em>Workbook
 unit 1 A&amp;C</em> - for classes of its level. Students do it there, or send photos of the pages.</p>
-<div class="tablewrap"><table>{workbook or '<tr><td class="sub">None yet.</td></tr>'}</table></div>
-<details class="gap-3" style="margin-bottom:var(--sp-6)"><summary>The course booklets ({sum(1 for t in rows if not t["series"])})</summary>
-<div class="tablewrap"><table>{course}</table></div></details>"""
+{group([t for t in rows if t["series"] == "workbook"])}
+<h2>The course booklets <span class="h2-count">{total}</span></h2>
+<div class="hb-levels">{course or '<p class="hb-none">None on the site yet.</p>'}</div>"""
 
 
 def view_handout_look(req, db, tid):
@@ -9618,23 +9899,56 @@ def view_test(req, db, tid):
     qs = core.test_questions(db, tid)
     ready = core.test_ready(db, tid)
 
-    rows = ""
+    # a booklet's boxes come exercise by exercise: "1.3  2 According to..." -
+    # the instruction is said once at the head of its exercise, not on every box
+    groups = []
     for q, opts in qs:
-        if q["kind"] == "typed" or not opts:
-            picks = (f'<input class="typedin" name="q{q["id"]}"'
-                     f' value="{E(q["answer"] or "")}"'
-                     f' placeholder="the answer, or two of them separated by /">')
+        m = re.match(r"(\d+\.\d+)\s{2,}(.*)", q["prompt"] or "", re.S)
+        label, text = (m.group(1), m.group(2)) if m else ("", q["prompt"] or "")
+        if not groups or groups[-1][0] != label:
+            groups.append((label, []))
+        groups[-1][1].append((q, opts, text))
+    rows, unset = "", 0
+    for label, items in groups:
+        head = next((t for _q, _o, t in items if label and t.startswith(label)), "")
+        inner = ""
+        for k, (q, opts, text) in enumerate(items, 1):
+            open_box = q["kind"] == "open"
+            if q["kind"] == "typed" or not opts:
+                picks = (f'<input class="typedin" name="q{q["id"]}" value="{E(q["answer"] or "")}"'
+                         f' placeholder="{"marked by you - leave empty" if open_box else "the answer, or several separated by /"}">')
+            else:
+                picks = '<div class="kq-picks">' + "".join(
+                    f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
+                    f' value="{E(o["letter"])}"{" checked" if q["answer"] == o["letter"] else ""}>'
+                    f'<span><b>{E(o["letter"])}</b> {E(o["text"][:90])}</span></label>'
+                    for o in opts) + '</div>'
+            if open_box and not q["answer"]:
+                flag = '<span class="hb-chip">you mark it</span>'
+            elif not q["answer"]:
+                flag = '<span class="hb-chip risk">no answer</span>'
+                unset += 1
+            else:
+                flag = ""
+            ways = len((q["answer"] or "").split("/")) if q["kind"] == "typed" and q["answer"] else 0
+            if ways > 1:
+                flag += f'<span class="hb-chip set">{ways} ways right</span>'
+            said = "" if (label and text.startswith(label)) or not text else text
+            if label and not said:
+                said = f"Box {k}"
+            pic = (f'<img class="passageimg" src="/testimg/{E(q["image"])}" alt="">' if q["image"] else "")
+            inner += (f'{pic}<div class="kq{" unset" if not q["answer"] and not open_box else ""}'
+                      f'{" bare" if said == f"Box {k}" else ""}">'
+                      f'<span class="kq-n">{q["num"]}</span>'
+                      f'<span class="kq-q">{E(said)}{(" " + flag) if flag else ""}</span>'
+                      f'<span class="kq-a">{picks}</span></div>')
+        if label:
+            rows += (f'<section class="kx"><header class="kx-head"><span class="kx-label">{E(label)}</span>'
+                     f'<span class="kx-text">{E(head[len(label):].strip() if head else "")}</span>'
+                     f'<span class="kx-n">{len(items)} box{"" if len(items) == 1 else "es"}</span></header>'
+                     f'{inner}</section>')
         else:
-            picks = "".join(
-                f'<label class="keypick"><input type="radio" name="q{q["id"]}"'
-                f' value="{E(o["letter"])}"{" checked" if q["answer"] == o["letter"] else ""}>'
-                f'<span><b>{E(o["letter"])}</b> {E(o["text"][:90])}</span></label>'
-                for o in opts)
-        missing = "" if q["answer"] else ' <span class="pill risk">no answer</span>'
-        pic = (f'<img class="passageimg" src="/testimg/{E(q["image"])}" alt="">'
-               if q["image"] else "")
-        rows += (f'{pic}<div class="dq"><div class="dqhead"><b>{q["num"]}</b> '
-                 f'{E(q["prompt"])}{missing}</div>{picks}</div>')
+            rows += f'<section class="kx plain">{inner}</section>'
 
     passage = (f'<div class="card"><div class="sub">The text students read</div>'
                f'<div class="passage">{E(t["passage"])}</div></div>'
@@ -9643,19 +9957,19 @@ def view_test(req, db, tid):
     sat = core.attempts_for_test(db, tid)
     results = ""
     if sat:
-        results = "<h2>Who has sat it</h2><div class='tablewrap'><table>" \
-                  "<tr><th>Student</th><th>Score</th><th>When</th><th></th></tr>"
+        results = f"<h2>Who has sat it <span class='h2-count'>{len(sat)}</span></h2><ul class='rs-list'>"
         for a in sat:
+            pct = round(100 * (a["score"] or 0) / a["total"]) if a["total"] else 0
             results += (
-                f'<tr><td>{E(a["name"])}</td>'
-                f'<td><strong>{a["score"]}</strong> of {a["total"]}</td>'
-                f'<td class="sub">{E((a["finished_at"] or "")[:16].replace("T", " "))}</td>'
-                f'<td class="right"><form method="post" '
-                f'action="/tests/{tid}/attempt/{a["id"]}/delete" '
+                f'<li class="rs-row with-act"><span class="rs-score">{pct}%</span>'
+                f'<span class="rs-name">{E(a["name"])}</span>'
+                f'<span class="rs-meta"><strong>{a["score"]}</strong> of {a["total"]} · '
+                f'{E((a["finished_at"] or "")[:16].replace("T", " "))}</span>'
+                f'<form class="rs-act" method="post" action="/tests/{tid}/attempt/{a["id"]}/delete" '
                 f'onsubmit="return confirm(\'Remove this sitting? '
                 f'It is the one the league counts.\')">'
-                f'<button class="ghost small">Remove</button></form></td></tr>')
-        results += "</table></div>"
+                f'<button class="ghost small">Remove</button></form></li>')
+        results += "</ul>"
         written = sum(1 for p in core.written_answers(db, tid)
                       for a in p["answers"] if a["text"])
         if written:
@@ -9700,37 +10014,43 @@ time set, a bar counts down on screen and the paper hands itself in when it
 reaches nought &mdash; with whatever they had written, which is saved as they
 type, never a blank page.</p>{busy}</div>"""
 
-    pub = ""
     if ready:
         # only homework and the lesson count in the league: a test sat for
         # practice earns nothing, and one set as homework counts as homework
         note = ('Published, it is practice: students can sit it as often as they like and it '
                 'earns no league points. Set it as homework, with a deadline, and it counts like '
                 'any homework &mdash; the first sitting before the deadline, out of ten.')
-        pub = (f'<form method="post" action="/tests/{tid}/publish"'
-               f' style="display:inline">'
-               f'<button>{"Unpublish" if t["published"] else "Publish to students"}'
-               f'</button></form>'
-               f'<p class="sub gap-3" style="margin-bottom:0">{note}</p>')
+        pub = (f'<form method="post" action="/tests/{tid}/publish">'
+               f'<button{" class=ghost" if t["published"] else ""}>'
+               f'{"Unpublish" if t["published"] else "Publish to students"}</button></form>')
     else:
-        pub = ('<p class="sub">Set every answer before publishing.</p>')
+        note = "Set every answer before publishing."
+        pub = ""
+    kind = "booklet" if (t["kind"] if "kind" in t.keys() else None) == "handout" else "test"
+    look = (f'<a class="btn ghost" href="/tests/{tid}/look">Look through</a>' if kind == "booklet" else "")
 
-    body = f"""<h1>{E(t["title"])}</h1>
-<p class="sub">{len(qs)} questions &middot;
-{"every answer set" if ready else "answer key incomplete"} &middot;
-{"published" if t["published"] else "not published"}</p>
+    body = f"""<div class="pagehead"><div><p class="eyebrow">{"Digital handout" if kind == "booklet" else "Digital test"}</p>
+<h1>{E(t["title"])}</h1>
+<p class="key-chips"><span class="hb-chip">{len(qs)} questions</span>
+<span class="hb-chip {"set" if ready else "risk"}">{"every answer set" if ready else "answer key incomplete"}</span>
+<span class="hb-chip {"open" if t["published"] else ""}">{"published" if t["published"] else "not published"}</span></p></div>
+<div class="actions">{look}{pub}</div></div>
+<p class="sub key-note">{note}</p>
 {passage}
-<form method="post" action="/tests/{tid}/key">
-<div class="card">{rows}</div>
-<div class="seasonbtns"><button>Save the answer key</button>
-<form method="post" action="/tests/{tid}/delete" style="display:inline"
- onsubmit="return confirm('Delete this test and everything students scored on it?')">
-<button class="ghost danger">Delete</button></form></div>
+<form method="post" action="/tests/{tid}/key" class="keyform">
+<p class="key-how">Several answers that are all right go in one box, separated by <b>/</b>
+&mdash; <em>doesn't/does not</em>. Capitals and a full stop at the end never count.</p>
+{rows}
+<div class="key-save"><span class="key-left">{f"{unset} box{'' if unset == 1 else 'es'} without an answer" if unset
+ else "Every box has its answer"}</span><button>Save the answer key</button></div>
 </form>
-<div class="card gap-4">{pub}</div>
 {carry_card(db, t, req)}
 {timing}
-{results}"""
+{results}
+<form method="post" action="/tests/{tid}/delete" class="key-delete"
+ onsubmit="return confirm('Delete this {kind} and everything students scored on it?')">
+<span>Deleting it takes every student's answers and marks on it with it.</span>
+<button class="ghost danger">Delete this {kind}</button></form>"""
     return html_response(page(t["title"], body, "Tests"))
 
 
@@ -10973,6 +11293,7 @@ ROUTES = [
     ("GET",  r"^/music$", view_music),
     ("POST", r"^/music/delete$", act_delete_song),
     ("POST", r"^/materials/(\d+)/delete$", act_delete_material),
+    ("POST", r"^/materials/delete$", act_delete_materials),
     ("GET", r"^/vocab$", view_vocab),
     ("GET", r"^/vocab/(\d+)$", view_word_list),
     ("GET", r"^/skip$", act_skip),

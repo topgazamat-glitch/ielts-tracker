@@ -80,7 +80,8 @@
     });
     if (dock) { dock.remove(); dock = null; }
     makeDock();
-    if (dock) dock.querySelector(".lx-label").textContent = "Track " + el.getAttribute("data-track");
+    if (dock) dock.querySelector(".lx-label").textContent =
+      el.getAttribute("data-label") || "Track " + el.getAttribute("data-track");
     // the small player shows only while the button itself is off the screen
     if (watch) watch.disconnect();
     seen = true;

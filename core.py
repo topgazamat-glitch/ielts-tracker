@@ -5072,9 +5072,10 @@ def test_questions(db, test_id):
 def set_answer_key(db, test_id, answers):
     """answers maps question id -> letter. An empty letter clears it."""
     for qid, letter in answers.items():
-        # a typed answer is a word or two, not a letter
+        # a typed answer may list every right form ("I'm sitting/I am sitting/..."), so
+        # it is not cut short: cutting it at 120 dropped the last forms of long lists
         db.execute("UPDATE dquestions SET answer=? WHERE id=? AND test_id=?",
-                   ((letter or "").strip()[:120] or None, qid, test_id))
+                   ((letter or "").strip()[:2000] or None, qid, test_id))
     db.commit()
 
 
@@ -5393,6 +5394,22 @@ def handout_finished(db, test_id, student_id):
     return n >= len(parts)
 
 
+def replaced_after_deadline(book, books, set_rows):
+    """A hidden booklet that a class still has as homework gives way to its new
+    edition once that homework's deadline has passed (his rule, 2026-10-02:
+    "keep them with old ones, after their deadline, switch old tests to the new
+    ones"). The new booklet then stands in its place on the shelf and the old
+    one no longer holds the course back. Its homework mark is untouched: that
+    comes from the assignment, not from the shelf."""
+    if book["published"]:
+        return False
+    dues = [r["due_at"] for r in set_rows if r["test_id"] == book["id"]]
+    if not dues or any(still_open(d) for d in dues):
+        return False
+    place = lesson_order(book)[:2]
+    return any(o["published"] and o["id"] > book["id"] and lesson_order(o)[:2] == place for o in books)
+
+
 def handout_shelf(db, student):
     """The booklets a student sees, in the order of the course, each with the
     booklet that has to be finished first (None when it is open)."""
@@ -5407,6 +5424,7 @@ def handout_shelf(db, student):
     owed_ids = {r["test_id"] for r in set_rows if owes(db, student, r, excused)}
     books = [b for b in digital_tests(db, level_of(db, gid), kind="handout")
              if not b["series"] and (b["published"] or b["id"] in set_ids)]
+    books = [b for b in books if not replaced_after_deadline(b, books, set_rows)]
     books.sort(key=lesson_order)
     out, first = [], None
     for b in books:
@@ -6085,6 +6103,45 @@ def level_counts(db, level_id, collection):
 
 def collection_counts(db, level_id):
     return {key: len(materials_at_level(db, level_id, key)) for key in COLLECTION_ORDER}
+
+
+def materials_scope(db, level_id, collection=None, category=None, unit=None):
+    """The files a "delete everything here" means: only this level's own. A file
+    filed for all levels shows on every level's shelf, but it is not this
+    level's to throw away - it goes only when it is ticked by name. unit -1 is
+    the drawer of files with no unit."""
+    sql = "SELECT * FROM materials WHERE active=1 AND level_id IS ?"
+    args = [level_id]
+    if collection:
+        sql += " AND collection=?"
+        args.append(collection)
+    if category:
+        sql += " AND category=?"
+        args.append(category)
+    if unit == -1:
+        sql += " AND unit IS NULL"
+    elif unit is not None:
+        sql += " AND unit=?"
+        args.append(unit)
+    return db.execute(sql + " ORDER BY title", args).fetchall()
+
+
+def delete_materials(db, ids):
+    """Take files off the shelves for good: the file on the disk and its row.
+    Returns (how many, how many bytes freed)."""
+    gone, freed = 0, 0
+    for mid in ids:
+        row = db.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
+        if not row:
+            continue
+        path = os.path.join(MATERIAL_DIR, row["filename"])
+        if os.path.exists(path):
+            freed += os.path.getsize(path)
+            os.remove(path)
+        db.execute("DELETE FROM materials WHERE id=?", (mid,))
+        gone += 1
+    db.commit()
+    return gone, freed
 
 
 def materials_for(db, group_id, category=None):

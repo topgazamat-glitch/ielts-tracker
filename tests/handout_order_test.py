@@ -195,6 +195,37 @@ core.void_answer(db, att, q2)
 check("the mark knows it does not count", core.handout_status(db, u2ac, ann)["voided"] == 1)
 check("but the booklets after it stay open", shut(ann) == [])
 
+print("\n8. AFTER THE DEADLINE, THE NEW EDITION TAKES THE OLD ONE'S PLACE")
+old = handout(1, "Unit 1A & 1C — Communication (first edition)")
+db.execute("UPDATE dtests SET published=0 WHERE id=?", (old,))
+new = handout(1, "Unit 1A & 1C — Communicating")
+lone = handout(3, "Unit 3B & 3D — Money (first edition)")
+db.execute("UPDATE dtests SET published=0 WHERE id=?", (lone,))
+NAME.update({old: "old 1AC", new: "new 1AC", lone: "old 3BD"})
+aid = db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at, test_id)"
+                 " VALUES (?,?,?,1,?,?)", (g2, "handout", now, core.iso(core.now() + timedelta(days=2)), old)).lastrowid
+db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at, test_id)"
+           " VALUES (?,?,?,1,?,?)", (g2, "handout", now, core.iso(core.now() - timedelta(days=3)), lone))
+db.commit()
+
+
+def names(sid):
+    return [NAME[b["id"]] for b, _f in core.handout_shelf(db, student(sid))]
+
+
+check("before the deadline the class has the old edition: %s" % names(cam), "old 1AC" in names(cam))
+check("and it holds the course back, the new edition too", shut(cam)[:2] == ["new 1AC", "1BD"])
+db.execute("UPDATE assignments SET due_at=? WHERE id=?", (core.iso(core.now() - timedelta(days=3)), aid))
+db.commit()
+check("after the deadline the old edition gives way to the new: %s" % names(cam),
+      "old 1AC" not in names(cam) and "new 1AC" in names(cam))
+check("and holds nothing back", shut(cam) == [])
+check("the homework itself still points at the old edition, so its mark stands",
+      db.execute("SELECT test_id FROM assignments WHERE id=?", (aid,)).fetchone()["test_id"] == old)
+check("an old booklet with no new edition stays where it was", "old 3BD" in names(cam))
+check("a published booklet never gives way", "1AC" in names(cam))
+check("another class never had the old edition, so it never sees it", "old 1AC" not in names(ann))
+
 srv.shutdown()
 print()
 print("handout_order: %d checks, %d failed" % (checks, len(fails)))
