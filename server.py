@@ -4981,13 +4981,12 @@ Your teacher will start it soon.</p></div>
               'starts again &mdash; keep working, it will be back.</p></div>'
               if champ["paused"] else "")
 
-    of = core.SEASON_LESSONS
-    left = of - mine["lessons"]
+    of, hw_of = core.SEASON_LESSONS, core.SEASON_HOMEWORK
     pace = ("Your season is finished and this score is final."
             if mine["done"] and mine["final"] else
-            "Your lessons are finished. The last homework from them still counts, "
+            "Your lessons and homework sets are done. The last homework is still being marked, "
             "so this score can still move." if mine["done"] else
-            f'{mine["lessons"]} of {of} lessons done, {left} to go.')
+            f'Your season ends after {of} lessons and {hw_of} sets of homework.')
 
     def tab(sc, label):
         on = " on" if scope == sc else ""
@@ -5000,8 +4999,7 @@ Your teacher will start it soon.</p></div>
     for r in shown["rows"]:
         st = r["student"]
         short = {"In the lesson": "Lesson"}
-        bits = [f'{E(short.get(l, l))} {r["points"].get(k, 0):g}' for k, l, _w in core.CHAMPIONSHIP]
-        bits.append(f'{of}/{of} &#10003;' if r["done"] else f'{r["lessons"]}/{of} lessons')
+        bits = [f'{min(r["sets"], hw_of)}/{hw_of} homework', f'{r["lessons"]}/{of} lessons']
         if scope == "school":
             bits.insert(0, f'<span class="lg-cls">{E(group_name(db, st["group_id"]))}</span>')
         items.append({"place": r["rank"] if r["eligible"] else None, "name": st["name"],
@@ -5012,6 +5010,7 @@ Your teacher will start it soon.</p></div>
              f'{core.MIN_GRADED} deadlines behind them yet, so they are below the '
              f'line for now.</p>' if waiting else "")
     lesson_pct = min(100, round(100 * mine["lessons"] / of)) if of else 0
+    sets_pct = min(100, round(100 * mine["sets"] / hw_of)) if hw_of else 0
 
     return f"""<h2>Championship &mdash; season {champ["season"]}</h2>
 {frozen}
@@ -5019,15 +5018,19 @@ Your teacher will start it soon.</p></div>
   <div class="lg-top"><span class="lg-rank">{big}</span><span class="lg-total"><b>{here["total"]:g}</b><small>points</small></span></div>
   <p class="lg-say">{standing} <a href="#me" class="findme">Find me in the table &darr;</a></p>
   <div class="lg-parts">{parts}</div>
-  <div class="lg-season"><span>{pace}</span><span class="lg-sbar"><i style="width:{lesson_pct}%"></i></span></div>
+  <div class="lg-season"><span>{pace}</span>
+    <div class="lg-count"><span>Homework sets</span><span class="lg-sbar"><i style="width:{sets_pct}%"></i></span><b>{min(mine["sets"], hw_of)}/{hw_of}</b></div>
+    <div class="lg-count"><span>Lessons</span><span class="lg-sbar"><i style="width:{lesson_pct}%"></i></span><b>{mine["lessons"]}/{of}</b></div></div>
 </div>
 {tabs}
 {podium(items)}
 {rank_list(items)}
 {below}
 <details class="lg-how"><summary>How the league works</summary>
-<p>A season lasts {of} lessons, not a month, so everyone is judged over the same amount of teaching.
-Every piece of homework and every lesson adds to your score, so it climbs as the season goes on.
+<p>A season lasts {hw_of} sets of homework and {of} lessons, not a month, so everyone is judged over
+the same amount of work &mdash; a class that had no homework for a while keeps going until it has had
+its {hw_of} sets. A missed set counts as one of them, scored nought. Every set and every lesson adds
+to your score, so it climbs as the season goes on.
 You enter the table once your first {core.MIN_GRADED} deadlines have passed. The prize goes to the best
 in the whole school.</p></details>
 <h2>Your homework</h2>
@@ -8983,19 +8986,25 @@ def champ_row(db, r, show_group=True, me=None, tops=None):
     group = f'<td>{E(group_name(db, st["group_id"]))}</td>' if show_group else ""
     mine = ' class="me"' if me == st["id"] else ""
     seen = r.get("lessons", 0)
-    of = core.SEASON_LESSONS
+    sets = r.get("sets", 0)
+    of, hw_of = core.SEASON_LESSONS, core.SEASON_HOMEWORK
+    hw = (f'<td class="sub">{hw_of}/{hw_of} &#10003;</td>' if sets >= hw_of
+          else f'<td class="sub">{sets}/{hw_of}</td>')
     if r.get("done") and r.get("final"):
-        lessons = (f'<td class="sub" title="finished on {r["closed"]}; every piece'
+        lessons = (f'<td class="sub" title="lessons finished on {r["closed"]}; fifteen sets'
                    f' of homework due and marked">{of}/{of} &#10003;</td>')
     elif r.get("done"):
-        lessons = (f'<td class="sub" title="lessons finished on {r["closed"]}, but'
-                   f' homework from them is still to come">{of}/{of} '
+        lessons = (f'<td class="sub" title="lessons and sets finished, but'
+                   f' the last homework is still to be marked">{of}/{of} '
                    f'<span class="pill watch">provisional</span></td>')
+    elif r.get("closed"):
+        lessons = (f'<td class="sub" title="lessons finished on {r["closed"]}; the season stays'
+                   f' open until {hw_of} sets of homework have come due">{of}/{of} &#10003;</td>')
     else:
         lessons = f'<td class="sub">{seen}/{of}</td>'
     return (f'<tr{mine}><td>{place}</td>'
             f'<td><a href="/students/{st["id"]}">{E(st["name"])}</a></td>{group}'
-            f'<td><strong>{r["total"]:g}</strong></td>{bars}{lessons}'
+            f'<td><strong>{r["total"]:g}</strong></td>{bars}{hw}{lessons}'
             f'<td class="sub">{E(r["handed"])}</td></tr>')
 
 
@@ -9027,11 +9036,11 @@ def view_championship(req, db):
 <p class="sub">The table is clear. Season {standing["season"]} begins the moment you
 start it, and nothing recorded before that counts towards it.</p>
 <div class="card"><h2 style="margin-top:0">Season {standing["season"]}</h2>
-<p class="sub">A season runs for <strong>{core.SEASON_LESSONS} lessons per student</strong>,
-not for a calendar month. A class that meets thirteen times and a class that meets twelve
-are then judged over exactly the same amount of teaching. A student's season closes on
-their {core.SEASON_LESSONS}th recorded lesson and their score is frozen there, however
-long the rest of the school takes to catch up.</p>
+<p class="sub">A season runs for <strong>{core.SEASON_LESSONS} lessons and
+{core.SEASON_HOMEWORK} sets of homework per student</strong>, not for a calendar month, so every
+student is judged over exactly the same amount of teaching and homework. A student's season
+closes once they have had both, and their score is frozen there, however long the rest of the
+school takes to catch up.</p>
 <form method="post" action="/championship/start" class="gap-4">
 <button>Start season {standing["season"]}</button></form></div>
 {history}"""
@@ -9110,7 +9119,8 @@ long the rest of the school takes to catch up.</p>
     body_html = f"""<h1>Championship</h1>
 <p class="sub">Season {standing["season"]}, counting from
 {E(standing.get("start_day") or standing["start"][:10])}{skipped}.
-{core.SEASON_LESSONS} lessons each, everyone in the school. It runs like a football league:
+{core.SEASON_LESSONS} lessons and {core.SEASON_HOMEWORK} sets of homework each, everyone in the
+school. It runs like a football league:
 every piece of homework you set is worth up to {core.HOMEWORK_PER_SET:g} points and every
 lesson up to {core.CONDUCT_PER_LESSON:g}, and those points are added to the running total
 and never taken away. A digital test counts as a piece of homework, marked the moment it is
@@ -9120,11 +9130,14 @@ marked is left out until you mark it.</p>
 {paused}
 {gapbox}
 <div class="card"><strong>{done} of {total}</strong> students have finished their
-{core.SEASON_LESSONS} lessons{", " + str(settled) + " of them settled" if done else ""}.
-<p class="sub gap-2">Homework belongs to the lesson it was set in, not to
-the day it is due, so the last pieces of a season fall due after the lessons are over. A
-student is marked <span class="pill watch">provisional</span> until every one of them has
-come due and been marked.</p>
+{core.SEASON_LESSONS} lessons and {core.SEASON_HOMEWORK} sets of homework{", " + str(settled) + " of them settled" if done else ""}.
+<p class="sub gap-2">Every student's season is the same size: their first
+{core.SEASON_HOMEWORK} sets of homework and their first {core.SEASON_LESSONS} lessons. A set is
+the homework that shares a deadline, and it takes its place once the deadline passes &mdash;
+handed in, missed (a nought) or waiting to be marked. A class preparing for an exam with no
+homework for a while keeps its season open until it has had its {core.SEASON_HOMEWORK} sets;
+a class set more than that stops counting at the {core.SEASON_HOMEWORK}th. A student is marked
+<span class="pill watch">provisional</span> while the last of their sets is waiting to be marked.</p>
 <p class="sub gap-2">A student's lesson count only moves when you record
 their marks for that day, so the season advances at the speed you record it. Close the
 season when enough of them have finished: the table is written into the record book with
@@ -9142,8 +9155,9 @@ the winner's name, and the next season starts clear from that moment.</p>
 the line for now.</p>
 <div class="tablewrap"><table><tr><th>#</th><th>Student</th>
 {"<th>Group</th>" if gid is None else ""}
-<th>Total</th>{head}<th>Lessons</th><th>Handed in</th></tr>
-{body or '<tr><td colspan=11 class="sub">Nobody yet.</td></tr>'}</table></div>
+<th>Total</th>{head}<th title="sets of homework due so far, of {core.SEASON_HOMEWORK}">Homework sets</th>
+<th>Lessons</th><th>Handed in</th></tr>
+{body or '<tr><td colspan=12 class="sub">Nobody yet.</td></tr>'}</table></div>
 <h2>How the points work</h2>
 <div class="card"><ul class="rules">{rules}</ul>
 <p class="sub gap-3"><strong>Each time, not in total.</strong> A set of
@@ -9157,8 +9171,8 @@ first sitting counts, so retaking a test to learn from it never moves the table.
 that carries no deadline cannot be missed, so not sitting one is no points rather than a
 nought. In the lesson is the average of punctuality, behaviour and taking
 part, and each lesson is worth up to five. Both add up across the season rather than
-averaging out: full marks means {core.SEASON_LESSONS} pieces of homework at ten and
-{core.SEASON_LESSONS} lessons at five. A deadline that passed with nothing against it is a
+averaging out: full marks means {core.SEASON_HOMEWORK} sets of homework at ten and
+{core.SEASON_LESSONS} lessons at five, the same for everyone. A deadline that passed with nothing against it is a
 nought, exactly like one handed in late. Work waiting to be marked is left out until you
 mark it. A student needs {core.MIN_GRADED} deadlines behind them to be eligible. Nothing you have not recorded scores anything, so
 an unmarked lesson is a nought for everyone alike and the order of the table is

@@ -4187,6 +4187,12 @@ def climb(db, student_id):
 # A season is counted in lessons, not in days, so a class that met thirteen times
 # and a class that met twelve are judged over the same amount of teaching.
 SEASON_LESSONS = 15
+# and in homework sets, for the same reason: a class busy preparing for its exam
+# may go weeks with no homework, and fifteen lessons would close its season with
+# a handful of sets in it while another class had fifteen. Each student's season
+# counts their first fifteen sets and their first fifteen lessons, and finishes
+# only when it has both.
+SEASON_HOMEWORK = 15
 SEASON_OPEN = "9999-12-31T00:00:00+00:00"   # a season still running has no end yet
 
 CHAMPIONSHIP = [
@@ -4427,7 +4433,7 @@ def handed_summary(graded, late, missing, waiting, pending=0):
     return ", ".join(bits) or "nothing due yet"
 
 
-def homework_marks(db, student, lo, hi, windows):
+def homework_marks(db, student, lo, hi, windows, cap=None, with_sets=False):
     """Every piece of homework this student was set, and what it was worth.
 
     The average used to be taken over the work that arrived, which meant a
@@ -4453,7 +4459,14 @@ def homework_marks(db, student, lo, hi, windows):
     deleted task went on deciding the table. The assignments are the list now,
     and a mark with nothing to belong to is left out.
 
-    Returns (scores, late, missing, waiting, pending).
+    With a cap, only the first `cap` sets count, in the order they fell due: a
+    set is the homework that shares a deadline, and it takes its place once the
+    deadline has passed, whether it was handed in, missed or is still waiting
+    to be marked - so a missed set is one of the fifteen, scored nought, and
+    skipping one never makes room for a better one later.
+
+    Returns (scores, late, missing, waiting, pending, batches), and the number
+    of sets that have taken their place when `with_sets` is asked for.
     """
     stamp = iso(now())
     # set during the season, or set just before it and falling due inside it -
@@ -4468,16 +4481,21 @@ def homework_marks(db, student, lo, hi, windows):
 
     scores, late, missing, waiting, pending = [], 0, 0, 0, 0
     batches = {}                      # (due_at) -> the marks from that set
+    slots = []                        # the sets that have taken their place, in order
     excused = excused_tests(db, student["id"])
     for a in was_set:
         if not owes(db, student, a, excused):
             continue                      # before they joined, or let off it
         due = a["due_at"]
+        if cap and (due or "none") not in slots and len(slots) >= cap:
+            continue                      # the season already has its sets
         if due and due > stamp:
             pending += 1                  # set, but the deadline has not arrived
             continue
         if due and paused_at(due, windows):
             continue                      # the league was off when this fell due
+        if due and due not in slots:
+            slots.append(due)
         if a["test_id"] and not is_handout(db, a["test_id"]):
             # a digital test set as homework is homework: its first sitting,
             # out of ten, if it was finished by the deadline - averaged with
@@ -4549,6 +4567,10 @@ def homework_marks(db, student, lo, hi, windows):
         else:
             scores.append(sub["score"])
             batches.setdefault(key, []).append(float(sub["score"]))
+    if "none" in batches and "none" not in slots:
+        slots.append("none")              # handed in with no deadline: a set of its own
+    if with_sets:
+        return scores, late, missing, waiting, pending, batches, len(slots)
     return scores, late, missing, waiting, pending, batches
 
 
@@ -4569,8 +4591,10 @@ def championship(db, cfg=None):
         # only homework and the lesson count. A test counts when it was set
         # as homework, inside homework_marks; one sat for practice earns
         # nothing, however well it went - it is practice.
-        counted, late, missing, waiting, pending, batches = homework_marks(
-            db, st, lo, hi, windows)
+        # homework is counted by its own fifteen sets, not by the lessons: a
+        # class preparing for an exam keeps its season open until it has had them
+        counted, late, missing, waiting, pending, batches, sets = homework_marks(
+            db, st, lo, SEASON_OPEN, windows, cap=SEASON_HOMEWORK, with_sets=True)
         graded = len(counted)
         parts = {}
         # each set of homework is its own fixture: the average of the marks in
@@ -4606,10 +4630,12 @@ def championship(db, cfg=None):
             "graded": graded, "words": words, "late": late,
             "not_handed": missing, "waiting": waiting, "pending": pending,
             "handed": handed_summary(graded, late, missing, waiting, pending),
-            "lessons": lessons, "closed": closed, "done": closed is not None,
-            # the lessons can be finished while homework from the last of them
-            # is still to come due, or still to be marked
-            "final": closed is not None and not pending and not waiting,
+            "lessons": lessons, "closed": closed,
+            "sets": sets, "sets_done": sets >= SEASON_HOMEWORK,
+            # finished only with fifteen lessons and fifteen sets behind them
+            "done": closed is not None and sets >= SEASON_HOMEWORK,
+            # and final once the last of those sets has been marked
+            "final": closed is not None and sets >= SEASON_HOMEWORK and not waiting,
             "marked_lessons": lesson_n,
             "average": round(sum(counted) / graded, 2) if graded else None,
             # deadlines behind them, not marks given: a student should not drop
@@ -4651,7 +4677,7 @@ def close_season(db, cfg=None):
     snapshot = [{"rank": r["rank"], "name": r["student"]["name"],
                  "total": r["total"], "points": r["points"],
                  "graded": r["graded"], "words": r["words"],
-                 "lessons": r["lessons"]} for r in standing["rows"]]
+                 "lessons": r["lessons"], "sets": r["sets"]} for r in standing["rows"]]
     db.execute(
         "INSERT INTO seasons (no, started_at, closed_at, winner_id, winner_name,"
         " winner_points, standing) VALUES (?,?,?,?,?,?,?)",

@@ -99,10 +99,55 @@ for r in st["rows"]:
         r["student"]["name"], r["rank"], r["total"],
         r["points"]["homework"], r["points"]["conduct"],
         r["lessons"], core.SEASON_LESSONS, "finished" if r["done"] else ""))
-assert by["Ali"]["done"] and by["Vali"]["done"] and not by["Newcomer"]["done"]
+# fifteen lessons are not the end on their own: four sets of homework are
+assert by["Ali"]["lessons"] == 15 and by["Ali"]["sets"] == 4 and not by["Ali"]["done"]
+assert not by["Vali"]["done"] and not by["Newcomer"]["done"]
 # same homework, better conduct -> Ali above Vali
 assert by["Ali"]["total"] > by["Vali"]["total"]
 print("   Ali and Vali both averaged 8/10; Ali wins on lesson marks (5s vs 3s). Correct.")
+print("   fifteen lessons each, but four sets of homework: the season is still open")
+
+print("5b. Fifteen sets of homework as well as fifteen lessons")
+tasks += [task(k, start + timedelta(days=k)) for k in range(5, 18)]   # seventeen in all
+for i in range(4, 17):
+    hand(ali, start + timedelta(days=i + 1, hours=1), 8, i)
+db.commit()
+st = core.championship(db)
+by = {r["student"]["name"]: r for r in st["rows"]}
+print("   Ali  sets %d/%d  homework %s  finished %s" % (by["Ali"]["sets"], core.SEASON_HOMEWORK,
+      by["Ali"]["points"]["homework"], by["Ali"]["done"]))
+print("   Vali sets %d/%d  homework %s  finished %s" % (by["Vali"]["sets"], core.SEASON_HOMEWORK,
+      by["Vali"]["points"]["homework"], by["Vali"]["done"]))
+assert by["Ali"]["sets"] == 15 and by["Ali"]["done"] and by["Ali"]["final"]
+# the first fifteen sets only: fourteen 8s and the late nought - the sixteenth
+# and seventeenth, both 8s, are past the end of his season
+assert by["Ali"]["points"]["homework"] == 33.6, by["Ali"]["points"]["homework"]
+# a missed set is one of the fifteen, scored nought: Vali sent three
+assert by["Vali"]["sets"] == 15 and by["Vali"]["done"] and by["Vali"]["points"]["homework"] == 7.2
+assert by["Newcomer"]["sets"] == 15 and not by["Newcomer"]["done"]     # four lessons
+print("   only the first fifteen sets count; a missed one is a nought among them")
+
+# a class preparing for its exam: fifteen lessons, two sets - its season waits
+g2 = db.execute("INSERT INTO groups (name, join_code, created_at) VALUES ('Exam','EXAM',?)",
+                (core.iso(core.now()),)).lastrowid
+zeb = db.execute("INSERT INTO students (name, group_id, active, created_at) VALUES ('Zebo',?,1,?)",
+                 (g2, core.iso(core.now()))).lastrowid
+for i in range(15):
+    lesson(zeb, days[i], 5, 5, 5)
+for k in (1, 2):
+    made = start + timedelta(days=k)
+    t2 = db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at)"
+                    " VALUES (?,?,?,1,?)", (g2, "Exam HW %d" % k, core.iso(made),
+                                            core.iso(made + timedelta(days=1)))).lastrowid
+    db.execute("INSERT INTO submissions (student_id, assignment_id, status, score, created_at, kind)"
+               " VALUES (?,?,'graded',9,?,'photo')", (zeb, t2, core.iso(made + timedelta(hours=2))))
+db.commit()
+z = next(r for r in core.championship(db)["rows"] if r["student"]["name"] == "Zebo")
+print("   Zebo (exam class): lessons %d/15, sets %d/15, finished %s" % (z["lessons"], z["sets"], z["done"]))
+assert z["lessons"] == 15 and z["sets"] == 2 and not z["done"]
+db.execute("DELETE FROM lesson_marks WHERE student_id=?", (zeb,))
+db.execute("UPDATE students SET active=0 WHERE id=?", (zeb,))
+db.commit()
 
 print("6. Closing the season keeps the record and clears the table")
 core.close_season(db)

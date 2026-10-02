@@ -4017,3 +4017,7 @@ button.pl-go:active { transform: scale(.98); }
 .tr-note { margin: 0; font-size: 1.2cqw; line-height: 1.35; text-align: center; color: #7a6784; }
 @media print { .cert.tr { background: #fdfbff; } }
 .tr-head { padding-right: 9cqw; }
+.lg-count { display: grid; grid-template-columns: 108px minmax(0, 1fr) 44px; align-items: center; gap: 10px; }
+.lg-count b { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
+.lg-count .lg-sbar { height: 6px; }
+.lg-count:first-of-type .lg-sbar i { background: linear-gradient(90deg, #ffd166, #ffb347); }

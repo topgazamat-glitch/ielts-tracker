@@ -77,17 +77,30 @@ want = 13 * (8 / 10.0 * 3)
 print("  thirteen at 8 -> 2.4 each, two missed -> 0:  %.2f" % want)
 assert abs(r["points"]["homework"] - round(want, 2)) < 0.05
 
-print("\nAnd a piece not yet due is left out, not counted as missed:")
+print("\nA sixteenth set is past the end of the season: it counts for nothing")
 d = lesson_days[-1]
-db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at)"
+extra = db.execute("INSERT INTO assignments (group_id, title, created_at, published, due_at)"
            " VALUES (?,?,?,1,?)",
-           (g, "HW 16", core.iso(d), core.iso(core.now() + timedelta(days=2))))
+           (g, "HW 16", core.iso(d), core.iso(core.now() + timedelta(days=2)))).lastrowid
 db.commit()
 r2 = next(x for x in core.championship(db)["rows"] if x["student"]["id"] == sid)
-print("  line                :", r2["handed"])
-print("  still counted       :", r2["graded"], "| not due yet:", r2["pending"])
+print("  sets                :", r2["sets"], "| not due yet:", r2["pending"])
 print("  points unchanged    :", r2["points"]["homework"] == r["points"]["homework"])
-print("  now provisional     :", r2["final"] is False)
-assert r2["pending"] == 1 and r2["graded"] == 15 and not r2["final"]
+print("  still final         :", r2["final"])
+assert r2["sets"] == 15 and r2["pending"] == 0 and r2["final"]
+assert r2["points"]["homework"] == r["points"]["homework"]
+
+print("\nAnd a set not yet due is left out, not counted as missed:")
+db.execute("DELETE FROM assignments WHERE id=?", (extra,))
+db.execute("UPDATE assignments SET due_at=? WHERE id=?",
+           (core.iso(core.now() + timedelta(days=2)), tasks[14]))
+db.commit()
+r3 = next(x for x in core.championship(db)["rows"] if x["student"]["id"] == sid)
+print("  line                :", r3["handed"])
+print("  sets so far         :", r3["sets"], "| not due yet:", r3["pending"])
+print("  points unchanged    :", r3["points"]["homework"] == r["points"]["homework"])
+print("  now provisional     :", r3["final"] is False)
+assert r3["pending"] == 1 and r3["sets"] == 14 and r3["not_handed"] == 1
+assert not r3["final"] and not r3["done"]
 db.close(); shutil.rmtree(tmp)
-print("\nConduct and homework now cover the same 15 lessons.")
+print("\nFifteen lessons and fifteen sets: the season is the same size for everyone.")
