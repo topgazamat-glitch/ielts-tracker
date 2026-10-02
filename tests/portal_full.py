@@ -54,11 +54,12 @@ db.commit()
 
 st = db.execute("SELECT * FROM students WHERE name='Student 07'").fetchone()
 h = server.portal_class(db, st, st["token"], "school")
-rows = h.count("<tr")
-print("school view: %d bytes, %d table rows" % (len(h), rows))
+ROW = 'class="lg-row'
+rows = h.count(ROW)
+print("school view: %d bytes, %d rows" % (len(h), rows))
 c = server.portal_class(db, st, st["token"], "class")
-print("class view: %d rows (their class only)" % c.count("<tr"))
-assert c.count("<tr") < rows, "the class view must be shorter"
+print("class view: %d rows (their class only)" % c.count(ROW))
+assert 0 < c.count(ROW) < rows, "the class view must be shorter"
 assert "Class standings" not in h, "the second leaderboard must be gone"
 print("own row anchored:", 'id="me"' in h)
 print("find-me link:", 'href="#me"' in h)
@@ -68,8 +69,8 @@ print("eligible: %d of %d, finished: %d" % (champ["eligible"], len(champ["rows"]
 m = re.search(r"You (are|need)[^<]*", h); print("standing:", m.group(0) if m else "none")
 m = re.search(r"below the line[^<]*", h); print("line note:", bool(m))
 # show the top of the league as a student sees it
-tbl = h[h.index("<th>Class</th>"):]
-for line in re.findall(r"<tr.*?</tr>", tbl)[:6]:
+tbl = h[h.index('class="lg-list'):]
+for line in re.findall(r"<li class=\"lg-row.*?</li>", tbl)[:6]:
     txt = re.sub(r"<[^>]+>", " ", line)
     print("   ", " ".join(txt.split()))
 db.close(); shutil.rmtree(tmp)

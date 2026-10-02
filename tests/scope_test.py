@@ -78,14 +78,14 @@ print("   championship present:       ", "Championship" in pg)
 print("   class/school toggle:        ", "scope=school" in pg and "scope=class" in pg)
 print("   their own homework line:    ", "Your homework" in pg)
 assert "Class standings" not in pg and "scope=school" in pg
-tables = pg.count("<table")
-print("   tables on the page:", tables, "(was 2)")
+tables = pg.count("<table") + pg.count('class="lg-list')
+print("   rankings on the page:", tables, "(was 2)")
 assert tables == 1, tables
 
 print("\n3. THE TOGGLE WORKS")
 cls = get("/s/tok0000000000000000?tab=class&scope=class", urllib.request.build_opener())
 sch = get("/s/tok0000000000000000?tab=class&scope=school", urllib.request.build_opener())
-nc = len(re.findall(r"<tr", cls)); ns = len(re.findall(r"<tr", sch))
+nc = len(re.findall(r'class="lg-row', cls)); ns = len(re.findall(r'class="lg-row', sch))
 print("   my class: %d rows | whole school: %d rows" % (nc, ns))
 assert ns > nc
 print("   class view says 'in your class':", "in your class" in cls)

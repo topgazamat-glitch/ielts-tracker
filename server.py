@@ -249,6 +249,9 @@ LOOK_ICONS.update({
     "video": '<rect x="3.5" y="6" width="12.5" height="12" rx="2.5"/><path d="M16 10.5l4.5-2.5v8l-4.5-2.5"/>',
     "slides": '<rect x="3.5" y="4.5" width="17" height="11.5" rx="2"/><path d="M12 16v3.5M8.5 19.5h7"/>',
     "trophy": '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5v1.5A3 3 0 0 0 8 10.5M16 6h3v1.5a3 3 0 0 1-3 3M12 13v4M8.5 20h7M10 17h4"/>',
+    "play": '<path d="M8.5 5.8v12.4L18.5 12z"/>',
+    "bolt": '<path d="M13 2.5 5 13.5h6l-1 8 8-11h-6z"/>',
+    "lock": '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     "clipboard": '<rect x="5.5" y="5" width="13" height="15.5" rx="2"/><path d="M9 5V3.8h6V5M8.5 11l2 2 4-4M8.5 16.5h7"/>',
     "cap": '<path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.5v4c1.5 1.4 3.4 2 5.5 2s4-.6 5.5-2v-4M21.5 9.5v5"/>',
     "list": '<path d="M9 7h11M9 12h11M9 17h11"/><circle cx="4.8" cy="7" r=".9"/><circle cx="4.8" cy="12" r=".9"/>'
@@ -4849,6 +4852,51 @@ def portal_profile(db, s, token, flash=""):
 </form></div></details>"""
 
 
+def ordinal(n):
+    return "%d%s" % (n, {1: "st", 2: "nd", 3: "rd"}.get(n if n % 100 < 20 else n % 10, "th"))
+
+
+def rank_list(items, cls=""):
+    """A ranking a phone can read: place, initial, name, a line under it, and
+    the figure that decides it on the right. Each item is a dict with place
+    (None for below the line), name, meta, value, unit and me."""
+    out = ""
+    line = False
+    for it in items:
+        if it.get("place") is None and not line and it.get("line"):
+            out += f'<li class="lg-line">{it["line"]}</li>'
+            line = True
+        place = it.get("place")
+        badge = (f'<span class="lg-place p{place}">{place}</span>' if place and place <= 3
+                 else f'<span class="lg-place">{place if place else "&ndash;"}</span>')
+        initial = E((first_name(it["name"]) or it["name"] or "?")[:1].upper())
+        me = it.get("me")
+        mark = ' id="me"' if me else ""
+        out += (f'<li class="lg-row{" me" if me else ""}"{mark}>{badge}'
+                f'<span class="lg-ava">{initial}</span>'
+                f'<span class="lg-who"><span class="lg-name">{E(it["name"])}'
+                + (' <span class="lg-you">you</span>' if me else "")
+                + f'</span><span class="lg-meta">{it.get("meta", "")}</span></span>'
+                f'<span class="lg-val"><b>{it["value"]}</b><small>{E(it.get("unit", ""))}</small></span></li>')
+    return f'<ol class="lg-list{(" " + cls) if cls else ""}">{out}</ol>'
+
+
+def podium(items):
+    """The top three, standing on their steps: second, first, third."""
+    top = {it["place"]: it for it in items if it.get("place") in (1, 2, 3)}
+    if len(top) < 3:
+        return ""
+    cols = ""
+    for p in (2, 1, 3):
+        it = top[p]
+        cols += (f'<div class="pd-col pd{p}{" me" if it.get("me") else ""}">'
+                 f'<span class="pd-ava">{E((first_name(it["name"]) or "?")[:1].upper())}</span>'
+                 f'<span class="pd-name">{E(first_name(it["name"]) or it["name"])}</span>'
+                 f'<span class="pd-pts">{it["value"]} {E(it.get("unit", ""))}</span>'
+                 f'<span class="pd-step">{p}</span></div>')
+    return f'<div class="podium" aria-label="The top three">{cols}</div>'
+
+
 def portal_champ_row(db, r, me_id, show_group=True, tops=None):
     """One line of the league as a student sees it.
 
@@ -4904,21 +4952,25 @@ Your teacher will start it soon.</p></div>
     shown = core.scope_standing(champ, s["group_id"]) if scope == "class" else champ
     here = next((r for r in shown["rows"] if r["student"]["id"] == s["id"]), mine)
 
+    where = "in your class" if scope == "class" else "in the school"
     if here["eligible"]:
         rank = here["rank"]
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(rank if rank < 20 else rank % 10, "th")
-        where = "in your class" if scope == "class" else "in the school"
-        standing = (f'You are <strong>{rank}{suffix}</strong> {where} with '
-                    f'<strong>{here["total"]:g}</strong> points')
+        num, suf = str(rank), ordinal(rank)[len(str(rank)):]
+        standing = (f'You are <strong>{ordinal(rank)}</strong> {where} with '
+                    f'<strong>{here["total"]:g}</strong> points.')
+        big = (f'<span class="lg-big">{num}<sup>{suf}</sup></span>'
+               f'<span class="lg-of">{where}<br><small>of {shown["eligible"]}</small></span>')
     else:
         standing = (f'Your first {core.MIN_GRADED} deadlines have to pass before '
-                    f'you enter. {here["graded"]} so far')
+                    f'you enter. {here["graded"]} so far.')
+        big = (f'<span class="lg-big lg-wait">{here["graded"]}<small>/{core.MIN_GRADED}</small></span>'
+               f'<span class="lg-of">deadlines<br><small>before you enter</small></span>')
 
     best = {k: max([r["points"].get(k) or 0 for r in champ["rows"]] or [0])
             for k, _l, _w in core.CHAMPIONSHIP}
     parts = "".join(
-        f'<div class="cp"><span>{E(label)}</span>'
-        f'<span class="cbar"><i style="width:'
+        f'<div class="lg-part"><span class="lg-plabel">{E(label)}</span>'
+        f'<span class="lg-pbar"><i style="width:'
         f'{min(100, (mine["points"].get(key, 0) / float(best.get(key) or 1) * 100)):.0f}%"></i></span>'
         f'<b>{mine["points"].get(key, 0):g}</b></div>'
         for key, label, weight in core.CHAMPIONSHIP)
@@ -4929,43 +4981,56 @@ Your teacher will start it soon.</p></div>
               'starts again &mdash; keep working, it will be back.</p></div>'
               if champ["paused"] else "")
 
-    left = core.SEASON_LESSONS - mine["lessons"]
+    of = core.SEASON_LESSONS
+    left = of - mine["lessons"]
     pace = ("Your season is finished and this score is final."
             if mine["done"] and mine["final"] else
             "Your lessons are finished. The last homework from them still counts, "
             "so this score can still move." if mine["done"] else
-            f'{mine["lessons"]} of {core.SEASON_LESSONS} lessons done, {left} to go.')
+            f'{mine["lessons"]} of {of} lessons done, {left} to go.')
 
     def tab(sc, label):
         on = " on" if scope == sc else ""
         return (f'<a class="tab{on}" href="/s/{E(token)}?tab=class&amp;scope={sc}">'
                 f'{E(label)}</a>')
-    tabs = f'<div class="tabs">{tab("class", "My class")}{tab("school", "Whole school")}</div>'
+    tabs = f'<div class="tabs lg-tabs">{tab("class", "My class")}{tab("school", "Whole school")}</div>'
 
-    rows = "".join(portal_champ_row(db, r, s["id"], show_group=scope == "school",
-                                    tops=best) for r in shown["rows"])
-    chead = "".join(f'<th title="up to {w:g} points each time">{E(l)}</th>'
-                    for _k, l, w in core.CHAMPIONSHIP)
     waiting = len(shown["rows"]) - shown["eligible"]
+    items = []
+    for r in shown["rows"]:
+        st = r["student"]
+        short = {"In the lesson": "Lesson"}
+        bits = [f'{E(short.get(l, l))} {r["points"].get(k, 0):g}' for k, l, _w in core.CHAMPIONSHIP]
+        bits.append(f'{of}/{of} &#10003;' if r["done"] else f'{r["lessons"]}/{of} lessons')
+        if scope == "school":
+            bits.insert(0, f'<span class="lg-cls">{E(group_name(db, st["group_id"]))}</span>')
+        items.append({"place": r["rank"] if r["eligible"] else None, "name": st["name"],
+                      "meta": " · ".join(bits), "value": f'{r["total"]:g}', "unit": "points",
+                      "me": st["id"] == s["id"],
+                      "line": f'Below the line: fewer than {core.MIN_GRADED} deadlines behind them yet'})
     below = (f'<p class="sub">The last {waiting} have not yet handed in '
              f'{core.MIN_GRADED} deadlines behind them yet, so they are below the '
              f'line for now.</p>' if waiting else "")
+    lesson_pct = min(100, round(100 * mine["lessons"] / of)) if of else 0
 
     return f"""<h2>Championship &mdash; season {champ["season"]}</h2>
-<p class="sub">A season lasts {core.SEASON_LESSONS} lessons, not a month, so everyone is
-judged over the same amount of teaching. Every piece of homework and every lesson adds to
-your score, so it climbs as the season goes on. {pace}
-The prize goes to the best in the whole school.</p>
 {frozen}
-<div class="card"><p style="margin:0 0 12px">{standing}.
-<a href="#me" class="findme">Find me in the table &darr;</a></p>
-<div class="cparts">{parts}</div></div>
+<div class="lg-hero">
+  <div class="lg-top"><span class="lg-rank">{big}</span><span class="lg-total"><b>{here["total"]:g}</b><small>points</small></span></div>
+  <p class="lg-say">{standing} <a href="#me" class="findme">Find me in the table &darr;</a></p>
+  <div class="lg-parts">{parts}</div>
+  <div class="lg-season"><span>{pace}</span><span class="lg-sbar"><i style="width:{lesson_pct}%"></i></span></div>
+</div>
 {tabs}
-<div class="tablewrap"><table><tr><th>#</th><th>Student</th>
-{"<th>Class</th>" if scope == "school" else ""}
-<th>Points</th>{chead}<th>Lessons</th></tr>{rows}</table></div>
+{podium(items)}
+{rank_list(items)}
 {below}
-<h2 style="margin-top:26px">Your homework</h2>
+<details class="lg-how"><summary>How the league works</summary>
+<p>A season lasts {of} lessons, not a month, so everyone is judged over the same amount of teaching.
+Every piece of homework and every lesson adds to your score, so it climbs as the season goes on.
+You enter the table once your first {core.MIN_GRADED} deadlines have passed. The prize goes to the best
+in the whole school.</p></details>
+<h2>Your homework</h2>
 {standing_line(db, s) or '<p class="sub">Nothing marked yet.</p>'}"""
 
 
@@ -5297,55 +5362,57 @@ def portal_play(db, s, token, query):
             return '<h2>Play</h2><p class="sub">That list is not open to your class.</p>'
         if not here["unlocked"]:
             before = chain[here["step"] - 2]["list"]["title"]
-            return (f'<h2>{E(wl["title"])}</h2><div class="card"><p class="flush">'
-                    f'🔒 Step {here["step"]} is locked. Pass <strong>{E(before)}</strong> '
-                    f'first.</p></div>'
-                    f'<p class="gap-4"><a class="tab" href="{back}">Back to the steps</a></p>')
+            return (f'<p class="pl-back"><a href="{back}">&larr; All the steps</a></p>'
+                    f'<div class="pl-locked">{look_icon("lock", "pl-lock")}<h2>{E(wl["title"])}</h2>'
+                    f'<p>Step {here["step"]} is locked. Pass <strong>{E(before)}</strong> first.</p>'
+                    f'<a class="btn" href="{back}">Back to the steps</a></div>')
         n = here["n"]
         round_n = min(core.SOLO_ROUND, n)
         mine = core.solo_best(db, s["id"], wl["id"])
         board = core.solo_list_board(db, wl["id"], s["group_id"])
-        rows = solo_rows(board[:10], s["id"],
-                         [lambda r: "%d" % r["best"], lambda r: "%d%%" % r["pct"]])
-        state = ("✅ passed" if here["passed"] else
-                 f'you need <strong>{here["need"]} of {round_n}</strong> to pass')
+        items = [{"place": i, "name": r["name"], "meta": "%d%% right" % r["pct"], "value": "%d" % r["best"],
+                  "unit": "points", "me": r["id"] == s["id"]} for i, r in enumerate(board[:10], 1)]
+        state = (f'{look_icon("check", "pl-ok")}Passed' if here["passed"] else
+                 f'You need <strong>{here["need"]} of {round_n}</strong> to pass')
         me_line = (f'Your best this week: <strong>{mine["best"]}</strong> points, '
                    f'{mine["pct"]}% right, in {mine["rounds"]} round(s).'
                    if mine["rounds"] else "You have not played this step this week.")
-        return f"""<h2>Step {here["step"]} &middot; {E(wl["title"])}</h2>
-<p class="sub">{n} questions &middot; a round is {round_n} of them, picked at random,
-{core.SOLO_SECONDS} seconds each &middot; {state}</p>
-<form method="post" action="/s/{E(token)}/solo/start">
-<input type="hidden" name="list" value="{wl["id"]}">
-<button class="big">{"Play it again" if here["passed"] else "Start step %d" % here["step"]}</button></form>
-<p class="gap-3">{me_line}</p>
+        return f"""<p class="pl-back"><a href="{back}">&larr; All the steps</a></p>
+<div class="pl-hero {E(wl["kind"])}">
+  <span class="pl-hero-k">Step {here["step"]}</span>
+  <h2 class="pl-hero-t">{E(wl["title"])}</h2>
+  <p class="pl-hero-p">{n} questions &middot; a round is {round_n} of them, picked at random,
+  {core.SOLO_SECONDS} seconds each</p>
+  <p class="pl-hero-s">{state}</p>
+  <form method="post" action="/s/{E(token)}/solo/start">
+  <input type="hidden" name="list" value="{wl["id"]}">
+  <button class="pl-go">{look_icon("play", "pl-go-ico")}{"Play it again" if here["passed"] else "Start step %d" % here["step"]}</button></form>
+  <p class="pl-hero-me">{me_line}</p>
+</div>
 <h3 class="gap-4">This week in your class</h3>
-<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
-<th class="num">Best</th><th class="num">Right</th></tr>
-{rows or '<tr><td colspan="4" class="sub">Nobody has played it yet this week. Be the first.</td></tr>'}
-</table></div>
+{rank_list(items) if items else '<div class="empty-state">' + look_icon("trophy", "empty-ico")
+ + '<p><strong>Nobody has played it yet this week.</strong><br>Be the first.</p></div>'}
 <p class="sub gap-3">Your best round this week counts, however many you play. The
-table starts again every Monday; a step you have passed stays passed.</p>
-<p class="gap-4"><a class="tab" href="{back}">Back to the steps</a></p>"""
+table starts again every Monday; a step you have passed stays passed.</p>"""
 
     if kind in KIND_NAME:
         if kind in BY_BOOK and book is None:
             books = core.play_books(db, s, kind)
             cards = ""
             for b in books:
-                bar = (f'{b["passed"]} of {b["steps"]} passed' if b["steps"] else "empty")
-                cards += (f'<a class="tile small" '
-                          f'href="{base}&amp;kind={E(kind)}&amp;book='
-                          f'{urllib.parse.quote(b["source"]) or "-"}">'
-                          f'<div class="tile-title">{E(b["title"])}</div>'
-                          f'<div class="sub">{b["steps"]} '
-                          f'step{"" if b["steps"] == 1 else "s"} &middot; {bar}</div></a>')
-            return (f"<h2>{KIND_NAME[kind]}</h2><p class=\"sub\">Pick a book. Each "
+                pct = round(100 * b["passed"] / b["steps"]) if b["steps"] else 0
+                cards += (f'<a class="pl-book {E(kind)}" href="{base}&amp;kind={E(kind)}&amp;book='
+                          f'{urllib.parse.quote(b["source"]) or "-"}">{look_icon("book", "pl-book-ico")}'
+                          f'<span class="pl-book-t">{E(b["title"])}</span>'
+                          f'<span class="pl-book-m">{b["passed"]} of {b["steps"]} '
+                          f'step{"" if b["steps"] == 1 else "s"} passed</span>'
+                          f'<span class="pl-bar"><i style="width:{pct}%"></i></span></a>')
+            return (f'<p class="pl-back"><a href="{base}">&larr; Play</a></p>'
+                    f"<h2>{KIND_NAME[kind]}</h2><p class=\"sub\">Pick a book. Each "
                     f"one is a ladder: pass a step to open the next.</p>"
-                    + (f'<div class="tiles">{cards}</div>' if cards else
-                       '<div class="card empty-card"><p class="flush">No lists here yet. Your '
-                       'teacher will add some.</p></div>')
-                    + f'<p class="gap-4"><a class="tab" href="{base}">Back to Play</a></p>')
+                    + (f'<div class="pl-books">{cards}</div>' if cards else
+                       '<div class="empty-state">' + look_icon("book", "empty-ico") + '<p><strong>No lists here yet.'
+                       '</strong><br>Your teacher will add some.</p></div>'))
 
         chain = core.play_chain(db, s, kind, book if kind in BY_BOOK else None)
         title = ((book or "Other lists") if kind in BY_BOOK
@@ -5354,26 +5421,29 @@ table starts again every Monday; a step you have passed stays passed.</p>
         for c in chain:
             l, round_n = c["list"], min(core.SOLO_ROUND, c["n"])
             if c["passed"]:
-                mark, note, cls = "✅", f'passed &middot; {c["n"]} questions', " passed"
+                node, note, cls = LOOK_ICONS["check"], f'passed &middot; {c["n"]} questions', " passed"
             elif c["unlocked"]:
-                mark, note, cls = "▶", f'{c["need"]} of {round_n} to pass', " open"
+                node, note, cls = LOOK_ICONS["play"], f'{c["need"]} of {round_n} right to pass', " open"
             else:
-                mark, note, cls = "🔒", "pass the step before it", " locked"
-            inner = (f'<span class="stepno">{mark} {c["step"]}</span>'
-                     f'<span class="steptitle">{E(l["title"])}</span>'
-                     f'<span class="sub">{note}</span>')
-            steps += (f'<a class="steprow{cls}" href="{base}&amp;l={l["id"]}">{inner}</a>'
-                      if c["unlocked"] else f'<div class="steprow{cls}">{inner}</div>')
+                node, note, cls = LOOK_ICONS["lock"], "pass the step before it", " locked"
+            inner = (f'<span class="lad-node"><svg viewBox="0 0 24 24" aria-hidden="true">{node}</svg></span>'
+                     f'<span class="lad-card"><span class="lad-txt"><span class="lad-no">Step {c["step"]}</span>'
+                     f'<span class="lad-t">{E(l["title"])}</span><span class="lad-n">{note}</span></span>'
+                     + ('<span class="lad-go">Play</span>' if cls == " open" else "") + '</span>')
+            steps += (f'<li class="lad-step{cls}"><a href="{base}&amp;l={l["id"]}">{inner}</a></li>'
+                      if c["unlocked"] else f'<li class="lad-step{cls}"><div>{inner}</div></li>')
         done = sum(1 for c in chain if c["passed"])
         back = (f'{base}&amp;kind={E(kind)}'
                 if kind in BY_BOOK and book is not None else base)
-        return (f"<h2>{E(title)}</h2>"
-                + (f'<p class="sub">Step {min(done + 1, len(chain))} of {len(chain)} '
-                   f'&middot; {done} passed</p>' if chain else "")
-                + (f'<div class="steps">{steps}</div>' if steps else
-                   '<div class="card empty-card"><p class="flush">No lists here yet. Your '
-                   'teacher will add some.</p></div>')
-                + f'<p class="gap-4"><a class="tab" href="{back}">Back</a></p>')
+        pct = round(100 * done / len(chain)) if chain else 0
+        return (f'<p class="pl-back"><a href="{back}">&larr; Back</a></p>'
+                f"<h2>{E(title)}</h2>"
+                + (f'<div class="lad-sum"><span><strong>{done} of {len(chain)}</strong> passed &middot; '
+                   f'step {min(done + 1, len(chain))} is next</span>'
+                   f'<span class="pl-bar"><i style="width:{pct}%"></i></span></div>' if chain else "")
+                + (f'<ol class="lad {E(kind)}">{steps}</ol>' if steps else
+                   '<div class="empty-state">' + look_icon("list", "empty-ico") + '<p><strong>No lists here yet.'
+                   '</strong><br>Your teacher will add some.</p></div>'))
 
     live = core.live_game(db, s["group_id"])
     banner = (f'<a class="card playlive" href="/s/{E(token)}/game"><strong>Your '
@@ -5383,31 +5453,33 @@ table starts again every Monday; a step you have passed stays passed.</p>
     got = {k: sum(1 for l in core.play_lists(db, s, k) if l["id"] in passed)
            for k in KIND_NAME}
     # a door only appears once there is something behind it
+    icons = {"vocab": "message", "grammar": "layers", "exam": "clipboard"}
     doors = "".join(
-        f'<a class="playbtn {k}" href="{base}&amp;kind={k}">'
-        f'<span class="pbig">{KIND_NAME[k]}</span>'
-        f'<span class="psmall">{got[k]} of {counts[k]} steps passed</span></a>'
+        f'<a class="pl-door {k}" href="{base}&amp;kind={k}">{look_icon(icons[k], "pl-door-ico")}'
+        f'<span class="pl-door-t">{KIND_NAME[k]}</span>'
+        f'<span class="pl-door-m">{got[k]} of {counts[k]} steps passed</span>'
+        f'<span class="pl-bar light"><i style="width:{round(100 * got[k] / counts[k])}%"></i></span></a>'
         for k in ("vocab", "grammar", "exam") if counts[k])
     # the fourth door: racing a classmate rather than the ladder
     waiting = len(core.open_invites(db, s))
     rec = core.battle_record(db, s["id"])
-    doors += (f'<a class="playbtn battle" href="/s/{E(token)}?tab=battle">'
-              f'<span class="pbig">Battle</span>'
-              f'<span class="psmall">'
+    doors += (f'<a class="pl-door battle" href="/s/{E(token)}?tab=battle">{look_icon("bolt", "pl-door-ico")}'
+              f'<span class="pl-door-t">Battle</span>'
+              f'<span class="pl-door-m">'
               + (f'{waiting} challenge{"" if waiting == 1 else "s"} waiting!'
                  if waiting else
                  (f'{rec["wins"]} win{"" if rec["wins"] == 1 else "s"} this week'
                   if rec["races"] else "race a classmate"))
-              + '</span></a>')
+              + '</span>' + (f'<span class="pl-ping">{waiting}</span>' if waiting else "") + '</a>')
     week = core.solo_week_board(db, s["group_id"])
-    rows = solo_rows(week[:10], s["id"],
-                     [lambda r: "%d" % r["mastered"], lambda r: "%d" % r["points"]])
+    items = [{"place": i, "name": r["name"], "value": "%d" % r["points"], "unit": "points",
+              "meta": "%d step%s passed this week" % (r["mastered"], "" if r["mastered"] == 1 else "s"),
+              "me": r["id"] == s["id"]} for i, r in enumerate(week[:10], 1)]
     return f"""<h2>Play</h2>
 {banner}
-<div class="playpick">{doors}</div>
+<div class="pl-doors">{doors}</div>
 <h3 class="gap-4">This week's champions</h3>
-{f'''<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
-<th class="num">Passed</th><th class="num">Points</th></tr>{rows}</table></div>''' if rows else
+{podium(items)}{rank_list(items) if items else
  '<div class="empty-state">' + look_icon("trophy", "empty-ico")
  + '<p><strong>Nobody has played yet this week.</strong><br>Pass a step and your name goes here first.</p></div>'}
 <p class="sub gap-3">Each section is a ladder: pass a step to open the next one.
@@ -5456,15 +5528,16 @@ def view_solo(req, db, token, rid):
                      " WHERE r.id=? AND r.student_id=?", (rid, s["id"])).fetchone()
     if not run:
         return redirect(f"/s/{token}?tab=play")
-    body = f"""<p class="sub solotitle">{E(run["title"])}</p>
+    body = f"""<div class="solo-stage"><p class="solotitle">{E(run["title"])}</p>
 <div id="bar" class="solobar"></div>
-<div id="play"></div>
+<div id="play"></div></div>
 <script>
 const TOK = {json.dumps(token)}, RID = {rid}, LIST = {run["list_id"]};
 const SENTENCE = {json.dumps(run["kind"] == "grammar")};
 const KIND = {json.dumps(run["kind"])};
 const BOOK = {json.dumps((run["source"] or "").strip() if run["kind"] == "vocab" else None)};
 const SHAPES = ['\u25B2', '\u25C6', '\u25CF', '\u25A0'];
+const SECS = {core.SOLO_SECONDS};
 let st = null, ticker = null, busy = false, ac = null;
 function esc(x) {{ return String(x).replace(/[&<>"]/g, c =>
   ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
@@ -5482,7 +5555,8 @@ function bar() {{
   document.getElementById('bar').innerHTML =
     '<span>Question ' + Math.min(st.number + 1, st.total) + ' of ' + st.total + '</span>' +
     (st.streak >= 2 ? '<span>' + st.streak + ' in a row 🔥</span>' : '<span></span>') +
-    '<span><strong>' + st.score + '</strong> points</span>';
+    '<span><strong>' + st.score + '</strong> points</span>' +
+    '<span class="sprog"><i style="width:' + Math.round(100 * st.number / st.total) + '%"></i></span>';
 }}
 async function load() {{
   const r = await fetch('/s/' + TOK + '/solo/' + RID + '.json', {{cache: 'no-store'}});
@@ -5522,7 +5596,8 @@ function show() {{
   let left = st.left;
   el.innerHTML =
     '<div class="gcard"><div class="gclock" id="clock">' + left + '</div>' +
-    '<div class="gword' + (SENTENCE ? ' solo' : '') + '">' + esc(st.term) + '</div></div>' +
+    '<div class="gword' + (SENTENCE ? ' solo' : '') + '">' + esc(st.term) + '</div>' +
+    '<div class="gtime"><i id="gtime" style="width:' + Math.round(100 * left / SECS) + '%"></i></div></div>' +
     '<div class="gopts">' + st.options.map((o, i) =>
       '<button class="gopt c' + i + '" onclick="pick(' + i + ')">' +
       '<span class="gshape">' + SHAPES[i] + '</span>' + esc(o) + '</button>').join('') +
@@ -5532,6 +5607,8 @@ function show() {{
     left -= 1;
     const c = document.getElementById('clock');
     if (c) c.textContent = Math.max(0, left);
+    const g = document.getElementById('gtime');
+    if (g) {{ g.style.width = Math.max(0, Math.round(100 * left / SECS)) + '%'; g.classList.toggle('low', left <= 5); }}
     if (left <= 5 && left > 0) beep(880, 60);
     if (left <= 0) {{ clearInterval(ticker); pick(-1); }}
   }}, 1000);
@@ -5595,19 +5672,25 @@ def portal_battle(db, s, token, query):
 
     rec = core.battle_record(db, s["id"])
     board = core.battle_week_board(db, s["group_id"])
-    rows = solo_rows(board[:10], s["id"],
-                     [lambda r: "%d" % r["wins"], lambda r: "%d" % r["races"],
-                      lambda r: "%d" % r["points"]])
+    items = [{"place": i, "name": r["name"], "value": "%d" % r["points"], "unit": "points",
+              "meta": "%d win%s · %d race%s" % (r["wins"], "" if r["wins"] == 1 else "s",
+                                                r["races"], "" if r["races"] == 1 else "s"),
+              "me": r["id"] == s["id"]} for i, r in enumerate(board[:10], 1)]
     mine_line = (f'This week: <strong>{rec["wins"]}</strong> win'
                  f'{"" if rec["wins"] == 1 else "s"} from {rec["races"]} race'
                  f'{"" if rec["races"] == 1 else "s"}.'
                  if rec["races"] else "You have not raced yet this week.")
-    return f"""<h2>Battle</h2>
-<p class="sub">Up to {core.BATTLE_MAX} of you race through the same
-{core.BATTLE_ROUND} questions. Everyone runs at their own speed and you watch
-each other move. Fastest right answers win.</p>
+    return f"""<p class="pl-back"><a href="/s/{E(token)}?tab=play">&larr; Play</a></p>
+<div class="pl-hero battle">
+  <span class="pl-hero-k">{look_icon("bolt", "pl-ok")} Battle</span>
+  <h2 class="pl-hero-t">Race your classmates</h2>
+  <p class="pl-hero-p">Up to {core.BATTLE_MAX} of you race through the same
+  {core.BATTLE_ROUND} questions. Everyone runs at their own speed and you watch
+  each other move. Fastest right answers win.</p>
+  <p class="pl-hero-me">{mine_line}</p>
+</div>
 {running}{inv_html}
-{"" if mine else f'''<div class="card">
+{"" if mine else f'''<div class="bt-pair"><div class="card bt-card">
 <h3 class="flush">Start a race</h3>
 <form method="post" action="/s/{E(token)}/battle/new" class="battlestart">
 <label class="lab" for="blist">Topic</label>
@@ -5615,23 +5698,19 @@ each other move. Fastest right answers win.</p>
 <button class="big gap-2">Open a lobby</button></form>
 {"" if pick else '<p class="sub">No topics are open to your class yet.</p>'}
 </div>
-<div class="card">
+<div class="card bt-card">
 <h3 class="flush">Join a race</h3>
 <p class="sub">Type the four letters your classmate reads out.</p>
 <form method="post" action="/s/{E(token)}/battle/code" class="battlecode">
 <input name="code" maxlength="4" autocapitalize="characters" autocomplete="off"
  spellcheck="false" placeholder="ABCD" required>
 <button class="big">Join</button></form>
-</div>'''}
-<p class="gap-3">{mine_line}</p>
+</div></div>'''}
 <h3 class="gap-4">This week's racers</h3>
-<div class="tablewrap"><table class="rank"><tr><th></th><th>Student</th>
-<th class="num">Wins</th><th class="num">Races</th><th class="num">Points</th></tr>
-{rows or '<tr><td colspan="5" class="sub">Nobody has raced yet this week. Be the first.</td></tr>'}
-</table></div>
+{podium(items)}{rank_list(items) if items else '<div class="empty-state">' + look_icon("bolt", "empty-ico")
+ + '<p><strong>Nobody has raced yet this week.</strong><br>Be the first.</p></div>'}
 <p class="sub gap-3">The table starts again every Monday. Like Play, battles are
-just for fun: they are not part of the league, and they do not open career steps.</p>
-<p class="gap-4"><a class="tab" href="/s/{E(token)}?tab=play">Back to Play</a></p>"""
+just for fun: they are not part of the league, and they do not open career steps.</p>"""
 
 
 def act_battle_new(req, db, token):
