@@ -6458,12 +6458,14 @@ def unit_homework(db, group_id, unit, pair="A&C", kind="essay", practice="", des
         # a pair may fall back on the unit's other handout (older titles say "4.1", not
         # "4A"); one lesson takes only its own - lesson A must not tick 4B's handout
         if booklet and ((single and "%s%s" % (unit, pair.upper()) not in booklet["title"])
-                        or (cd and "%sC & %sD" % (unit, unit) not in booklet["title"])):
+                        or (cd and "%sC & %sD" % (unit, unit) not in booklet["title"])
+                        or (asrp and "ASRP" not in booklet["title"].upper())):
             booklet = None
     out["items"].append({
         "kind": "booklet",
         "test_id": booklet["id"] if booklet else None,
         "title": (booklet["title"].replace(" (booklet)", "") if booklet
+                  else "Academic Skills + Reading Plus handout \u2014 unit %s" % unit if asrp
                   else "12-page handout \u2014 unit %s%s" % (unit, pair.upper() if single
                                                              else "C & %sD" % unit if cd else ""))})
 

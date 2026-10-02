@@ -119,6 +119,12 @@ check("the Academic Skills lesson at Intermediate has no review line",
       [i["kind"] for i in core.unit_homework(db, gi, 9, pair="ASRP", kind="none")["items"]] == ["workbook", "booklet"])
 check("at Elementary it has", [i["kind"] for i in core.unit_homework(db, ge, 9, pair="ASRP", kind="none")["items"]]
       == ["workbook", "booklet", "review"])
+check("with no Academic Skills handout on the site, a line - never the unit's other handout",
+      core.unit_homework(db, gi, 9, pair="ASRP", kind="none")["items"][1]
+      == {"kind": "booklet", "test_id": None, "title": "Academic Skills + Reading Plus handout — unit 9"})
+asrp9 = shelf("Unit 9 ASRP — Screens and stories")
+db.commit()
+check("and with one, that one", core.unit_homework(db, gi, 9, pair="ASRP", kind="none")["items"][1]["test_id"] == asrp9)
 
 print("\n4. ON THE PAGE, AND SET")
 import threading, time, urllib.request, urllib.parse, http.cookiejar
