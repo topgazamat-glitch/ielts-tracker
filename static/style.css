@@ -3498,6 +3498,7 @@ a.hs-next:hover .hs-next-go svg { transform: translateX(3px); }
 .hs-sum { margin: 0 0 14px; font-size: 14px; color: var(--ink-3); line-height: 1.5; }
 .hs-sum strong { color: var(--ink); }
 .hs-shelf { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); margin: 0 0 18px; }
+.hs-shelf-head { margin-top: 26px; }   /* the workbook's own shelf, under the booklets */
 .hs-card { display: flex; align-items: flex-start; gap: 14px; padding: 15px 16px; border-radius: var(--r-card);
   background: var(--surface); border: 1px solid var(--card-line); box-shadow: var(--card-shadow); color: var(--ink);
   transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease); }

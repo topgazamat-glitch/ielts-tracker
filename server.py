@@ -3895,9 +3895,11 @@ def handout_shelf_page(db, s, token, base):
     locked ones saying which booklet opens them. (A handout set as homework to
     this class opens for it even when it is not open to everyone as practice;
     they come in the order of the course, each one after a set booklet shut
-    until that is finished.)"""
+    until that is finished.) Under them, a shelf of their own: the workbook's
+    units - "Workbook handouts" - which never lock and are never locked."""
     shelf = core.handout_shelf(db, s)
-    if not shelf:
+    workbook = core.workbook_shelf(db, s)
+    if not shelf and not workbook:
         return ('<h2>Handouts</h2><div class="empty-state">' + look_icon("book", "empty-ico")
                 + '<p><strong>Nothing here yet.</strong><br>Your teacher will put your booklets on this page.</p></div>')
     cfg = core.load_config()
@@ -3906,15 +3908,15 @@ def handout_shelf_page(db, s, token, base):
                         " AND test_id IS NOT NULL", (s["group_id"],)):
         if r["due_at"] and (r["test_id"] not in due or r["due_at"] > due[r["test_id"]]):
             due[r["test_id"]] = r["due_at"]
-    cards, carry, finished, total = "", None, 0, 0
-    for b, first in shelf:
-        total += 1
+    tally = {"carry": None}
+
+    def card(b, first):
+        """One booklet's card; it may also become the one to carry on with."""
         badge = str(b["number"]) if b["number"] else (short_title(b)[:2] or "·")
         if first:
-            cards += (f'<div class="hs-card shut" aria-disabled="true"><span class="hs-badge" title="Unit">{E(badge)}</span>'
-                      f'<span class="hs-body"><span class="hs-name">{E(b["title"])}</span>'
-                      f'<span class="hs-state">{LOCK_SVG}Opens when you finish {E(short_title(first))}</span></span></div>')
-            continue
+            return (f'<div class="hs-card shut" aria-disabled="true"><span class="hs-badge" title="Unit">{E(badge)}</span>'
+                    f'<span class="hs-body"><span class="hs-name">{E(b["title"])}</span>'
+                    f'<span class="hs-state">{LOCK_SVG}Opens when you finish {E(short_title(first))}</span></span></div>'), False
         layout = db.execute("SELECT layout FROM dtests WHERE id=?", (b["id"],)).fetchone()["layout"] or ""
         _intro, parts = handout_parts(layout)
         att = db.execute("SELECT id FROM dattempts WHERE test_id=? AND student_id=?"
@@ -3940,16 +3942,27 @@ def handout_shelf_page(db, s, token, base):
             marked = sum(r["right_n"] + r["wrong_n"] for r in done.values())
             state = f'{look_icon("check", "hs-done")}Finished · {right} of {marked} right'
             cls = "done"
-            finished += 1
+        carry = tally["carry"]
         if left and (carry is None or (b["id"] in due and carry[0]["id"] not in due)):
-            carry = (b, left[0], len(done), len(parts), b["id"] in due)
-        cards += (f'<a class="hs-card {cls}" href="{base}&amp;h={b["id"]}"><span class="hs-badge">{E(badge)}</span>'
-                  f'<span class="hs-body"><span class="hs-name">{E(b["title"])}</span>{homework}'
-                  f'<span class="hs-bar" role="img" aria-label="{len(done)} of {len(parts)} parts checked">'
-                  f'<i style="width:{pct}%"></i></span><span class="hs-state">{state}</span></span></a>')
+            tally["carry"] = (b, left[0], len(done), len(parts), b["id"] in due)
+        return (f'<a class="hs-card {cls}" href="{base}&amp;h={b["id"]}"><span class="hs-badge">{E(badge)}</span>'
+                f'<span class="hs-body"><span class="hs-name">{E(b["title"])}</span>{homework}'
+                f'<span class="hs-bar" role="img" aria-label="{len(done)} of {len(parts)} parts checked">'
+                f'<i style="width:{pct}%"></i></span><span class="hs-state">{state}</span></span></a>'), cls == "done"
+
+    cards, finished = "", 0
+    for b, first in shelf:
+        html_card, is_done = card(b, first)
+        cards += html_card
+        finished += is_done
+    wb_cards, wb_finished = "", 0
+    for b in workbook:
+        html_card, is_done = card(b, None)
+        wb_cards += html_card
+        wb_finished += is_done
     hero = ""
-    if carry:
-        b, part, n_done, n_parts, is_hw = carry
+    if tally["carry"]:
+        b, part, n_done, n_parts, is_hw = tally["carry"]
         pct = round(100 * n_done / max(n_parts, 1))
         hero = (f'<a class="hs-next" href="{base}&amp;h={b["id"]}">'
                 f'<span class="hs-next-k">{"Homework · " if is_hw else ""}{"Carry on" if n_done else "Start"}</span>'
@@ -3958,10 +3971,18 @@ def handout_shelf_page(db, s, token, base):
                 f'<span class="hs-bar light"><i style="width:{pct}%"></i></span>'
                 f'<span class="hs-next-go">{"Carry on" if n_done else "Open it"}'
                 f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["arrow"]}</svg></span></a>')
-    return (f'<h2>Handouts</h2>{hero}'
-            f'<p class="hs-sum"><strong>{finished} of {total}</strong> finished · one part at a time, nothing is timed,'
-            f' and what you write is saved as you go.</p>'
-            f'<div class="hs-shelf">{cards}</div>'
+    course = ""
+    if shelf:
+        course = (f'<p class="hs-sum"><strong>{finished} of {len(shelf)}</strong> finished · one part at a time,'
+                  f' nothing is timed, and what you write is saved as you go.</p>'
+                  f'<div class="hs-shelf">{cards}</div>')
+    books = ""
+    if workbook:
+        books = (f'<h2 class="hs-shelf-head">Workbook handouts</h2>'
+                 f'<p class="hs-sum"><strong>{wb_finished} of {len(workbook)}</strong> finished · the workbook'
+                 f' pages, done here part by part; they never wait for a booklet.</p>'
+                 f'<div class="hs-shelf">{wb_cards}</div>')
+    return (f'<h2>Handouts</h2>{hero}{course}{books}'
             f'<details class="hs-how"><summary>How handouts work</summary><p>Answer every box in a part and check it:'
             f' you see how you did straight away, and the next part opens. A booklet set as homework has to be'
             f' finished before the next one opens.</p></details>')
@@ -10116,9 +10137,10 @@ where each booklet is set, look through it as a student does, or check its key.<
 <h2>Destination</h2>
 <p class="sub">{how}</p>
 {group([t for t in rows if t["series"] == "destination"])}
-<h2>Workbook</h2>
-<p class="sub">A workbook unit on the site is linked from its homework line by itself - <em>Workbook
-unit 1 A&amp;C</em> - for classes of its level. Students do it there, or send photos of the pages.</p>
+<h2>Workbook handouts</h2>
+<p class="sub">The workbook's units have a shelf of their own on the students' Handouts page, <em>Workbook
+handouts</em>: the ones open to the level as practice, and any set to the class. A homework line -
+<em>Workbook unit 1 A&amp;C</em> - is linked to its unit by itself. Students do it there, or send photos of the pages.</p>
 {group([t for t in rows if t["series"] == "workbook"])}
 <h2>The course booklets <span class="h2-count">{total}</span></h2>
 <div class="hb-levels">{course or '<p class="hb-none">None on the site yet.</p>'}</div>"""

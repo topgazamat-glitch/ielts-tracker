@@ -5724,10 +5724,27 @@ def handout_shelf(db, student):
         if first is None and b["id"] in owed_ids and not handout_finished(db, b["id"], student["id"]):
             first = b
     # a unit from another book - Destination - opens for the class it is set
-    # to, whatever its level, and neither waits for a booklet nor holds one up
+    # to, whatever its level, and neither waits for a booklet nor holds one up.
+    # The workbook's units have a shelf of their own (workbook_shelf).
     out += [(b, None) for b in digital_tests(db, None, kind="handout")
-            if b["series"] and b["id"] in set_ids]
+            if b["series"] and b["series"] != "workbook" and b["id"] in set_ids]
     return out
+
+
+def workbook_shelf(db, student):
+    """The workbook units on the student's "Workbook handouts" shelf (his
+    request, 3 October 2026): the ones of their level that are open to it as
+    practice, and any set to their class, in the order of the course. A
+    workbook unit never waits for a booklet and never holds one up."""
+    gid = student["group_id"]
+    set_ids = {r["test_id"] for r in db.execute(
+        "SELECT test_id FROM assignments WHERE group_id=? AND published=1 AND test_id IS NOT NULL", (gid,))}
+    level = level_of(db, gid)
+    books = [b for b in digital_tests(db, None, kind="handout")
+             if b["series"] == "workbook"
+             and (b["id"] in set_ids or (b["published"] and level and b["level_id"] == level))]
+    books.sort(key=lesson_order)
+    return books
 
 
 def handout_blocked_by(db, test_id, student):
