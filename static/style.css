@@ -4021,3 +4021,23 @@ button.pl-go:active { transform: scale(.98); }
 .lg-count b { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
 .lg-count .lg-sbar { height: 6px; }
 .lg-count:first-of-type .lg-sbar i { background: linear-gradient(90deg, #ffd166, #ffb347); }
+
+/* ============================================================================
+   The microphone: a meter that moves when it hears you, the time, and a line
+   that says what is happening - in red, with what to do, when it cannot
+   ========================================================================== */
+.voice-row { flex-wrap: wrap; }
+.rec-vu { display: inline-block; width: 90px; height: 8px; border-radius: 99px; background: var(--line-soft);
+  overflow: hidden; vertical-align: middle; }
+.rec-vu[hidden] { display: none; }
+.rec-vu i { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, #27a866, #f2c94c);
+  transition: width .1s linear; }
+.rec-clock { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 2.6em; }
+.rec-say { flex-basis: 100%; font-size: 13px; line-height: 1.45; color: var(--ink-3); }
+.rec-say:empty { display: none; }
+.rec-say.live { color: #1a8a52; font-weight: 600; }
+.rec-say.ask { color: var(--brand); font-weight: 600; }
+.rec-say.warn { color: #9a5b00; font-weight: 600; }
+.rec-say.ok { color: #1a8a52; }
+.rec-say.error { padding: 8px 10px; border-radius: 10px; color: #a8202f; background: var(--warn-soft);
+  border: 1px solid var(--warn-line); font-weight: 600; }

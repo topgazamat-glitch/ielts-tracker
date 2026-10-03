@@ -218,7 +218,7 @@ def page(title, body, active="", music=False):
             + side_link("/settings", "Settings", side_icon("Settings"), section == "Settings")
             + side_link("/logout", "Sign out", side_icon("Sign out"), False))
     scripts = (["music.js"] if (music or tune) else []) + [
-        "shell.js", "nav.js", "listen.js", "materials.js", "grade.js", "prompts.js", "roster.js", "marks.js"]
+        "shell.js", "nav.js", "listen.js", "materials.js", "voice.js", "grade.js", "prompts.js", "roster.js", "marks.js"]
     return shell(title, body, nav=side_nav(groups), foot=foot, heading=section or title, tabs=tabs,
                  scripts=scripts, banner=demo_banner(), tune=tune)
 
@@ -744,7 +744,8 @@ def grade_form(db, sub, student, assignment, regrade=False, gid=None, due=None):
       <div class="voice" id="voice" data-sid="{sub["id"]}">
         <div class="voice-row">
           <button type="button" class="ghost" id="rec"><i class="dot"></i>Record a voice note</button>
-          <span class="sub" id="rectime"></span>
+          <span class="rec-vu" id="recvu" hidden><i></i></span><span class="rec-clock" id="recclock"></span>
+          <span class="rec-say" id="rectime" aria-live="polite"></span>
         </div>
         <div class="voice-have" id="recwrap"{"" if sub["voice"] else " hidden"}>
           <audio controls preload="metadata" id="recplay"

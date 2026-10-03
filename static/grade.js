@@ -143,103 +143,89 @@
   // ---- a voice note, recorded here and kept beside the mark
   //
   // Uploaded the moment the recording stops, so the mark can then be saved
-  // the ordinary way. Opus in WebM is what Chrome, Edge and Firefox record
-  // well; Safari cannot record that and gives mp4 instead. The piece the
+  // the ordinary way. The microphone itself is voice.js, which says what it
+  // is doing - asking, waiting, recording, or why it cannot. The piece the
   // note belongs to is fixed when recording starts, because by the time the
   // upload finishes the page may already show the next student.
-  var recorder = null, chunks = [], recTimer = null, recStart = 0, recSid = null;
-  var voicePending = null;                  // resolves when the upload is done
-  function recMime() {
-    var M = window.MediaRecorder;
-    if (!M || !M.isTypeSupported) return "";
-    var tries = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
-    for (var i = 0; i < tries.length; i++) if (M.isTypeSupported(tries[i])) return tries[i];
-    return "";
-  }
-  function recNote(text) {
+  var current = null;                        // the recording now running
+  var voicePending = null;                   // resolves when the upload is done
+  function recNote(text, kind) {
     var el = document.getElementById("rectime");
-    if (el) el.textContent = text;
+    if (!el) return;
+    el.textContent = text;
+    el.className = "rec-say" + (kind ? " " + kind : "");
   }
-  function clock(ms) {
-    var s = Math.round(ms / 1000);
-    return Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2);
+  function meter(level) {
+    var bar = document.querySelector("#recvu i");
+    if (bar) bar.style.width = Math.round(level * 100) + "%";
   }
-  function uploadVoice(blob, mime, sid, length) {
-    if (!sid) return Promise.resolve();
-    if (blob.size < 1000) {
-      recNote("Nothing was recorded — is the microphone working?");
-      return Promise.resolve();
-    }
+  function recButton(live, label) {
+    var btn = document.getElementById("rec");
+    if (!btn) return;
+    btn.classList.toggle("live", !!live);
+    btn.innerHTML = '<i class="dot"></i>' + label;
+    var vu = document.getElementById("recvu");
+    if (vu) vu.hidden = !live;
+  }
+  function uploadVoice(got, sid) {
+    if (!sid || !got || got.empty) return Promise.resolve();
     var fd = new FormData();
     fd.append("submission_id", sid);
-    fd.append("kind", mime);
-    var ext = mime.indexOf("mp4") >= 0 ? "m4a" : mime.indexOf("ogg") >= 0 ? "ogg" : "webm";
-    fd.append("file", blob, "voice." + ext);
+    fd.append("kind", got.mime);
+    var ext = got.mime.indexOf("mp4") >= 0 ? "m4a" : got.mime.indexOf("ogg") >= 0 ? "ogg" : "webm";
+    fd.append("file", got.blob, "voice." + ext);
     recNote("Saving…");
     return fetch("/grade/voice", {method: "POST", body: fd, credentials: "same-origin"})
       .then(function (r) { return r.json(); })
       .then(function (out) {
-        if (!out.ok) throw new Error("no");
+        if (!out.ok) throw new Error(out.why || "no");
         var box = document.getElementById("voice");
         // only dress the page if it still shows the piece this note is for
         if (box && box.getAttribute("data-sid") === String(sid)) {
           var wrap = document.getElementById("recwrap"), play = document.getElementById("recplay");
           if (play) play.src = out.url;
           if (wrap) wrap.hidden = false;
-          recNote("Voice note saved · " + clock(length));
+          recNote("Voice note saved · " + Voice.clock(got.ms), "ok");
         }
-        toast("Voice note saved · " + clock(length));
+        toast("Voice note saved · " + Voice.clock(got.ms));
       })
-      .catch(function () { recNote("Could not save the recording"); });
+      .catch(function () { recNote("Could not save the recording — check the internet and record again.", "error"); });
   }
   function stopRecording() {
-    if (!recorder || recorder.state !== "recording") return;
-    // the promise exists before onstop fires, so a save pressed right now waits
-    var settle;
-    voicePending = new Promise(function (res) { settle = res; });
-    recorder._settle = settle;
-    recorder.stop();
+    if (!current) return;
+    var rec = current, sid = rec._sid;
+    current = null;
+    recButton(false, "Record again");
+    voicePending = rec.stop().then(function (got) { return uploadVoice(got, sid); })
+      .then(function () { voicePending = null; });
   }
   function startRecording() {
-    if (!navigator.mediaDevices || !window.MediaRecorder) {
-      recNote("This browser cannot record"); return;
-    }
+    if (!window.Voice) { recNote("The recorder did not load — reload the page.", "error"); return; }
     var box = document.getElementById("voice");
     var sid = box ? box.getAttribute("data-sid") : null;
-    navigator.mediaDevices.getUserMedia({audio: true}).then(function (stream) {
-      var mime = recMime();
-      var rec;
-      try { rec = new MediaRecorder(stream, mime ? {mimeType: mime} : undefined); }
-      catch (err) { rec = new MediaRecorder(stream); mime = ""; }
-      recorder = rec; recSid = sid; chunks = [];
-      rec.ondataavailable = function (ev) { if (ev.data && ev.data.size) chunks.push(ev.data); };
-      rec.onstop = function () {
-        stream.getTracks().forEach(function (t) { t.stop(); });
-        clearInterval(recTimer);
-        var length = Date.now() - recStart;
-        var btn = document.getElementById("rec");
-        if (btn) { btn.classList.remove("live"); btn.innerHTML = '<i class="dot"></i>Record again'; }
-        var type = rec.mimeType || mime || "audio/webm";
-        var done = uploadVoice(new Blob(chunks, {type: type}), type, sid, length);
-        done.then(function () { if (rec._settle) rec._settle(); voicePending = null; });
-      };
-      rec.start(1000);                       // a chunk a second: nothing is lost on stop
-      recStart = Date.now();
-      var btn = document.getElementById("rec");
-      if (btn) { btn.classList.add("live"); btn.innerHTML = '<i class="dot"></i>Stop'; }
-      recTimer = setInterval(function () {
-        var ms = Date.now() - recStart;
-        recNote("Recording " + clock(ms));
-        if (ms >= 180000) stopRecording();     // three minutes is a lecture
-      }, 500);
-    }).catch(function () { recNote("Microphone not allowed — check the address bar"); });
+    recButton(true, "Stop");
+    meter(0);
+    current = Voice.start({
+      maxMs: 180000,                         // three minutes is a lecture
+      onState: function (text, kind) {
+        if (kind === "error") { recButton(false, "Record a voice note"); current = null; }
+        if (text) recNote(text, kind);
+      },
+      onLevel: meter,
+      onTick: function (ms) {
+        var el = document.getElementById("recclock");
+        if (el) el.textContent = Voice.clock(ms);
+        if (ms >= 180000) stopRecording();
+      }
+    });
+    current._sid = sid;
   }
   document.addEventListener("click", function (e) {
     var t = e.target.closest ? e.target.closest("#rec, #recdel") : null;
     if (!t) return;
     e.preventDefault();
     if (t.id === "rec") {
-      if (recorder && recorder.state === "recording") stopRecording(); else startRecording();
+      if (current) stopRecording(); else startRecording();
       return;
     }
     var box = document.getElementById("voice");
@@ -251,13 +237,12 @@
         var wrap = document.getElementById("recwrap"), play = document.getElementById("recplay");
         if (play) play.removeAttribute("src");
         if (wrap) wrap.hidden = true;
-        var btn = document.getElementById("rec");
-        if (btn) btn.innerHTML = '<i class="dot"></i>Record a voice note';
+        recButton(false, "Record a voice note");
         recNote("");
       });
   });
   document.addEventListener("pageswap", function () {
-    stopRecording(); chunks = []; clearInterval(recTimer);
+    if (current) { current.stop(); current = null; }
   });
 
   document.addEventListener("submit", function (e) {
