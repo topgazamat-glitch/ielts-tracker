@@ -4102,3 +4102,7 @@ button.bk-rec-cant.armed { color: #a8202f; font-weight: 700; }
 .sp-card.cant { border-style: dashed; }
 .sp-cant { margin: 0; font-size: 13.5px; color: var(--ink-2); }
 .fb-mic { width: 16px; height: 16px; vertical-align: -3px; fill: none; stroke: var(--brand); stroke-width: 2; }
+/* which microphone: shown once the browser names them, when there is more than one */
+select.mic-pick { max-width: 100%; padding: 6px 10px; border-radius: 10px; font-size: 13px; }
+select.mic-pick[hidden] { display: none; }
+.bk-rec select.mic-pick { flex-basis: 100%; }

@@ -63,6 +63,7 @@
         if (kind === "error") { button(box, "Start recording", false); live = null; }
         if (text) say(box, text, kind);
       },
+      onDevice: function () { if (Voice.pickers) Voice.pickers(); },
       onLevel: function (level) {
         var bar = box.querySelector(".rec-vu i");
         if (bar) bar.style.width = Math.round(level * 100) + "%";
@@ -83,7 +84,7 @@
     button(box, "Record again", false);
     var need = parseInt(box.getAttribute("data-min") || "45", 10);
     rec.stop().then(function (got) {
-      if (!got || got.empty) return;
+      if (!got || got.empty || got.quiet) return;              // voice.js has said why
       var secs = Math.round(got.ms / 1000);
       if (secs < need) {
         say(box, "That was " + Voice.clock(got.ms) + ". Talk for at least " + Voice.clock(need * 1000) +
@@ -170,7 +171,7 @@
       btn.querySelector("span").textContent = "Record a reply";
       if (vu) vu.hidden = true;
       r.stop().then(function (got) {
-        if (!got || got.empty) return;
+        if (!got || got.empty || got.quiet) return;
         var fd = new FormData();
         fd.append("attempt", btn.getAttribute("data-attempt"));
         fd.append("question", btn.getAttribute("data-question"));
@@ -208,6 +209,7 @@
                                 if (vu) vu.hidden = true; reply = null; }
         if (text) replySay(btn, text, kind);
       },
+      onDevice: function () { if (Voice.pickers) Voice.pickers(); },
       onLevel: function (level) { var i = vu && vu.querySelector("i"); if (i) i.style.width = Math.round(level * 100) + "%"; },
       onTick: function (ms) { if (clock) clock.textContent = Voice.clock(ms); }
     });

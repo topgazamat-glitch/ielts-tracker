@@ -168,7 +168,7 @@
     if (vu) vu.hidden = !live;
   }
   function uploadVoice(got, sid) {
-    if (!sid || !got || got.empty) return Promise.resolve();
+    if (!sid || !got || got.empty || got.quiet) return Promise.resolve();   // voice.js has said why
     var fd = new FormData();
     fd.append("submission_id", sid);
     fd.append("kind", got.mime);
@@ -212,6 +212,7 @@
         if (text) recNote(text, kind);
       },
       onLevel: meter,
+      onDevice: function () { if (Voice.pickers) Voice.pickers(); },   // names show once allowed
       onTick: function (ms) {
         var el = document.getElementById("recclock");
         if (el) el.textContent = Voice.clock(ms);

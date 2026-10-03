@@ -750,6 +750,7 @@ def grade_form(db, sub, student, assignment, regrade=False, gid=None, due=None):
         <div class="voice-row">
           <button type="button" class="ghost" id="rec"><i class="dot"></i>Record a voice note</button>
           <span class="rec-vu" id="recvu" hidden><i></i></span><span class="rec-clock" id="recclock"></span>
+          <select class="mic-pick" id="recmic" hidden aria-label="Which microphone"></select>
           <span class="rec-say" id="rectime" aria-live="polite"></span>
         </div>
         <div class="voice-have" id="recwrap"{"" if sub["voice"] else " hidden"}>
@@ -3507,7 +3508,8 @@ def speak_box(q, num, mine, lock):
         controls = (f'<div class="bk-rec-row"><button type="button" class="bk-rec-go"><i class="dot"></i>'
                     f'<span>{"Record again" if have else "Start recording"}</span></button>'
                     f'<span class="rec-vu" hidden><i></i></span>'
-                    f'<span class="bk-rec-clock">0:00</span><span class="bk-rec-need">/ at least {need_txt}</span></div>'
+                    f'<span class="bk-rec-clock">0:00</span><span class="bk-rec-need">/ at least {need_txt}</span>'
+                    f'<select class="mic-pick" hidden aria-label="Which microphone"></select></div>'
                     f'<p class="rec-say" aria-live="polite"></p>')
     file_attr = ' data-file="%s"' % E(v["file"]) if have else ""
     return (f'<div class="bk-rec{" has" if have else ""}{" locked" if lock else ""}" data-q="{num}"'
@@ -10381,7 +10383,8 @@ def view_speaking(req, db):
     <textarea name="note" rows="2" placeholder="A line for the student - what was good, one thing to work on">{E(r["note"] or "")}</textarea>
     <div class="sp-acts"><button>Save the note</button>
       <button type="button" class="ghost sp-rec" data-attempt="{r["attempt_id"]}" data-question="{r["question_id"]}"><i class="dot"></i><span>Record a reply</span></button>
-      <span class="rec-vu" hidden><i></i></span><span class="rec-clock"></span></div>
+      <span class="rec-vu" hidden><i></i></span><span class="rec-clock"></span>
+      <select class="mic-pick" hidden aria-label="Which microphone"></select></div>
     <p class="rec-say" aria-live="polite"></p>
   </form>{fbv}
 </div>"""
