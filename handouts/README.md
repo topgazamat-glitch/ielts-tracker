@@ -71,6 +71,7 @@ Upload the json on the Tests page (it arrives as a handout) and publish it.
 | `p02bd_new_digital.py` | Pre-Intermediate | 2B + 2D Travel and tourism (new style) | 181 | 150 |
 | `p03ac_new_digital.py` | Pre-Intermediate | 3A + 3C Money (new style) | 207 | 175 |
 | `p03bd_new_digital.py` | Pre-Intermediate | 3B + 3D Money (new style) | 164 | 134 |
+| `p05ac_digital.py` | Pre-Intermediate | 5A + 5C Work (new style) | 171 | 141 |
 | `p02ac_digital.py` | Pre-Intermediate | 2A + 2C Travel and tourism | 163 | 129 |
 | `p02bd_digital.py` | Pre-Intermediate | 2B + 2D Travel and tourism | 154 | 123 |
 | `p03ac_digital.py` | Pre-Intermediate | 3A + 3C Money | 154 | 129 |
