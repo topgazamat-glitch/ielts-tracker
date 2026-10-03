@@ -1045,6 +1045,23 @@ def migrate(db):
     CREATE INDEX IF NOT EXISTS idx_game_q ON game_questions(game_id, ord);
     CREATE INDEX IF NOT EXISTS idx_game_ans ON game_answers(game_id, question_id);
     """)
+    # Lookups every page makes, which had no index and read the whole table
+    # each time: a student's sitting of a handout, a handout's questions, a
+    # question's options, a word's progress. Small once; the tables grow with
+    # every booklet and every class, and the slow pages grew with them.
+    db.executescript("""
+    CREATE INDEX IF NOT EXISTS idx_datt_test_student ON dattempts(test_id, student_id);
+    CREATE INDEX IF NOT EXISTS idx_datt_student ON dattempts(student_id);
+    CREATE INDEX IF NOT EXISTS idx_dq_test ON dquestions(test_id, num);
+    CREATE INDEX IF NOT EXISTS idx_dopt_question ON doptions(question_id);
+    CREATE INDEX IF NOT EXISTS idx_dresp_question ON dresponses(question_id);
+    CREATE INDEX IF NOT EXISTS idx_wp_word ON word_progress(word_id);
+    CREATE INDEX IF NOT EXISTS idx_solo_q_run ON solo_questions(run_id, ord);
+    CREATE INDEX IF NOT EXISTS idx_files_name ON files(filename);
+    CREATE INDEX IF NOT EXISTS idx_students_token ON students(token);
+    CREATE INDEX IF NOT EXISTS idx_assign_test ON assignments(test_id);
+    CREATE INDEX IF NOT EXISTS idx_game_ans_student ON game_answers(student_id);
+    """)
     db.commit()
 
 
@@ -1391,7 +1408,38 @@ def rolling_average(values, window=3):
     return out
 
 
+# A page asks the same question many times over: the Ratings page worked out
+# each student's homework record six times, and each record checked every
+# handout again - two hundred thousand queries for one page. While a page is
+# being read (a GET; nothing it shows changes under it) an answer is kept for
+# the rest of that page and then thrown away. The bot and the scheduled jobs
+# never switch this on.
+def memo_begin():
+    _thread.memo = {}
+
+
+def memo_end():
+    _thread.memo = None
+
+
+def _memo(name):
+    """The page's remembered answers for `name`, or None outside a page."""
+    memo = getattr(_thread, "memo", None)
+    if memo is None:
+        return None
+    return memo.setdefault((name, demo_on(), practice_on()), {})
+
+
 def student_timeline(db, student_id):
+    memo = _memo("timeline")
+    if memo is None:
+        return _student_timeline(db, student_id)
+    if student_id not in memo:
+        memo[student_id] = _student_timeline(db, student_id)
+    return memo[student_id]
+
+
+def _student_timeline(db, student_id):
     """Every assignment for the student's group, in order, with score or a miss.
 
     A missing submission is never scored zero - it is reported as a gap so the
@@ -5072,6 +5120,7 @@ def load_test(db, data):
             db.execute("INSERT INTO doptions (question_id, letter, text) VALUES (?,?,?)",
                        (qid, o.get("letter") or "?", o.get("text") or ""))
     db.commit()
+    forget_handout(tid)         # a deleted test's number can come back
     return tid
 
 
@@ -5120,6 +5169,7 @@ def set_answer_key(db, test_id, answers):
         db.execute("UPDATE dquestions SET answer=? WHERE id=? AND test_id=?",
                    ((letter or "").strip()[:2000] or None, qid, test_id))
     db.commit()
+    forget_handout(test_id)
 
 
 def test_ready(db, test_id):
@@ -5290,6 +5340,7 @@ def add_recorders(db, test_id):
                   % num + layout[at:])
     db.execute("UPDATE dtests SET layout=? WHERE id=?", (layout, test_id))
     db.commit()
+    forget_handout(test_id)
     return len(spots)
 
 
@@ -5370,13 +5421,30 @@ def speak_feedback_for(db, student_id):
 _HANDOUT_INFO = {}
 
 
+def forget_handout(test_id):
+    """Work a handout's scoring out again next time it is asked for.
+
+    Everything that changes a layout or a key calls this: load_test,
+    set_answer_key, add_recorders, and deleting a test. It used to be keyed
+    on the length of the layout alone, so a key changed on the site - which
+    leaves the layout as it was - went on being marked by the old key until
+    the next restart, and so did a new test given the number of a deleted one.
+    """
+    for key in list(_HANDOUT_INFO):
+        if key[0] == test_id:
+            _HANDOUT_INFO.pop(key, None)
+
+
 def handout_info(db, test_id):
     """What scoring a handout needs from its layout, worked out once: how many
     parts, which question is in which, and which part is the listening."""
-    t = db.execute("SELECT layout FROM dtests WHERE id=?", (test_id,)).fetchone()
-    layout = (t["layout"] if t else "") or ""
-    key = (test_id, len(layout))
+    # Kept until forget_handout() says the layout or the key changed. It was
+    # checked against the layout on every call, and the layout is a hundred
+    # and fifty kilobytes read thousands of times a page by the league.
+    key = (test_id,)
     if key not in _HANDOUT_INFO:
+        t = db.execute("SELECT layout FROM dtests WHERE id=?", (test_id,)).fetchone()
+        layout = (t["layout"] if t else "") or ""
         _intro, parts = handout_parts(layout)
         part_of = {}
         for n, _name, _what, markup in parts:
@@ -5389,11 +5457,23 @@ def handout_info(db, test_id):
                   if q["kind"] != "open" and q["answer"]}
         _HANDOUT_INFO[key] = {"parts": [n for n, *_r in parts], "listening": listening,
                               "marked": marked,
+                              "scored": {qid for qid, part in marked.items()
+                                         if part not in listening},
                               "part_of_id": {q["id"]: part_of.get(q["num"]) for q in qs}}
     return _HANDOUT_INFO[key]
 
 
 def handout_status(db, test_id, student_id, due_at=None):
+    memo = _memo("handout")
+    if memo is None:
+        return _handout_status(db, test_id, student_id, due_at)
+    key = (test_id, student_id, due_at)
+    if key not in memo:
+        memo[key] = _handout_status(db, test_id, student_id, due_at)
+    return dict(memo[key])            # a copy: a caller may add to it
+
+
+def _handout_status(db, test_id, student_id, due_at=None):
     """Where a student is in a handout, and its mark out of ten.
 
     Half the mark is for doing it: a point for every part checked by the
@@ -5416,7 +5496,7 @@ def handout_status(db, test_id, student_id, due_at=None):
     void_parts = {info["part_of_id"].get(r["question_id"]) for r in db.execute(
         "SELECT question_id FROM dresponses WHERE attempt_id=? AND void=1", (att["id"],))}
     finished = checked - void_parts
-    scored = {qid for qid, part in info["marked"].items() if part not in info["listening"]}
+    scored = info["scored"]
     right = sum(1 for r in db.execute(
         "SELECT question_id FROM dresponses WHERE attempt_id=? AND correct=1", (att["id"],))
         if r["question_id"] in scored and info["marked"][r["question_id"]] in checked)
@@ -6450,11 +6530,28 @@ def sent_submission(db, student_id, assignment_id):
     return row
 
 
-def finish_draft(db, submission_id):
-    """Hand a draft in: from here it is visible to the teacher and locked."""
+def finish_draft(db, submission_id, at=None):
+    """Hand a draft in: from here it is visible to the teacher and locked.
+
+    `at` is when it counts as sent; the moment of handing in when not given.
+    """
     db.execute("UPDATE submissions SET draft=0, created_at=? WHERE id=? AND draft=1",
-               (iso(now()), submission_id))
+               (at or iso(now()), submission_id))
     db.commit()
+
+
+def last_page_at(db, submission_id):
+    """When the newest page of a piece of work arrived, or None.
+
+    Every page is saved as <submission>_<page>_<unix time>.<ext>, by the bot
+    and by the website alike, so the file names carry the times.
+    """
+    newest = 0
+    for r in db.execute("SELECT filename FROM files WHERE submission_id=?", (submission_id,)):
+        m = re.match(r"^\d+_\d+_(\d{9,11})\.\w+$", r["filename"] or "")
+        if m:
+            newest = max(newest, int(m.group(1)))
+    return iso(datetime.fromtimestamp(newest, timezone.utc)) if newest else None
 
 
 def open_submission(db, student_id, assignment_id):

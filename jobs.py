@@ -242,7 +242,10 @@ def rescue_drafts(db, token, cfg):
     ).fetchall():
         if not core.page_count(db, row["id"]):
             continue
-        core.finish_draft(db, row["id"])
+        # Sent when the last page arrived, not now: pages photographed before
+        # a deadline and never finished were picked up the next morning and
+        # counted as late - a nought in the league for work done on time.
+        core.finish_draft(db, row["id"], at=core.last_page_at(db, row["id"]) or row["created_at"])
         bot.notify_teachers_new(db, token, row["id"])
         st = db.execute("SELECT telegram_id, lang FROM students WHERE id=?",
                         (row["student_id"],)).fetchone()
@@ -449,6 +452,9 @@ def offload_old_photos(db, cfg):
                 freed += os.path.getsize(path)
                 os.remove(path)
             db.execute("UPDATE files SET offloaded=1 WHERE id=?", (f["id"],))
+            # at once: an open write here was held through the next questions
+            # to Telegram, and every save on the site waited behind it
+            db.commit()
             gone += 1
         except OSError:
             continue

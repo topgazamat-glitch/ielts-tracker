@@ -16,11 +16,7 @@
   const QUALITY = 0.82;
   const WORTH_IT = 400 * 1024;      // leave small files alone
 
-  const form = document.querySelector('form[action$="/upload"]');
-  if (!form || !window.FileReader || !document.createElement("canvas").toBlob) return;
-  const input = form.querySelector('input[type=file][name=photo]');
-  const button = form.querySelector("button");
-  if (!input) return;
+  if (!window.FileReader || !document.createElement("canvas").toBlob) return;
 
   function shrink(file) {
     return new Promise((resolve) => {
@@ -56,9 +52,18 @@
     });
   }
 
+  // Listened for on the document, not on the form: the Send page is often
+  // swapped in without a reload (nav.js), and a form found only when the
+  // script first ran left every photo sent after that at full size.
   let busy = false;
-  form.addEventListener("submit", async (e) => {
-    if (busy || !input.files.length) return;
+  document.addEventListener("submit", async (e) => {
+    const form = e.target;
+    if (!form.matches || !form.matches('form[action$="/upload"]')) return;
+    const input = form.querySelector('input[type=file][name=photo]');
+    const button = form.querySelector("button");
+    if (!input) return;
+    if (busy) { e.preventDefault(); return; }    // a second tap while the first is sending
+    if (!input.files.length) return;
     e.preventDefault();
     busy = true;
     const was = button ? button.textContent : "";

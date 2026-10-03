@@ -251,6 +251,9 @@
     if (!form || form.id !== "gform" || !window.Nav || !window.fetch) return;
     if (form.dataset.native === "1") return;        // the fallback resubmitting
     e.preventDefault();
+    // Enter pressed twice saved the mark twice, and the student was sent it twice
+    if (form.dataset.sending === "1") return;
+    form.dataset.sending = "1";
     // a recording still running is finished first, and its upload waited for
     stopRecording();
     var sub = e.submitter;
@@ -285,6 +288,7 @@
       })
       .catch(function () {
         if (window.Nav.bar) window.Nav.bar(false);
+        form.dataset.sending = "";
         form.dataset.native = "1";
         if (sub && sub.click) sub.click(); else form.submit();
       });

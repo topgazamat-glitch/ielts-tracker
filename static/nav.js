@@ -16,12 +16,14 @@
   if (!document.querySelector("main")) return;
 
   var busy = 0;
+  // the page whose content is showing, so Back can tell when it needs another
+  var shown = window.location.href;
 
   function full(href) { window.location.href = href; }
 
   function skip(url, a) {
     if (url.origin !== window.location.origin) return true;
-    if (a && (a.target || a.hasAttribute("download"))) return true;
+    if (a && (a.target || a.hasAttribute("download") || a.hasAttribute("data-reload"))) return true;
     if (a && a.getAttribute("href").charAt(0) === "#") return true;
     var p = url.pathname;
     return p.indexOf("/static/") === 0 || p.indexOf("/song") === 0 ||
@@ -66,6 +68,9 @@
     if (!fresh) throw new Error("no main");
     // the one thing this must never do: run someone else's script twice
     if (fresh.querySelector("script")) throw new Error("page has its own script");
+    // a paper with a clock (book.js) starts only on a page load of its own:
+    // swapped in, its clock stood at --:-- and nothing typed was kept
+    if (fresh.querySelector("form[data-save]")) throw new Error("needs its own load");
 
     var here = document.querySelector("main");
     here.parentNode.replaceChild(fresh, here);
@@ -74,6 +79,7 @@
     if (doc.title) { document.title = doc.title; }
 
     if (push) { window.history.pushState({nav: 1}, "", href); }
+    shown = push ? href : window.location.href;
     window.scrollTo(0, 0);
     document.dispatchEvent(new CustomEvent("pageswap"));
   }
@@ -156,7 +162,13 @@
     go(url.href, true);
   });
 
-  window.addEventListener("popstate", function (e) {
-    if (e.state && e.state.nav) { go(window.location.href, false); }
+  // Back and Forward. The page first opened has no state of its own, so
+  // waiting for one left Back to it showing the page that was swapped in
+  // after it, under its address. What decides is whether the address now
+  // differs from the content on screen; a jump to #somewhere on the same
+  // page is not a different page.
+  function bare(u) { return String(u).split("#")[0]; }
+  window.addEventListener("popstate", function () {
+    if (bare(window.location.href) !== bare(shown)) { go(window.location.href, false); }
   });
 })();

@@ -49,21 +49,27 @@
       }
     }
 
+    // A save that did not get through is tried again on the next beat: it
+    // used to count as sent, so an essay typed before the connection dropped
+    // was never sent at all unless more was typed after it.
     function save(force) {
+      if (!document.body.contains(box)) return;     // a page swapped away
       if (!force && box.value === lastSent) return;
       lastSent = box.value;
       dirty = false;
       var body = "answer=" + encodeURIComponent(box.value) +
                  "&seconds=" + Math.floor((Date.now() - started) / 1000);
       fetch("/s/" + window.location.pathname.split("/")[2] + "/write/" + sub + "/save", {
-        method: "POST",
+        method: "POST", keepalive: body.length < 60000,
         headers: {"Content-Type": "application/x-www-form-urlencoded"},
         body: body
-      }).then(function () {
-        saved.textContent = "saved";
-        setTimeout(function () { if (!dirty) saved.textContent = "saved"; }, 10);
+      }).then(function (r) { return r.json(); }).then(function (out) {
+        if (out && out.ok) { if (!dirty) saved.textContent = "saved"; return; }
+        saved.textContent = "not saved — this paper is already handed in";
       }).catch(function () {
         saved.textContent = "not saved — check your connection";
+        dirty = true;
+        lastSent = null;
       });
     }
 
@@ -72,8 +78,11 @@
       dirty = true;
       saved.textContent = "…";
     });
-    setInterval(function () { if (dirty) save(false); }, 4000);
-    setInterval(tick, 1000);
+    var beat = setInterval(function () {
+      if (!document.body.contains(box)) { clearInterval(beat); clearInterval(clockBeat); return; }
+      if (dirty) save(false);
+    }, 4000);
+    var clockBeat = setInterval(tick, 1000);
     // a closed tab should not cost the last few seconds either
     window.addEventListener("pagehide", function () { if (dirty) save(true); });
     document.addEventListener("visibilitychange", function () {

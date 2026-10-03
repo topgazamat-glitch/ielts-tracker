@@ -10,6 +10,7 @@ import os
 import random
 import re
 import secrets
+import threading
 import traceback
 import urllib.parse
 from datetime import datetime, timedelta
@@ -105,6 +106,36 @@ def side_icon(name):
             % SIDE_ICONS.get(name, SIDE_ICONS["Today"]))
 
 
+def _static_version():
+    """One fingerprint of everything in static/, worked out at start-up.
+
+    Every page names the stylesheet and the scripts with it (?v=...), so a
+    browser can keep them for a year and still fetch the new ones the moment
+    a deploy changes them. They were kept for five minutes and then sent again
+    whole - a quarter of a megabyte of stylesheet - on the first page after
+    every short break, which is a long wait on a phone; and a change could
+    only be seen after a hard reload.
+    """
+    import hashlib
+    h = hashlib.sha1()
+    folder = os.path.join(core.ROOT, "static")
+    for name in sorted(os.listdir(folder)):
+        full = os.path.join(folder, name)
+        if os.path.isfile(full):
+            h.update(name.encode())
+            with open(full, "rb") as fh:
+                h.update(fh.read())
+    return h.hexdigest()[:10]
+
+
+STATIC_V = _static_version()
+# the gold mark from the rail, so a tab says whose site it is (and the
+# browser stops asking for a /favicon.ico that is not there on every visit)
+FAVICON = ('<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27'
+           ' viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%279%27'
+           ' fill=%27%23ffc76a%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%277.2%27 fill=%27none%27'
+           ' stroke=%27%232a0736%27 stroke-width=%273.6%27/%3E%3C/svg%3E">')
+
 # Before the page is drawn: the sidebar as it was left, open or narrowed to
 # its icons, so it never opens and then snaps shut on the way in.
 SIDE_EARLY = ('<script>try{if(localStorage.getItem("side")==="rail")'
@@ -167,7 +198,7 @@ def shell(title, body, *, nav, foot, heading, tabs, home="/", role="Teacher", sc
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
 {SIDE_EARLY}
-<link rel="stylesheet" href="/static/style.css"></head><body class="{body_class}">
+{FAVICON}<link rel="stylesheet" href="/static/style.css?v={STATIC_V}"></head><body class="{body_class}">
 <aside class="side" id="side" aria-label="Main menu">
   <div class="side-head">
     <a class="side-brand" href="{home}" data-tip="OlimovAzamat"><span class="mark">O</span>
@@ -194,7 +225,7 @@ def shell(title, body, *, nav, foot, heading, tabs, home="/", role="Teacher", sc
 <main{main_attr}>{body}</main>
 {after}
 </div>
-{tune}{"".join(f'<script src="/static/{js}" defer></script>' for js in scripts)}
+{tune}{"".join(f'<script src="/static/{js}?v={STATIC_V}" defer></script>' for js in scripts)}
 </body></html>"""
 
 
@@ -1223,6 +1254,7 @@ def act_grade_many(req, db):
     """Save every mark that was given, leave the rest waiting."""
     f = req["form"]
     done = 0
+    graded = []
     for key, values in list(f.items()):
         m = re.match(r"^score_(\d+)$", key)
         if not m or not values or not values[0].strip():
@@ -1238,11 +1270,11 @@ def act_grade_many(req, db):
         if save_grade(db, sub, one) is None:
             continue
         done += 1
-        try:
-            notify_graded(db, sid)
-        except Exception:
-            # the mark is saved either way; telling the student is best effort
-            traceback.print_exc()
+        graded.append(sid)
+    if graded:
+        # one message after another, on a thread of their own: a whole class
+        # marked on the grid kept the page waiting for twenty of them
+        notify_later(notify_each, graded)
     back = (f.get("assignment", ["0"])[0] or "0").strip()
     return redirect("/queue/grid?assignment=%s" % back)
 
@@ -2617,25 +2649,20 @@ def student_page(title, body, music=True):
            ' onclick="Music.toggle()" title="Music"></button></span>'
            ) if music else ""
     tune = song_tag() if music else ""
-    player = '<script src="/static/music.js" defer></script>' if music else ""
+    player = f'<script src="/static/music.js?v={STATIC_V}" defer></script>' if music else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>{E(title)} · OlimovAzamat</title>
-<link rel="stylesheet" href="/static/style.css"></head>
+{FAVICON}<link rel="stylesheet" href="/static/style.css?v={STATIC_V}"></head>
 <body><header class="top"><div class="bar">
 <span class="brand"><span class="mark">O</span>OlimovAzamat</span>
 {bar}</div></header>
 <main class="portal">{body}</main>
 {tune}{player}
-<script src="/static/nav.js" defer></script>
-<script src="/static/write.js" defer></script>
-<script src="/static/book.js" defer></script>
-<script src="/static/shrink.js" defer></script>
-<script src="/static/handout.js" defer></script>
-<script src="/static/voice.js" defer></script>
-<script src="/static/speak.js" defer></script>
-<script src="/static/listen.js" defer></script></body></html>"""
+{"".join(f'<script src="/static/{js}?v={STATIC_V}" defer></script>'
+         for js in ("nav.js", "write.js", "book.js", "shrink.js", "handout.js",
+                    "voice.js", "speak.js", "listen.js"))}</body></html>"""
 
 
 # The student's page in five sections, the way an app on their phone would
@@ -2792,7 +2819,7 @@ def portal_home(db, s, token, flash, pick=""):
                 link = (f' <span class="pill good">{sat["score"]} of '
                         f'{sat["total"]}</span>' if sat else
                         f' <a class="linky" href="/s/{E(token)}?tab=tests&amp;'
-                        f't={tid}">open it &rarr;</a>')
+                        f't={tid}" data-reload>open it &rarr;</a>')
             rows += (f'<li class="{"done" if done else ""}">'
                      f'<span class="box">{"&#10003;" if done else ""}</span>'
                      f'{E(a["title"])}{link}</li>')
@@ -4453,7 +4480,10 @@ def portal_tests(db, s, token, query):
             else:
                 state = f'{t["n"]} questions · not taken yet'
                 bar, cls = "", "new"
-            cards += (f'<a class="hs-card {cls}" href="{base}&amp;t={t["id"]}"><span class="hs-badge ico">'
+            # data-reload: a paper's clock and its saving start on a page
+            # load of their own, never on a page swapped in (nav.js)
+            cards += (f'<a class="hs-card {cls}" href="{base}&amp;t={t["id"]}" data-reload>'
+                      f'<span class="hs-badge ico">'
                       f'<svg viewBox="0 0 24 24" aria-hidden="true">{LOOK_ICONS["clipboard"]}</svg></span>'
                       f'<span class="hs-body"><span class="hs-name">{E(t["title"])}</span>{homework}{bar}'
                       f'<span class="hs-state">{state}</span></span></a>')
@@ -4480,7 +4510,7 @@ def portal_tests(db, s, token, query):
     if prev and (done_for_good or query.get("again", [""])[0] != "1"):
         again = ('<span class="sub">This paper is sat once, and you have sat '
                  'it.</span>' if done_for_good else
-                 f'<a class="tab" href="{base}&amp;t={tid}&amp;again=1">'
+                 f'<a class="tab" href="{base}&amp;t={tid}&amp;again=1" data-reload>'
                  f'Try it again</a>')
         given = {r["question_id"]: r for r in db.execute(
             "SELECT * FROM dresponses WHERE attempt_id=?", (prev["id"],))}
@@ -4664,12 +4694,18 @@ def notify_handed_in(db, sub_id):
         " JOIN students st ON st.id=s.student_id"
         " LEFT JOIN assignments a ON a.id=s.assignment_id WHERE s.id=?",
         (sub_id,)).fetchone()
-    who = core.meta_get(db, "teacher_chat_id")
+    # the teachers the bot knows are kept as a list under "teachers"; this read
+    # a key nothing ever writes, so a typed essay arrived without a word
+    who = [str(t) for t in json.loads(core.meta_get(db, "teachers", "[]") or "[]")]
+    old = core.meta_get(db, "teacher_chat_id")
+    if old and str(old) not in who:
+        who.append(str(old))
     if not row or not who:
         return
     import bot
-    bot.send(token, who, "%s typed %d words for %s" % (
-        row["name"], row["words"] or 0, row["title"] or "a writing task"))
+    for tid in who:
+        bot.send(token, tid, "%s typed %d words for %s" % (
+            row["name"], row["words"] or 0, row["title"] or "a writing task"))
 
 
 def act_student_test(req, db, token, tid):
@@ -10766,8 +10802,28 @@ def act_test_publish(req, db, tid):
 
 
 def act_test_delete(req, db, tid):
+    # Homework that sets it holds on to it: the delete was refused by the
+    # database and the page said only "Something broke". Say what holds it.
+    uses = db.execute(
+        "SELECT a.title, a.due_at, g.name gname FROM assignments a"
+        " LEFT JOIN groups g ON g.id=a.group_id WHERE a.test_id=?"
+        " ORDER BY a.due_at DESC", (tid,)).fetchall()
+    if uses:
+        cfg = core.load_config()
+        rows = "".join(
+            f'<li>{E(u["gname"] or "a class")} &middot; {E(u["title"])}'
+            f'{" &middot; due " + E(core.local_day(core.parse(u["due_at"]), cfg)) if u["due_at"] else ""}</li>'
+            for u in uses[:12])
+        more = f"<li>and {len(uses) - 12} more</li>" if len(uses) > 12 else ""
+        return html_response(page("Not deleted", f"""<h1>Not deleted</h1>
+<div class="card"><p class="flush">It is set as homework, so it stays until that homework is deleted:</p>
+<ul>{rows}{more}</ul>
+<p class="sub flush">Delete the homework on the <a class="linky" href="/homework?show=all">Homework</a> page
+first, then delete this.</p></div>
+<p><a class="tab" href="/tests/{tid}">Back</a></p>""", "Tests"))
     db.execute("DELETE FROM dtests WHERE id=?", (tid,))
     db.commit()
+    core.forget_handout(tid)
     return redirect("/tests")
 
 
@@ -11040,14 +11096,15 @@ def act_grade(req, db):
     sid = int(req["form"].get("submission_id", [0])[0])
     sub = db.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
     back = queue_url(*queue_filter(req["form"]))
-    if not sub or save_grade(db, sub, req["form"]) is None:
+    if not sub:
         return redirect(back)
-    try:
-        notify_graded(db, sid)
-    except Exception:
-        # the score is saved either way; telling the student is best effort and
-        # must never put an error page in front of the person marking
-        traceback.print_exc()
+    score = save_grade(db, sub, req["form"])
+    if score is None:
+        return redirect(back)
+    # The same mark saved twice - Enter pressed twice, a form sent again - is
+    # not news: the student was sent their score twice.
+    if sub["status"] != "graded" or sub["score"] is None or abs(sub["score"] - score) > 1e-9:
+        notify_later(notify_graded, sid)
     return redirect(back)
 
 
@@ -11063,10 +11120,7 @@ def act_regrade(req, db):
         return redirect("/regrade/%d" % sid)
     if was is None or abs((was or 0) - score) > 1e-9:
         # only when the number actually moved: a corrected tag is not news
-        try:
-            notify_graded(db, sid)
-        except Exception:
-            traceback.print_exc()
+        notify_later(notify_graded, sid)
     back = (req["form"].get("back", [""])[0] or "").strip()
     return redirect(back if back.startswith("/") else "/queue")
 
@@ -11081,6 +11135,40 @@ def act_delete_note(req, db):
     if tid.isdigit():
         core.delete_note_template(db, int(tid))
     return redirect("/queue")
+
+
+def notify_later(fn, *args):
+    """Run fn(db, *args) on a thread of its own, so the page does not wait.
+
+    Telling a student their mark meant working out where they stand in the
+    class and two calls to Telegram, all before the next piece of work could
+    open: a second or two on every save. The mark is saved before this
+    starts; the message is best effort and must never put an error page in
+    front of the person marking. The thread looks at the same copy of the
+    data as the request - the demo copy or the practice copy stays that copy,
+    so nothing invented can reach a real student's phone.
+    """
+    demo, practice = core.demo_on(), core.practice_on()
+
+    def run():
+        core.demo_on(demo)
+        core.practice_on(practice)
+        db = core.connect()
+        try:
+            fn(db, *args)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            db.close()
+    threading.Thread(target=run, daemon=True).start()
+
+
+def notify_each(db, sids):
+    for sid in sids:
+        try:
+            notify_graded(db, sid)
+        except Exception:
+            traceback.print_exc()        # one failed message does not stop the rest
 
 
 def notify_graded(db, sid):
@@ -11704,6 +11792,10 @@ ROUTES = [
 ]
 
 
+# the stylesheet and the big scripts, gzipped once rather than on every visit
+_ZIP_CACHE = {}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "TA/1.0"
     protocol_version = "HTTP/1.1"
@@ -11787,8 +11879,13 @@ class Handler(BaseHTTPRequestHandler):
                  else "audio/mpeg" if name.endswith(".mp3")
                  else "image/png" if name.endswith(".png")
                  else "application/octet-stream")
+        # named with this deploy's fingerprint (STATIC_V): it cannot change
+        # under that name, so it is kept; a bare name is kept five minutes
+        q = urllib.parse.urlsplit(self.path).query
+        keep = ("public, max-age=31536000, immutable" if ("v=" + STATIC_V) in q
+                else "max-age=300")
         self._send(200, [("Content-Type", ctype), ("Content-Length", str(len(data))),
-                         ("Cache-Control", "max-age=300")], data)
+                         ("Cache-Control", keep)], data)
 
     def _serve_media(self, path):
         name = os.path.basename(urllib.parse.unquote(path))
@@ -11873,6 +11970,11 @@ class Handler(BaseHTTPRequestHandler):
                      'Retake them: page flat, camera directly above, good light.</div>')
         elif query.get("e") == ["none"]:
             flash = '<div class="flash err">No photo was attached.</div>'
+        elif query.get("e") == ["locked"]:
+            # the upload refuses more photos for a task already handed in; it
+            # said so with this code, and the page used to say nothing at all
+            flash = ('<div class="flash err">That task has already been sent to your teacher, '
+                     'so these photos were not added. Ask your teacher if you need to change it.</div>')
         db = core.connect()
         try:
             return self._send(*view_student_portal(
@@ -11901,6 +12003,35 @@ class Handler(BaseHTTPRequestHandler):
         ("Strict-Transport-Security", "max-age=31536000"),
     ]
 
+    ZIPPED = ("text/html", "text/css", "application/javascript", "application/json")
+
+    def _squeeze(self, status, headers, body):
+        """The same answer, gzipped, when the browser takes it that way.
+
+        Pages, the stylesheet and the scripts are text and shrink to a fifth
+        or less; on a phone's connection that is most of the wait. Pictures
+        and recordings are already compressed and pass through as they are.
+        """
+        if (status != 200 or not body or len(body) < 1400
+                or "gzip" not in (self.headers.get("Accept-Encoding") or "")):
+            return headers, body
+        names = {k.lower(): v for k, v in headers}
+        if "content-encoding" in names or not names.get("content-type", "").startswith(self.ZIPPED):
+            return headers, body
+        import gzip
+        key = body if names["content-type"].startswith(("text/css", "application/javascript")) else None
+        packed = _ZIP_CACHE.get(key) if key is not None else None
+        if packed is None:
+            packed = gzip.compress(body, compresslevel=6)
+            if key is not None:
+                if len(_ZIP_CACHE) > 40:
+                    _ZIP_CACHE.clear()
+                _ZIP_CACHE[key] = packed
+        headers = [(k, v) for k, v in headers if k.lower() != "content-length"]
+        headers += [("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding"),
+                    ("Content-Length", str(len(packed)))]
+        return headers, packed
+
     def _send(self, status, headers, body):
         """Write a response, in pieces, tolerating a client that walks away.
 
@@ -11910,6 +12041,8 @@ class Handler(BaseHTTPRequestHandler):
         pipe, and the browser answered each dead connection by opening another
         - which is what the stuttering was.
         """
+        self._answered = True
+        headers, body = self._squeeze(status, headers, body)
         try:
             self.send_response(status)
             for k, v in self.SECURITY_HEADERS:
@@ -11933,6 +12066,7 @@ class Handler(BaseHTTPRequestHandler):
         can be answered whole and the player never has to come back for the
         next piece while it is playing.
         """
+        self._answered = True
         try:
             self.send_response(status)
             for k, v in self.SECURITY_HEADERS:
@@ -11961,12 +12095,37 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        self._answered = False
         self._enter_demo_if_asked(urllib.parse.urlsplit(self.path).path)
+        core.memo_begin()               # a page is read, not changed: see core.memo_begin
         try:
             return self._do_GET_inner()
+        except Exception as exc:
+            self._broke(exc)
         finally:
+            core.memo_end()
             core.demo_on(False)
             core.practice_on(False)
+
+    def _broke(self, exc):
+        """A page that failed outside the teacher's own routes - a student's,
+        a parent's, a file. The teacher's routes catch their own errors;
+        these did not, so the connection simply dropped: the student saw the
+        host's bare 502, and nobody was told. Now the student gets a page that
+        says what to do, and the teacher gets the error in Telegram."""
+        traceback.print_exc()
+        where = urllib.parse.urlsplit(self.path).path
+        # never a student's link in a message, and one key per kind of page
+        where = re.sub(r"^/([sp])/[A-Za-z0-9_-]+", r"/\1/<link>", where)
+        where = re.sub(r"\d+", "N", where)
+        core.report_breakage(where, exc)
+        if self._answered:
+            return                      # part of an answer has gone already
+        self._send(*html_response(student_page(
+            "Something went wrong",
+            "<h1>Something went wrong</h1><p class='sub'>Your teacher has been told. "
+            "Go back and try again in a minute &mdash; nothing you saved before is lost.</p>",
+            music=False), 500))
 
     def _do_GET_inner(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -12126,9 +12285,12 @@ class Handler(BaseHTTPRequestHandler):
                                             "headers": self.headers})
 
     def do_POST(self):
+        self._answered = False
         self._enter_demo_if_asked(urllib.parse.urlsplit(self.path).path)
         try:
             return self._do_POST_inner()
+        except Exception as exc:
+            self._broke(exc)
         finally:
             core.demo_on(False)
             core.practice_on(False)

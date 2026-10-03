@@ -30,16 +30,33 @@
   }
 
   // ---- saving
+  //
+  // "Saved" only when the server says so: a refused save used to say "Saved"
+  // as well. One that did not get through is tried again by itself, and the
+  // last one before the page goes away is sent so that it outlives the page.
+  var retry = null;
   function push() {
     var d = data();
     if (!dirty || !d) return;
     dirty = false;
+    clearTimeout(retry);
     note("Saving…");
-    fetch(d.getAttribute("data-save"), {method: "POST", body: body(),
-      credentials: "same-origin",
+    var b = body().toString();
+    fetch(d.getAttribute("data-save"), {method: "POST", body: b,
+      credentials: "same-origin", keepalive: b.length < 60000,
       headers: {"Content-Type": "application/x-www-form-urlencoded"}})
-      .then(function () { note("Saved"); })
-      .catch(function () { note("Not saved — you are offline"); dirty = true; });
+      .then(function (r) { return r.json(); })
+      .then(function (out) {
+        if (out && out.ok) { if (!dirty) note("Saved"); return; }
+        note(out && out.locked ? "Not saved — finish the booklet before this one first"
+                               : "Not saved — reload the page");
+      })
+      .catch(function () {
+        note("Not saved — you are offline. Trying again…");
+        dirty = true;
+        clearTimeout(retry);
+        retry = setTimeout(push, 8000);
+      });
   }
   function changed() {
     dirty = true;
@@ -313,6 +330,8 @@
     progress();
   }
   document.addEventListener("DOMContentLoaded", boot);
-  document.addEventListener("pageswap", function () { dirty = false; clearTimeout(armed); boot(); });
+  document.addEventListener("pageswap", function () {
+    dirty = false; clearTimeout(armed); clearTimeout(timer); clearTimeout(retry); boot();
+  });
   boot();
 })();
