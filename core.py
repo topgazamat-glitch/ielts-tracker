@@ -744,6 +744,17 @@ def migrate(db):
         void INTEGER NOT NULL DEFAULT 0,   -- the teacher said this answer does not count
         PRIMARY KEY (attempt_id, question_id)
     );
+    CREATE TABLE IF NOT EXISTS speak_feedback (
+        -- what the teacher said about a recording made in a handout: a line
+        -- of writing, a recording of their own, or both
+        attempt_id INTEGER NOT NULL REFERENCES dattempts(id) ON DELETE CASCADE,
+        question_id INTEGER NOT NULL REFERENCES dquestions(id) ON DELETE CASCADE,
+        note TEXT,
+        voice TEXT,
+        updated_at TEXT NOT NULL,
+        seen INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (attempt_id, question_id)
+    );
     CREATE TABLE IF NOT EXISTS criteria_scores (
         submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
         key TEXT NOT NULL,
@@ -1353,6 +1364,7 @@ def init_db():
     db.commit()
     seed_prompts(db)
     seed_coursebook(db)
+    add_all_recorders(db)
     return db
 
 
@@ -4972,11 +4984,16 @@ def feedback_rows(db, student_id, limit=40):
 
 
 def unseen_feedback(db, student_id):
-    """Marked pieces the student has not opened yet."""
-    return db.execute(
+    """Marked pieces the student has not opened yet - and answers to their
+    recordings."""
+    marked = db.execute(
         "SELECT COUNT(*) c FROM submissions WHERE student_id=? AND status='graded'"
         " AND draft=0 AND graded_at IS NOT NULL AND seen_at IS NULL",
         (student_id,)).fetchone()["c"]
+    spoken = db.execute(
+        "SELECT COUNT(*) c FROM speak_feedback f JOIN dattempts a ON a.id=f.attempt_id"
+        " WHERE a.student_id=? AND f.seen=0", (student_id,)).fetchone()["c"]
+    return marked + spoken
 
 
 def mark_feedback_seen(db, student_id):
@@ -5185,9 +5202,169 @@ def is_writing(q):
     return q["kind"] == "open" and (q["control"] or "") in ("long", "essay")
 
 
+SPEAK_MIN_SECONDS = 45   # a one-minute talk: 45 seconds is the least that counts (his choice, 2026-10-03)
+SPEAK_FILE_AT = re.compile(r"^speak_(\d+)_(\d+)_\d{14}\.(?:webm|m4a|ogg|mp3)$")
+
+
+def speak_value(text):
+    """A recording box holds "rec:<file>:<seconds>" once a recording is kept,
+    or "cant" when the student says they cannot record. None for anything else."""
+    text = (text or "").strip()
+    if text == "cant":
+        return {"cant": True}
+    m = re.match(r"^rec:([A-Za-z0-9_.-]+):(\d+)$", text)
+    if m and SPEAK_FILE_AT.match(m.group(1)):
+        return {"cant": False, "file": m.group(1), "seconds": int(m.group(2))}
+    return None
+
+
+def is_recording(q):
+    return (q["control"] or "") == "record"
+
+
 def too_short(q, text):
-    """A written answer that does not count as an answer yet."""
+    """A written answer that does not count as an answer yet - or a recording
+    that is too short, or was never kept."""
+    if is_recording(q):
+        v = speak_value(text)
+        if not v:
+            return True
+        if v["cant"]:
+            return False
+        return (v["seconds"] < SPEAK_MIN_SECONDS
+                or not os.path.isfile(os.path.join(UPLOAD_DIR, v["file"])))
     return is_writing(q) and len((text or "").split()) < WRITING_MIN_WORDS
+
+
+# a speaking task in a booklet: "Then record yourself ... send the recording to your teacher"
+RECORD_TASK_AT = re.compile(r"record yourself|send (?:the|your) recording", re.I)
+_EXERCISE_HEAD_AT = re.compile(
+    r'<p(?: [a-z-]+="[^"]*")*><span style="font-weight:700;color:#' + BOOKLET_TEAL + r';[^"]*">(\d+\.\d+)\s*</span>')
+
+
+def add_recorders(db, test_id):
+    """Put a recorder at the end of every speaking task in a handout - once.
+
+    A booklet asks students to record a one-minute talk and send it to the
+    teacher; on the site the recording is made in the task itself. The box
+    goes after the task's last box (its notes and its checklist), so the
+    notes are made first, and it is a question of its own, answered by a
+    recording of at least SPEAK_MIN_SECONDS. A handout that already has a
+    recorder is left alone. Returns how many were added."""
+    t = db.execute("SELECT id, layout, kind FROM dtests WHERE id=?", (test_id,)).fetchone()
+    if not t or (t["kind"] or "") != "handout" or not t["layout"]:
+        return 0
+    if db.execute("SELECT 1 FROM dquestions WHERE test_id=? AND control='record'", (test_id,)).fetchone():
+        return 0
+    layout = t["layout"]
+    heads = list(_EXERCISE_HEAD_AT.finditer(layout))
+    bars = [m.start() for m in SECTION_AT.finditer(layout)]
+    spots = []
+    for k, h in enumerate(heads):
+        end = heads[k + 1].start() if k + 1 < len(heads) else len(layout)
+        nxt_bar = next((b for b in bars if h.start() < b < end), None)
+        end = nxt_bar if nxt_bar is not None else end
+        seg = layout[h.start():end]
+        if not RECORD_TASK_AT.search(plain_text(seg)):
+            continue
+        boxes = list(re.finditer(r'<input class="bk-blank" data-q="\d+"[^>]*>', seg))
+        if boxes:
+            at = h.start() + boxes[-1].end()
+            close = layout.find("</p>", at)
+            at = close + len("</p>") if 0 <= close < end else at
+            # a box in a table cell: the recorder goes after the table, not in the cell
+            while layout[h.start():at].count("<table") > layout[h.start():at].count("</table>"):
+                at = layout.index("</table>", at) + len("</table>")
+        else:
+            at = end
+        spots.append((at, h.group(1)))
+    if not spots:
+        return 0
+    num = (db.execute("SELECT MAX(num) FROM dquestions WHERE test_id=?", (test_id,)).fetchone()[0] or 0)
+    for at, label in sorted(spots, reverse=True):          # from the end, so earlier places stay put
+        num += 1
+        db.execute("INSERT INTO dquestions (test_id, num, kind, prompt, answer, ord, control)"
+                   " VALUES (?,?,?,?,NULL,?,'record')",
+                   (test_id, num, "open", "%s  Your recording" % label, num))
+        layout = (layout[:at] + '<div class="bk-recp"><input class="bk-blank" data-q="%d" style="width:95%%"></div>'
+                  % num + layout[at:])
+    db.execute("UPDATE dtests SET layout=? WHERE id=?", (layout, test_id))
+    db.commit()
+    return len(spots)
+
+
+def add_all_recorders(db):
+    """Every handout's speaking tasks get their recorder - run at start-up,
+    so booklets already on the site get one too. Idempotent."""
+    added = 0
+    for r in db.execute("SELECT id FROM dtests WHERE kind='handout'").fetchall():
+        added += add_recorders(db, r["id"])
+    return added
+
+
+def recordings(db, waiting=False, test_id=None, limit=300):
+    """The students' recordings, newest first: who, which booklet and task,
+    how long, and what the teacher has said. `waiting`: only those with no
+    feedback yet. "cant" answers - a student who said they cannot record - are
+    in the list too, so the teacher sees who skipped it."""
+    sql = ("SELECT r.attempt_id, r.question_id, r.given, IFNULL(r.void,0) void, a.student_id, s.name,"
+           " s.group_id, t.id test_id, t.title, q.prompt, f.note, f.voice fb_voice, f.updated_at fb_at"
+           " FROM dresponses r JOIN dquestions q ON q.id=r.question_id"
+           " JOIN dattempts a ON a.id=r.attempt_id JOIN students s ON s.id=a.student_id"
+           " JOIN dtests t ON t.id=a.test_id"
+           " LEFT JOIN speak_feedback f ON f.attempt_id=r.attempt_id AND f.question_id=r.question_id"
+           " WHERE q.control='record' AND (r.given LIKE 'rec:%' OR r.given='cant')")
+    args = []
+    if test_id:
+        sql += " AND t.id=?"
+        args.append(test_id)
+    if waiting:
+        sql += " AND f.attempt_id IS NULL AND r.given LIKE 'rec:%'"
+    out = []
+    for row in db.execute(sql, args).fetchall():
+        v = speak_value(row["given"])
+        if not v:
+            continue
+        stamp = ""
+        if not v["cant"]:
+            m = re.search(r"_(\d{14})\.", v["file"])
+            stamp = m.group(1) if m else ""
+        out.append(dict(row, **v, stamp=stamp))
+    out.sort(key=lambda r: (r["stamp"] or "0"), reverse=True)
+    return out[:limit]
+
+
+def save_speak_feedback(db, attempt_id, question_id, note=None, voice=None, clear_voice=False):
+    old = db.execute("SELECT * FROM speak_feedback WHERE attempt_id=? AND question_id=?",
+                     (attempt_id, question_id)).fetchone()
+    note = (note if note is not None else (old["note"] if old else None)) or None
+    if clear_voice:
+        voice = None
+    elif voice is None:
+        voice = old["voice"] if old else None
+    if old and old["voice"] and old["voice"] != voice:
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, old["voice"]))
+        except OSError:
+            pass
+    if not note and not voice:
+        db.execute("DELETE FROM speak_feedback WHERE attempt_id=? AND question_id=?", (attempt_id, question_id))
+    else:
+        db.execute("INSERT INTO speak_feedback (attempt_id, question_id, note, voice, updated_at, seen)"
+                   " VALUES (?,?,?,?,?,0) ON CONFLICT(attempt_id, question_id) DO UPDATE SET"
+                   " note=excluded.note, voice=excluded.voice, updated_at=excluded.updated_at, seen=0",
+                   (attempt_id, question_id, note, voice, iso(now())))
+    db.commit()
+
+
+def speak_feedback_for(db, student_id):
+    """What the teacher said about this student's recordings, newest first."""
+    return db.execute(
+        "SELECT f.*, t.title, t.id test_id, q.prompt, r.given FROM speak_feedback f"
+        " JOIN dattempts a ON a.id=f.attempt_id JOIN dtests t ON t.id=a.test_id"
+        " JOIN dquestions q ON q.id=f.question_id"
+        " LEFT JOIN dresponses r ON r.attempt_id=f.attempt_id AND r.question_id=f.question_id"
+        " WHERE a.student_id=? ORDER BY f.updated_at DESC", (student_id,)).fetchall()
 
 
 _HANDOUT_INFO = {}

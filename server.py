@@ -66,7 +66,7 @@ def demo_banner():
 # pay. Every route is unchanged - only where the door to it is.
 SECTIONS = [
     ("Today", "/", [("/", "Overview")]),
-    ("Homework", "/queue", [("/queue", "Grade"), ("/homework", "Homework"),
+    ("Homework", "/queue", [("/queue", "Grade"), ("/speaking", "Speaking"), ("/homework", "Homework"),
                             ("/assignments", "Set homework")]),
     ("Students", "/roster", [("/roster", "Students"), ("/groups", "Groups"),
                              ("/ratings", "Progress"), ("/reteach", "Reteach"),
@@ -218,7 +218,7 @@ def page(title, body, active="", music=False):
             + side_link("/settings", "Settings", side_icon("Settings"), section == "Settings")
             + side_link("/logout", "Sign out", side_icon("Sign out"), False))
     scripts = (["music.js"] if (music or tune) else []) + [
-        "shell.js", "nav.js", "listen.js", "materials.js", "voice.js", "grade.js", "prompts.js", "roster.js", "marks.js"]
+        "shell.js", "nav.js", "listen.js", "materials.js", "voice.js", "speak.js", "grade.js", "prompts.js", "roster.js", "marks.js"]
     return shell(title, body, nav=side_nav(groups), foot=foot, heading=section or title, tabs=tabs,
                  scripts=scripts, banner=demo_banner(), tune=tune)
 
@@ -474,6 +474,11 @@ def today_block(db, pending):
                       else "arrived today")
         items += todo("/queue", "%d to grade" % pending, waited or "in the queue",
                       urgent=pending >= 10)
+
+    heard = [r for r in core.recordings(db) if not r["cant"] and not (r["note"] or r["fb_voice"])]
+    if heard:
+        items += todo("/speaking", "%d recording%s to listen to" % (len(heard), "" if len(heard) == 1 else "s"),
+                      "from the handouts' speaking tasks", urgent=len(heard) >= 15)
 
     # a class that got a list of six tasks is one line, not six
     for r in db.execute(
@@ -2627,6 +2632,8 @@ def student_page(title, body, music=True):
 <script src="/static/book.js" defer></script>
 <script src="/static/shrink.js" defer></script>
 <script src="/static/handout.js" defer></script>
+<script src="/static/voice.js" defer></script>
+<script src="/static/speak.js" defer></script>
 <script src="/static/listen.js" defer></script></body></html>"""
 
 
@@ -2696,7 +2703,7 @@ def student_shell(s, db, token, tab, body, top="", music=True):
 </div>"""
     tune = song_tag() if music else ""
     scripts = (["music.js"] if music else []) + [
-        "shell.js", "nav.js", "write.js", "book.js", "shrink.js", "handout.js", "listen.js"]
+        "shell.js", "nav.js", "write.js", "book.js", "shrink.js", "handout.js", "listen.js", "voice.js", "speak.js"]
     return html_response(shell(
         s["name"], top + head + body, nav=side_nav(groups), foot=who + (MUSIC_ROW if music else ""),
         heading=title, tabs=top_tabs(title, pages_of(pages)), home=base + "home", role="Student",
@@ -2946,8 +2953,29 @@ def portal_feedback(db, s, token):
     the ones not yet opened marked as new. Opening the page is what marks
     them read - there is nothing to press."""
     rows = core.feedback_rows(db, s["id"])
-    fresh = [r for r in rows if not r["seen"]]
+    spoken = core.speak_feedback_for(db, s["id"])
+    fresh = [r for r in rows if not r["seen"]] + [f for f in spoken if not f["seen"]]
     core.mark_feedback_seen(db, s["id"])
+    if spoken:
+        db.execute("UPDATE speak_feedback SET seen=1 WHERE seen=0 AND attempt_id IN"
+                   " (SELECT id FROM dattempts WHERE student_id=?)", (s["id"],))
+        db.commit()
+    speak_cards = ""
+    for f in spoken:
+        v = core.speak_value(f["given"])
+        mine = (f'<div class="fb-voice"><span class="sub">Your recording:</span><audio controls preload="none"'
+                f' src="/s/{E(token)}/speak/{E(v["file"])}"></audio></div>' if v and not v["cant"] else "")
+        note = f'<blockquote class="fb-note">{E(f["note"])}</blockquote>' if f["note"] else ""
+        voice = (f'<div class="fb-voice"><span class="sub">Your teacher says:</span><audio controls preload="metadata"'
+                 f' src="/s/{E(token)}/speakfb/{f["attempt_id"]}/{f["question_id"]}"></audio></div>'
+                 if f["voice"] else "")
+        speak_cards += f"""<div class="card fb{" new" if not f["seen"] else ""}">
+  <div class="fb-head"><div><div class="fb-title">{MIC_SVG.replace('<svg', '<svg class="fb-mic"', 1)} Speaking · {E(f["title"])}</div>
+    <div class="sub">{E((f["updated_at"] or "")[:10])} · task {E((f["prompt"] or "").split("  ")[0])}{' &middot; <span class="pill">new</span>' if not f["seen"] else ''}</div></div></div>
+  {note}{voice}{mine}
+</div>"""
+    if not rows and speak_cards:
+        return f"<h2>Feedback</h2><p class=\"sub\">What your teacher said about your recordings.</p>{speak_cards}"
     if not rows:
         return ('<h2>Feedback</h2><div class="card empty-card"><p class="flush">Nothing marked yet. '
                 'When your teacher marks a piece of homework, what they said about it '
@@ -2974,7 +3002,7 @@ def portal_feedback(db, s, token):
 </div>"""
     head = (f'<p class="sub">{len(fresh)} new since you last looked.</p>' if fresh
             else '<p class="sub">Everything your teacher has said about your work.</p>')
-    return f"<h2>Feedback</h2>{head}{cards}"
+    return f"<h2>Feedback</h2>{head}{speak_cards}{cards}"
 
 
 def portal_materials(db, s, token, query):
@@ -3380,6 +3408,8 @@ def handout_controls(layout, qs, given=None, marks=None):
                           f'{" data-optional" if kind in OPTIONAL_BOXES else ""}'
                           f'{" disabled" if lock else ""}><span>{E(label)}</span></label>')
             return f'<span class="bk-chips" data-q="{num}" role="radiogroup">{chips}</span>'
+        if kind == "record":
+            return speak_box(q, num, mine, lock)
         if kind == "tick":
             on = bool(mine.strip())
             return (f'<button type="button" class="bk-tick{" on" if on else ""}" '
@@ -3456,6 +3486,56 @@ def jump_menu(sections, exercises):
 # a tick, a correction to a sentence that was already right, and work done in
 # class with a partner may all rightly stay empty: none of them holds a part back
 OPTIONAL_BOXES = ("tick", "note", "pair")
+MIC_SVG = ('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/>'
+           '<path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>')
+
+
+def speak_box(q, num, mine, lock):
+    """A speaking task's recorder: record, hear it back, and it is sent to the
+    teacher. It counts as answered with a recording of at least
+    SPEAK_MIN_SECONDS - or when the student says they cannot record. The
+    page's sheet carries the addresses (speak.js reads them), since the box
+    itself does not know whose page it is on."""
+    v = core.speak_value(mine)
+    have = bool(v and not v["cant"])
+    cant = bool(v and v["cant"])
+    need = core.SPEAK_MIN_SECONDS
+    need_txt = "%d:%02d" % (need // 60, need % 60)
+    secs = v["seconds"] if have else 0
+    controls = ""
+    if not lock:
+        controls = (f'<div class="bk-rec-row"><button type="button" class="bk-rec-go"><i class="dot"></i>'
+                    f'<span>{"Record again" if have else "Start recording"}</span></button>'
+                    f'<span class="rec-vu" hidden><i></i></span>'
+                    f'<span class="bk-rec-clock">0:00</span><span class="bk-rec-need">/ at least {need_txt}</span></div>'
+                    f'<p class="rec-say" aria-live="polite"></p>')
+    file_attr = ' data-file="%s"' % E(v["file"]) if have else ""
+    return (f'<div class="bk-rec{" has" if have else ""}{" locked" if lock else ""}" data-q="{num}"'
+            f' data-qid="{q["id"]}" data-min="{need}"{file_attr}>'
+            f'<div class="bk-rec-head"><span class="bk-rec-mic">{MIC_SVG}</span>'
+            f'<span><b>Record your answer here</b><small>At least {need_txt} · it goes straight to your teacher'
+            f'</small></span></div>{controls}'
+            f'<div class="bk-rec-have"{"" if have else " hidden"}><audio controls preload="metadata"></audio>'
+            f'<span class="bk-rec-len">{secs // 60}:{secs % 60:02d} · sent to your teacher ✓</span></div>'
+            f'<p class="bk-rec-cantmsg"{"" if cant else " hidden"}>You told your teacher you can\'t record.'
+            + ('' if lock else ' <button type="button" class="linky bk-rec-try">Try again</button>') + '</p>'
+            + ('' if lock or have else
+               f'<button type="button" class="linky bk-rec-cant"{" hidden" if cant else ""}>I can\'t record</button>')
+            + f'<!--speakfb:{q["id"]}-->'
+            f'<input type="hidden" name="q{q["id"]}" value="{E(mine)}" data-q="{num}" data-required></div>')
+
+
+def speak_feedback_html(db, token, attempt_id, qid):
+    """The teacher's answer to a recording, where the student made it."""
+    f = db.execute("SELECT * FROM speak_feedback WHERE attempt_id=? AND question_id=?",
+                   (attempt_id, qid)).fetchone()
+    if not f:
+        return ""
+    note = f'<blockquote class="fb-note">{E(f["note"])}</blockquote>' if f["note"] else ""
+    voice = (f'<audio controls preload="metadata" src="/s/{E(token)}/speakfb/{attempt_id}/{qid}"></audio>'
+             if f["voice"] else "")
+    return f'<div class="bk-rec-fb"><span class="hx-label">Your teacher says</span>{note}{voice}</div>'
+
 BOOKLET_DEEP = "0B5456"          # the booklets' dark teal: a rule's name, DECIDE / OFFER
 BOOKLET_RUST = "C0745F"          # the booklets' warning boxes
 BOOKLET_HEAD = "E8F1F1"          # the header row of a booklet table
@@ -3972,7 +4052,10 @@ def handout_view(db, token, t, qs, attempt, query):
                         % E(hx_key(answer.get(m.group(2)))), filled)
     head = (f'<div class="hx-parthead"><p class="hx-partno">Part {idx + 1} of {len(parts)}</p>'
             f'<h2>{E(pname)}</h2>{f"<p>{E(what)}</p>" if what else ""}</div>')
-    sheet = f'<div class="booksheet handout hx-sheet">{filled}</div>'
+    filled = re.sub(r"<!--speakfb:(\d+)-->",
+                    lambda m: speak_feedback_html(db, token, attempt["id"], int(m.group(1))), filled)
+    sheet = (f'<div class="booksheet handout hx-sheet" data-speak="/s/{E(token)}/handout/{hid}/speak"'
+             f' data-speakfile="/s/{E(token)}/speak/">{filled}</div>')
     if locked:
         after = parts[idx + 1] if idx + 1 < len(parts) else None
         if after:
@@ -4122,6 +4205,63 @@ def act_handout_save(req, db, token, hid):
     db.commit()
     return json_response({"ok": True, "saved": saved})
 
+
+
+def act_handout_speak(req, db, token, hid):
+    """A recording made in a handout's speaking task: kept beside the answer
+    it is, and the box counts as answered. Long enough or not at all - the
+    page does not send a short one, and this does not keep one."""
+    fields, files = req["files"]
+    st = core.student_by_token(db, token)
+    if not st or not core.handout_open_to(db, hid, st["group_id"]):
+        return json_response({"ok": False})
+    if core.handout_blocked_by(db, hid, st):
+        return json_response({"ok": False, "why": "locked"})
+    qid = (fields.get("q", [""])[0] or "").strip()
+    q = qid.isdigit() and db.execute("SELECT * FROM dquestions WHERE id=? AND test_id=? AND control='record'",
+                                     (int(qid), hid)).fetchone()
+    if not q or not files:
+        return json_response({"ok": False})
+    try:
+        secs = int(float(fields.get("seconds", ["0"])[0] or 0))
+    except ValueError:
+        secs = 0
+    if secs < core.SPEAK_MIN_SECONDS:
+        return json_response({"ok": False, "why": "short"})
+    _name, data = files[0]
+    if not data or len(data) < 1000:
+        return json_response({"ok": False, "why": "empty"})
+    if len(data) > 30 * 1024 * 1024:
+        return json_response({"ok": False, "why": "too long"})
+    attempt = db.execute("SELECT * FROM dattempts WHERE test_id=? AND student_id=? ORDER BY id DESC LIMIT 1",
+                         (hid, st["id"])).fetchone()
+    aid = attempt["id"] if attempt else core.start_attempt(db, hid, st["id"])
+    done = core.handout_parts_done(db, aid)
+    if done:
+        lay = db.execute("SELECT layout FROM dtests WHERE id=?", (hid,)).fetchone()["layout"] or ""
+        for n, _a, _b, m in handout_parts(lay)[1]:
+            if n in done and q["num"] in set(part_keys(m)):
+                return json_response({"ok": False, "why": "locked"})
+    kind = (fields.get("kind", [""])[0] or "").split(";")[0].strip().lower()
+    ext = VOICE_EXT.get(kind, ".webm")
+    if ext not in (".m4a", ".webm", ".ogg", ".mp3"):
+        ext = ".webm"
+    name = "speak_%d_%d_%s%s" % (aid, q["id"], core.now().strftime("%Y%m%d%H%M%S"), ext)
+    os.makedirs(core.UPLOAD_DIR, exist_ok=True)
+    with open(os.path.join(core.UPLOAD_DIR, name), "wb") as fh:
+        fh.write(data)
+    old = db.execute("SELECT given FROM dresponses WHERE attempt_id=? AND question_id=?", (aid, q["id"])).fetchone()
+    was = core.speak_value(old["given"]) if old else None
+    if was and not was["cant"] and was["file"] != name:
+        try:
+            os.remove(os.path.join(core.UPLOAD_DIR, was["file"]))
+        except OSError:
+            pass
+    value = "rec:%s:%d" % (name, min(secs, 3600))
+    db.execute("INSERT INTO dresponses (attempt_id, question_id, given, correct) VALUES (?,?,?,NULL)"
+               " ON CONFLICT(attempt_id, question_id) DO UPDATE SET given=excluded.given", (aid, q["id"], value))
+    db.commit()
+    return json_response({"ok": True, "value": value, "url": "/s/%s/speak/%s" % (token, name)})
 
 
 def act_handout_check(req, db, token, hid):
@@ -10194,6 +10334,113 @@ def act_test_carry(req, db, tid):
     return redirect(f"/tests/{tid}?carried={copied}&students={len(done)}&parts={parts}")
 
 
+def view_speaking(req, db):
+    """Every recording the students made in their handouts, newest first:
+    listen, then answer with a line of writing, a recording of your own, or
+    both. The ones still waiting for an answer come first; a student who said
+    they cannot record is listed too, so nobody skips it unnoticed."""
+    show = (req["query"].get("show", ["waiting"])[0] or "waiting")
+    rows = core.recordings(db, waiting=False)
+    waiting = [r for r in rows if not r["cant"] and not (r["note"] or r["fb_voice"])]
+    cant = [r for r in rows if r["cant"]]
+    shown = waiting if show == "waiting" else cant if show == "cant" else rows
+
+    def tab(key, label, n):
+        on = " on" if show == key else ""
+        return f'<a class="tab{on}" href="/speaking?show={key}">{E(label)} <span class="tab-n">{n}</span></a>'
+    tabs = (f'<div class="tabs">{tab("waiting", "Waiting for you", len(waiting))}'
+            f'{tab("all", "All recordings", len(rows))}{tab("cant", "Could not record", len(cant))}</div>')
+    cards = ""
+    for r in shown:
+        label = (r["prompt"] or "").split("  ")[0]
+        when = ""
+        if r["stamp"]:
+            # the file is named in UTC; he reads Tashkent time
+            at = (datetime.strptime(r["stamp"], "%Y%m%d%H%M%S")
+                  + timedelta(hours=core.load_config()["timezone_offset_hours"]))
+            when = at.strftime("%-d %b, %H:%M")
+        who = (f'<div class="sp-who"><span class="lg-ava">{E((first_name(r["name"]) or "?")[:1].upper())}</span>'
+               f'<span><a href="/students/{r["student_id"]}"><b>{E(r["name"])}</b></a>'
+               f'<small>{E(group_name(db, r["group_id"]))} · {E(r["title"])} · {E(label)}'
+               f'{(" · " + when) if when else ""}</small></span></div>')
+        if r["cant"]:
+            cards += (f'<div class="card sp-card cant">{who}<p class="sp-cant">Pressed <b>I can&rsquo;t record</b>. '
+                      f'Ask for a Telegram voice message, or help them with the microphone in class.</p></div>')
+            continue
+        key = f'{r["attempt_id"]}-{r["question_id"]}'
+        fbv = (f'<div class="sp-fbv"><audio controls preload="none" src="/media/{E(r["fb_voice"])}"></audio>'
+               f'<form method="post" action="/speaking/voice/delete" class="inline">'
+               f'<input type="hidden" name="attempt" value="{r["attempt_id"]}">'
+               f'<input type="hidden" name="question" value="{r["question_id"]}">'
+               f'<button class="linky danger">remove</button></form></div>' if r["fb_voice"] else "")
+        cards += f"""<div class="card sp-card" id="sp-{key}">{who}
+  <div class="sp-play"><audio controls preload="none" src="/media/{E(r["file"])}"></audio>
+    <span class="sp-len">{r["seconds"] // 60}:{r["seconds"] % 60:02d}</span></div>
+  <form method="post" action="/speaking/note" class="sp-form">
+    <input type="hidden" name="attempt" value="{r["attempt_id"]}"><input type="hidden" name="question" value="{r["question_id"]}">
+    <textarea name="note" rows="2" placeholder="A line for the student - what was good, one thing to work on">{E(r["note"] or "")}</textarea>
+    <div class="sp-acts"><button>Save the note</button>
+      <button type="button" class="ghost sp-rec" data-attempt="{r["attempt_id"]}" data-question="{r["question_id"]}"><i class="dot"></i><span>Record a reply</span></button>
+      <span class="rec-vu" hidden><i></i></span><span class="rec-clock"></span></div>
+    <p class="rec-say" aria-live="polite"></p>
+  </form>{fbv}
+</div>"""
+    if not shown:
+        msg = {"waiting": "Nothing is waiting. When students record their answers in a handout, the recordings arrive here.",
+               "cant": "Nobody has said they can&rsquo;t record.",
+               "all": "No recordings yet. They arrive here as students record in their handouts."}[show if show in ("waiting", "cant") else "all"]
+        cards = f'<div class="empty-state">{look_icon("message", "empty-ico")}<p>{msg}</p></div>'
+    body = (f'<div class="pagehead"><div><h1>Speaking</h1><p class="sub">What students recorded in their handouts. '
+            f'Listen, then answer with a note, a recording, or both &mdash; they see it on their Feedback tab and '
+            f'next to their recording. A recording counts once it is at least {core.SPEAK_MIN_SECONDS} seconds.'
+            f'</p></div></div>{tabs}<div class="sp-list">{cards}</div>')
+    return html_response(page("Speaking", body, "Speaking"))
+
+
+def _speak_target(db, form):
+    att, qid = (form.get("attempt", [""])[0] or ""), (form.get("question", [""])[0] or "")
+    if not (att.isdigit() and qid.isdigit()):
+        return None
+    ok = db.execute("SELECT 1 FROM dresponses r JOIN dquestions q ON q.id=r.question_id"
+                    " WHERE r.attempt_id=? AND r.question_id=? AND q.control='record'", (int(att), int(qid))).fetchone()
+    return (int(att), int(qid)) if ok else None
+
+
+def act_speak_note(req, db):
+    t = _speak_target(db, req["form"])
+    if t:
+        core.save_speak_feedback(db, t[0], t[1], note=(req["form"].get("note", [""])[0] or "").strip())
+    return redirect("/speaking?show=" + ("all" if t else "waiting") + ("#sp-%d-%d" % t if t else ""))
+
+
+def act_speak_voice(req, db):
+    """The teacher's spoken answer to a recording, uploaded as soon as it stops."""
+    fields, files = req["files"]
+    t = _speak_target(db, fields)
+    if not t or not files:
+        return json_response({"ok": False})
+    _name, data = files[0]
+    if not data or len(data) < 1000:
+        return json_response({"ok": False, "why": "empty"})
+    if len(data) > 15 * 1024 * 1024:
+        return json_response({"ok": False, "why": "too long"})
+    kind = (fields.get("kind", [""])[0] or "").split(";")[0].strip().lower()
+    ext = VOICE_EXT.get(kind, ".webm")
+    name = "speakfb_%d_%d_%s%s" % (t[0], t[1], core.now().strftime("%Y%m%d%H%M%S"), ext)
+    os.makedirs(core.UPLOAD_DIR, exist_ok=True)
+    with open(os.path.join(core.UPLOAD_DIR, name), "wb") as fh:
+        fh.write(data)
+    core.save_speak_feedback(db, t[0], t[1], voice=name)
+    return json_response({"ok": True, "url": "/media/" + name})
+
+
+def act_speak_voice_delete(req, db):
+    t = _speak_target(db, req["form"])
+    if t:
+        core.save_speak_feedback(db, t[0], t[1], clear_voice=True)
+    return redirect("/speaking?show=all" + ("#sp-%d-%d" % t if t else ""))
+
+
 def view_test_writing(req, db, tid):
     """Every student's writing on one paper, in one place, ready to read."""
     t = db.execute("SELECT * FROM dtests WHERE id=?", (tid,)).fetchone()
@@ -10492,6 +10739,7 @@ def act_new_test(req, db):
     except Exception:
         return redirect("/tests")
     tid = core.load_test(db, data)
+    core.add_recorders(db, tid)          # its speaking tasks get a recorder
     return redirect(f"/tests/{tid}")
 
 
@@ -11380,6 +11628,9 @@ ROUTES = [
     ("POST", r"^/tests/(\d+)/void$", act_test_void),
     ("POST", r"^/tests/(\d+)/timing$", act_test_timing),
     ("GET",  r"^/tests/(\d+)/writing$", view_test_writing),
+    ("GET",  r"^/speaking$", view_speaking),
+    ("POST", r"^/speaking/note$", act_speak_note),
+    ("POST", r"^/speaking/voice/delete$", act_speak_voice_delete),
     ("POST", r"^/tests/(\d+)/attempt/(\d+)/delete$", act_attempt_delete),
     ("POST", r"^/students/(\d+)/newlink$", act_new_link),
     ("POST", r"^/cleanup$", act_free_space),
@@ -11754,6 +12005,34 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 db.close()
             return self._serve_media("/media/" + name)
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/speak/([A-Za-z0-9_.-]+)$", path)
+        if m:
+            name = m.group(2)
+            ok = core.SPEAK_FILE_AT.match(name)
+            db = core.connect()
+            try:
+                st = core.student_by_token(db, m.group(1))
+                mine = ok and st and db.execute("SELECT 1 FROM dattempts WHERE id=? AND student_id=?",
+                                                (int(ok.group(1)), st["id"])).fetchone()
+            finally:
+                db.close()
+            if not mine:
+                return self._send(*not_found())
+            return self._serve_media("/media/" + name)
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/speakfb/(\d+)/(\d+)$", path)
+        if m:
+            db = core.connect()
+            try:
+                st = core.student_by_token(db, m.group(1))
+                row = st and db.execute(
+                    "SELECT f.voice FROM speak_feedback f JOIN dattempts a ON a.id=f.attempt_id"
+                    " WHERE f.attempt_id=? AND f.question_id=? AND a.student_id=?",
+                    (int(m.group(2)), int(m.group(3)), st["id"])).fetchone()
+            finally:
+                db.close()
+            if not row or not row["voice"]:
+                return self._send(*not_found())
+            return self._serve_media("/media/" + row["voice"])
         if path.startswith("/s/"):
             return self._student_get(path, query)
         if path.startswith("/p/"):
@@ -11888,6 +12167,26 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(*act_grade_voice(
                     {"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        if path == "/speaking/voice":
+            if not self._session():
+                return self._send(*json_response({"ok": False}))
+            fields, files = uploads.parse_multipart(body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_speak_voice({"query": {}, "form": {}, "files": (fields, files)}, db))
+            finally:
+                db.close()
+
+        m = re.match(r"^/s/([A-Za-z0-9_-]+)/handout/(\d+)/speak$", path)
+        if m:
+            fields, files = uploads.parse_multipart(body, self.headers.get("Content-Type", ""))
+            db = core.connect()
+            try:
+                return self._send(*act_handout_speak({"query": {}, "form": {}, "files": (fields, files)}, db,
+                                                     m.group(1), int(m.group(2))))
             finally:
                 db.close()
 

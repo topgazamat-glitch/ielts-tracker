@@ -4041,3 +4041,64 @@ button.pl-go:active { transform: scale(.98); }
 .rec-say.ok { color: #1a8a52; }
 .rec-say.error { padding: 8px 10px; border-radius: 10px; color: #a8202f; background: var(--warn-soft);
   border: 1px solid var(--warn-line); font-weight: 600; }
+
+/* ============================================================================
+   A speaking task's recorder, in the handout: a card with a big button, the
+   meter, the time against the least it needs, and - once sent - the student's
+   own recording to hear back, and the teacher's answer when it comes
+   ========================================================================== */
+.bk-recp { margin: 10px 0 6px; }
+.bk-rec { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 16px;
+  background: linear-gradient(160deg, #fbf7ff, #f3ebf8); border: 1.5px solid #dccfe3; font-family: system-ui, -apple-system, sans-serif; }
+.bk-rec.has { border-color: #a8e6c6; background: linear-gradient(160deg, #f4fcf7, #e8f8ef); }
+.bk-rec-head { display: flex; align-items: center; gap: 12px; }
+.bk-rec-mic { flex: none; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: #fff;
+  background: linear-gradient(150deg, #9b3fc0, #5b1475); }
+.bk-rec.has .bk-rec-mic { background: linear-gradient(150deg, #27a866, #126b3f); }
+.bk-rec-mic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.bk-rec-head b { display: block; font-size: 15px; color: #1f0d27; }
+.bk-rec-head small { display: block; margin-top: 1px; font-size: 12.5px; color: #6e5a78; }
+.bk-rec-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+button.bk-rec-go { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 99px; border: 0;
+  font-size: 15px; font-weight: 700; color: #fff; background: #5b1475; box-shadow: 0 4px 12px -6px rgba(91, 20, 117, .6); }
+button.bk-rec-go .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff5a6a; }
+button.bk-rec-go.live { background: #c02a3c; animation: rec-pulse 1.4s ease-in-out infinite; }
+button.bk-rec-go.live .dot { background: #fff; border-radius: 2px; }
+@keyframes rec-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(192, 42, 60, .45); } 50% { box-shadow: 0 0 0 8px rgba(192, 42, 60, 0); } }
+@media (prefers-reduced-motion: reduce) { button.bk-rec-go.live { animation: none; } }
+.bk-rec .rec-vu { width: 80px; }
+.bk-rec-clock { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; color: #3c2a45; }
+.bk-rec.enough .bk-rec-clock { color: #1a8a52; }
+.bk-rec-need { font-size: 12.5px; color: #6e5a78; }
+.bk-rec .rec-say { margin: 0; }
+.bk-rec-have { display: flex; flex-direction: column; gap: 4px; }
+.bk-rec-have[hidden] { display: none; }
+.bk-rec-have audio { width: 100%; height: 40px; }
+.bk-rec-len { font-size: 12.5px; font-weight: 600; color: #1a8a52; }
+.bk-rec-cantmsg { margin: 0; font-size: 13px; color: #9a5b00; }
+.bk-rec-cantmsg[hidden], .bk-rec-cant[hidden] { display: none; }
+button.bk-rec-cant { align-self: flex-start; font-size: 12.5px; color: #6e5a78; }
+button.bk-rec-cant.armed { color: #a8202f; font-weight: 700; }
+.bk-rec-fb { padding: 10px 12px; border-radius: 12px; background: #fff; border: 1px solid #dccfe3; }
+.bk-rec-fb audio { width: 100%; height: 40px; margin-top: 6px; }
+.bk-rec-fb .fb-note { margin: 6px 0 0; }
+
+/* the teacher's Speaking page */
+.tab-n { display: inline-grid; place-items: center; min-width: 20px; height: 18px; margin-left: 4px; padding: 0 6px;
+  border-radius: 99px; font-size: 11px; font-weight: 700; background: var(--accent-soft); color: var(--brand); }
+.sp-list { display: grid; gap: 12px; }
+.sp-card { display: grid; gap: 10px; margin: 0; }
+.sp-who { display: flex; align-items: center; gap: 10px; }
+.sp-who small { display: block; font-size: 12.5px; color: var(--ink-3); }
+.sp-play { display: flex; align-items: center; gap: 10px; }
+.sp-play audio, .sp-fbv audio { flex: 1; min-width: 0; height: 40px; }
+.sp-len { font-size: 13px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.sp-form { display: grid; gap: 8px; }
+.sp-form textarea { width: 100%; }
+.sp-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sp-rec .dot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: #e5484d; }
+.sp-rec.live { color: #fff; background: #c02a3c; border-color: #c02a3c; }
+.sp-fbv { display: flex; align-items: center; gap: 10px; }
+.sp-card.cant { border-style: dashed; }
+.sp-cant { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.fb-mic { width: 16px; height: 16px; vertical-align: -3px; fill: none; stroke: var(--brand); stroke-width: 2; }

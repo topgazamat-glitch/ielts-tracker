@@ -55,7 +55,7 @@
     fields().forEach(function (el) {
       if (seen[el.name]) return;
       seen[el.name] = true;
-      if (el.type === "hidden") return;                 // a tick is optional
+      if (el.type === "hidden" && !el.hasAttribute("data-required")) return;   // a tick is optional
       if (el.hasAttribute("data-optional")) return;     // so is "correct it if it is false"
       out.push(el.name);
     });
@@ -88,6 +88,7 @@
   function target(name) {
     var s = sheet(), el = s.querySelector('[name="' + name + '"]');
     if (!el) return null;
+    if (el.type === "hidden") return el.closest(".bk-rec") || el.previousElementSibling || el;   // the recorder
     return el.type === "radio" ? el.closest(".bk-chips") || el : el;
   }
   function nextEmpty() {
@@ -147,8 +148,13 @@
         var el = sheet().querySelector('[name="' + n + '"][data-min-words]');
         return el && (el.value || "").trim();
       });
+      var unrecorded = left.some(function (n) {
+        var el = sheet().querySelector('[name="' + n + '"][data-required]');
+        return !!el;
+      });
       if (mk) mk.textContent = (left.length === 1 ? "1 box is" : left.length + " boxes are") +
         " still empty" + (short ? " or too short — write at least three words" : "") +
+        (unrecorded ? " — and the recording is still to make" : "") +
         ". Answer every box in this part first.";
       nextEmpty();
       return;
