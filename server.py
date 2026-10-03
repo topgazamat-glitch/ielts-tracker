@@ -12644,6 +12644,10 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    # How many new connections may wait to be picked up. Python's default is
+    # five: a class opening the site at the same moment was refused past the
+    # fifth, which a browser shows as a page that will not load.
+    request_queue_size = 128
 
 
 def main():

@@ -2186,7 +2186,16 @@ BATTLE_CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"   # no I or O: they read as 1 a
 
 
 def touch_student(db, student_id):
-    """Remember that this student is on the site, for the invite list."""
+    """Remember that this student is on the site, for the invite list.
+
+    At most every half minute: "online" means seen in the last two and a half,
+    and a write on every page a student opened queued behind everybody's
+    saving when a class was on the site together.
+    """
+    row = db.execute("SELECT last_seen FROM students WHERE id=?", (student_id,)).fetchone()
+    fresh = iso(now() - timedelta(seconds=30))
+    if row and row["last_seen"] and row["last_seen"] >= fresh:
+        return
     db.execute("UPDATE students SET last_seen=? WHERE id=?", (iso(now()), student_id))
     db.commit()
 
