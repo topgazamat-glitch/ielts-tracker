@@ -28,10 +28,18 @@ key lists cinema (2a item 3) as a long vowel; its bold letter is the final a,
 01.02 were checked against the key with an offline transcription before they
 went on the workbook shelf.
 
-Both halves are on the students' "Workbook handouts" shelf (handout_shelf):
+The unit's last two pages - page 8 (Reading and listening extension) and
+page 9 (Review and extension) - are a third handout, "Unit 1 ASRP", which a
+homework line for the Academic Skills + Reading Plus + Review lesson finds by
+itself ("Workbook unit 1 — Academic Skills, Reading Plus and Review"). Its
+track 01.06 was checked the same way. The book's key corrects 1 Grammar item 2
+to "at the café"; the sentence says "in", so both count. "I can..." is rated
+3 / 2 / 1 with taps that are kept, never marked.
+
+All three are on the students' "Workbook handouts" shelf (handout_shelf):
 open to the level as practice, and linked from a homework line as before.
 
-    python3 handouts/wb_pi_digital.py       # writes handouts/wb_pi_01ac.json and wb_pi_01bd.json
+    python3 handouts/wb_pi_digital.py       # writes wb_pi_01ac.json, wb_pi_01bd.json and wb_pi_01asrp.json
 """
 import json
 import os
@@ -40,7 +48,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from digital import Q, choose, report                                            # noqa: E402
-from dest_b1_digital import md, bar, ex, box, item, para, word_box, cover, handout, panel  # noqa: E402
+from dest_b1_digital import md, bar, ex, box, item, para, word_box, cover, handout, panel, key_list  # noqa: E402
 from variants import ok  # noqa: E402
 
 W = "95%"
@@ -408,8 +416,198 @@ def unit1bd():
     return h.build(K, "Pre-Intermediate", 1, "Workbook · Unit 1B & 1D — Communication")
 
 
+def corrected(*pairs, limit=400):
+    """Every right way to give a corrected sentence: (sentence, the words put
+    right) for each acceptable version."""
+    forms = []
+    for sentence, fix in pairs:
+        forms += spans(sentence, fix)
+    return ok(*forms, limit=limit)
+
+
+def unit1review():
+    h, P, K = handout(), [], {}
+    P.append(cover("WORKBOOK  ·  PRE-INTERMEDIATE  ·  UNIT 1", "Communication",
+                   "Reading and listening extension  ·  Review and extension",
+                   ["chet elda ishlash haqidagi maqolani oʻqib tushunishni",
+                    "talabalar qanday doʻst orttirishi haqidagi podkastni tinglab tushunishni",
+                    "1-unitdagi grammatika va soʻz xatolarini topib tuzatishni",
+                    "*like* ning turli maʼnolarini — *It looks like… · if you like · like Batman*",
+                    "oʻz yutuqlaringizni baholashni"]))
+
+    # ------------------------------------------------ 1 extension reading
+    P.append(bar(1, "Extension Reading", "working abroad"))
+    P.append(panel("WORKING ABROAD: IS IT FOR YOU?", [
+        "Are you looking for a new challenge at work? Do you want to meet new people and travel? Lots of people "
+        "work abroad to experience a new culture. British people especially have a positive experience – 74% of "
+        "Brits who live abroad say they feel at home in their new country! I talked to some young people from the "
+        "UK about their experiences.",
+        "**EMMA, 27, MEXICO CITY**  I work as an English teacher in Mexico City. It's an amazing city! It's cheap to "
+        "live here, so I'm saving quite a lot of money. Working abroad is not for everyone. I love Mexico, but I "
+        "miss home too. My plan is to return home in three months. One year abroad is enough for me!",
+        "**VANESSA, 25, BERLIN**  I've been in Berlin for two years. I work in IT. My job is sometimes boring, but "
+        "the city is exciting! I've also travelled to other parts of the country. It's easy to travel around "
+        "Germany, so I try to see a new city or town once a month. I'd like to stay here for a long time and never "
+        "stop seeing new places.",
+        "**TONY, 24, PARIS**  Living in Paris is very different from back home, but I love my life here. I'm "
+        "studying basic French and working as an event planner for a British company. I travel all over Europe "
+        "for work and have friends and colleagues in many countries – my life is very exciting!",
+        "You might face some problems living abroad, but a lot of people are doing it these days. It helps you "
+        "grow professionally and personally. Why don't you see what opportunities are outside your country?"]))
+    P.append(ex("1.1", "**1a**  Read the article. Match the statements 1–3 with the people a–c."))
+    P.append(key_list([("a", "Vanessa"), ("b", "Tony"), ("c", "Emma")]))
+    P.append(example(1, "Living abroad is different from living in the UK.  →  %s" % done("b")))
+    PEOPLE = {"a": "a · Vanessa", "b": "b · Tony", "c": "c · Emma"}
+    for n, (text, a) in enumerate([("Not everyone would love working abroad.", "c"),
+                                   ("It's important to see new places often.", "a")], 2):
+        P.append(item(h, "1.1", n, text + "  {}", box("1.1", n, "60px")))
+        K[("1.1", n, 1)] = choose(["a", "b", "c"], a, labels=PEOPLE)
+
+    P.append(ex("1.2", "**1b**  Read the article again and choose the best endings for the sentences."))
+    P.append(example(1, "British people living abroad … %s" % done("b  often have a positive experience.")))
+    for n, (stem, opts, a) in enumerate([
+            ("Emma …", ["has been in Mexico for three months.", "thinks Mexico City is wonderful.",
+                        "wants to stay abroad more than a year."], "b"),
+            ("Vanessa …", ["thinks that Berlin is a cheap city.", "thinks her job is exciting.",
+                           "often travels outside Berlin."], "c"),
+            ("Tony …", ["doesn't speak a lot of French.", "works with only British people.",
+                        "travels outside Europe for work."], "a"),
+            ("The writer of the article thinks that …", ["living abroad is easy.",
+                                                         "living abroad can help you with future jobs.",
+                                                         "there are many opportunities to work abroad."], "b")], 2):
+        P.append(item(h, "1.2", n, stem + "  {}", box("1.2", n, "60px")))
+        for letter, o in zip("abc", opts):
+            P.append(para('<span style="font-weight:700">%s</span>  %s' % (letter, md(o)),
+                          style="margin-bottom:2px;line-height:1.4;padding-left:72px"))
+        K[("1.2", n, 1)] = choose(["a", "b", "c"], a)
+
+    P.append(ex("1.3", "**1c**  Write a paragraph about the advantages and disadvantages of living and working "
+                       "abroad. Think about: family and friends · possible problems with the new language and "
+                       "culture · the stories in the article · your own experience."))
+    P.append(item(h, "1.3", 1, "{}", box("1.3", 1, W, "Your paragraph")))
+    K[("1.3", 1, 1)] = Q(None, control="essay")
+
+    # ------------------------------------------------ 2 extension listening
+    P.append(bar(2, "Extension Listening", "making friends at university"))
+    P.append(ex("2.1", "**2a**  Listen to the podcast. Match 1–3 with a–c to make true sentences."))
+    P.append(listen("01.06", "Listen"))
+    P.append(key_list([("a", "goes to a club every week."), ("b", "is friends with the people he lives with."),
+                       ("c", "meets people in a café every week.")]))
+    P.append(example(1, "Sophia  →  %s" % done("c")))
+    for n, (who, a) in enumerate([("Ollie", "a"), ("Ethan", "b")], 2):
+        P.append(item(h, "2.1", n, who + "  {}", box("2.1", n, "60px")))
+        K[("2.1", n, 1)] = choose(["a", "b", "c"], a)
+
+    P.append(ex("2.2", "**2b**  Listen to the podcast again and choose the best endings for the sentences."))
+    P.append(example(1, "The podcast is about … %s" % done("c  how people make friends.")))
+    for n, (stem, opts, a) in enumerate([
+            ("Ollie doesn't …", ["usually go to bars.", "like making friends with new people.",
+                                 "find it difficult to meet people at university."], "a"),
+            ("Ollie likes …", ["going to parties with his friends.", "people who like similar things to him.",
+                               "the countryside near where he lives."], "b"),
+            ("Sophia is interested in …", ["making friends with people studying drama.", "joining a club.",
+                                           "meeting a lot of different people."], "c"),
+            ("Ethan doesn't …", ["use the Internet to meet people.", "like the people he lives with.",
+                                 "usually go out in the evening."], "a"),
+            ("Which of the sentences is true about the students?",
+             ["The university is helping all the students make friends.",
+              "The students are making friends in different ways."], "b")], 2):
+        P.append(item(h, "2.2", n, stem + "  {}", box("2.2", n, "60px")))
+        for letter, o in zip("abc", opts):
+            P.append(para('<span style="font-weight:700">%s</span>  %s' % (letter, md(o)),
+                          style="margin-bottom:2px;line-height:1.4;padding-left:72px"))
+        K[("2.2", n, 1)] = choose(list("abc"[:len(opts)]), a)
+
+    P.append(ex("2.3", "**2c**  Write questions and answers about what you do in your free time and who you spend "
+                       "it with. Think about: Where do you spend your free time? · What do you do and how often? · "
+                       "Who do you spend your free time with?"))
+    P.append(item(h, "2.3", 1, "{}", box("2.3", 1, W, "Your questions and answers")))
+    K[("2.3", 1, 1)] = Q(None, control="essay")
+
+    # ------------------------------------------------ 3 review grammar
+    P.append(bar(3, "Review Grammar", "question forms · present simple and continuous"))
+    P.append(ex("3.1", "**1**  Correct the sentences. Write the correct sentence, or the part that was wrong."))
+    P.append(example(1, "Where you went on holiday last year?  →  %s" % done("Where did you go on holiday last year?")))
+    for n, (wrong, answers) in enumerate([
+            ("At the moment, she works in the café by the bus station.",
+             [("At the moment, she's working in the café by the bus station", "she's working"),
+              ("At the moment, she's working at the café by the bus station", "she's working")]),
+            ("Why you missed the bus?", [("Why did you miss the bus?", "did you miss")]),
+            ("I can't talk to you now because I do my homework.",
+             [("I can't talk to you now because I'm doing my homework", "I'm doing")]),
+            ("What kind of music you usually listen to?",
+             [("What kind of music do you usually listen to?", "do you usually listen")]),
+            ("They waiting for the coach to London.", [("They're waiting for the coach to London", "They're waiting")])],
+            2):
+        P.append(item(h, "3.1", n, wrong + "  {}", box("3.1", n, W, "the correct sentence")))
+        K[("3.1", n, 1)] = Q(corrected(*answers))
+
+    # ------------------------------------------------ 4 review vocabulary
+    P.append(bar(4, "Review Vocabulary", "adjectives and adverbs"))
+    P.append(ex("4.1", "**2**  Correct the sentences. Write the correct sentence, or the word that was wrong."))
+    P.append(example(1, "The new Batman film is amaizing!  →  %s" % done("The new Batman film is amazing!")))
+    for n, (wrong, answers) in enumerate([
+            ("We very enjoyed the film last night.",
+             [("We really enjoyed the film last night", "really"),
+              ("We enjoyed the film very much last night", "very much")]),
+            ("We had a luvly time at the party last night.",
+             [("We had a lovely time at the party last night", "lovely")]),
+            ("I think our history lessons are so borring.",
+             [("I think our history lessons are so boring", "boring")]),
+            ("I think that man's a bit extrange. Look, he's talking to himself.",
+             [("I think that man's a bit strange. Look, he's talking to himself", "strange")]),
+            ("New York's allright, but I prefer living in London, actually.",
+             [("New York's all right, but I prefer living in London, actually", "all right"),
+              ("New York's alright, but I prefer living in London, actually", "alright")])], 2):
+        P.append(item(h, "4.1", n, wrong + "  {}", box("4.1", n, W, "the correct sentence")))
+        K[("4.1", n, 1)] = Q(corrected(*answers))
+
+    # ------------------------------------------------ 5 wordpower and progress
+    P.append(bar(5, "Review Wordpower", "like  ·  review your progress"))
+    P.append(ex("5.1", "**3**  Match 1–8 with a–h to make sentences."))
+    P.append(key_list([("a", "like a perfect day for the beach."), ("b", "like this one. How much is it?"),
+                       ("c", "like Jacob. They've got the same smile."), ("d", "like you're having a great holiday."),
+                       ("e", "if you like."), ("f", "like Katy Perry."), ("g", "like Batman and Spider-Man."),
+                       ("h", "like last night?")]))
+    P.append(example(1, "We can go for a walk in the park  →  %s" % done("e")))
+    for n, (text, a) in enumerate([("What was the party", "h"), ("What amazing weather! It looks", "a"),
+                                   ("The boy in the white T-shirt looks", "c"),
+                                   ("He loves films with superheroes, you know,", "g"),
+                                   ("I absolutely love this singer. She sounds", "f"),
+                                   ("I want to buy a computer", "b"), ("Thanks for your email. It sounds", "d")], 2):
+        P.append(item(h, "5.1", n, text + "  {}", box("5.1", n, "60px")))
+        K[("5.1", n, 1)] = choose(list("abcdefgh"), a)
+    P.append(ex("5.2", "**Review your progress**  How well can you do these things now? 3 = very well · 2 = well · "
+                       "1 = not so well"))
+    RATE = {"3": "3 · very well", "2": "2 · well", "1": "1 · not so well"}
+    for n, text in enumerate(["ask and answer personal questions", "talk about how I communicate",
+                              "greet people and end conversations", "write a personal email"], 1):
+        P.append(item(h, "5.2", n, "I can " + text + "  {}", box("5.2", n, "60px")))
+        K[("5.2", n, 1)] = Q(None, options=["3", "2", "1"], labels=RATE)   # theirs: kept, not marked
+
+    h.html = '<div class="booklet">' + "".join(P) + "</div>"
+    for label, text in [
+            ("1.1", "Maqolani oʻqing. 1–3 gaplarni a–c odamlar bilan moslang."),
+            ("1.2", "Maqolani yana oʻqing va gaplarning eng toʻgʻri davomini tanlang."),
+            ("1.3", "Chet elda yashash va ishlashning yaxshi va yomon tomonlari haqida bitta xatboshi yozing. Oila va "
+                    "doʻstlar, yangi til va madaniyatdagi qiyinchiliklar, maqoladagi hikoyalar va oʻz tajribangiz "
+                    "haqida oʻylang."),
+            ("2.1", "Podkastni tinglang. Toʻgʻri gap hosil qilish uchun 1–3 ni a–c bilan moslang."),
+            ("2.2", "Podkastni yana tinglang va gaplarning eng toʻgʻri davomini tanlang."),
+            ("2.3", "Boʻsh vaqtingizda nima qilishingiz va uni kim bilan oʻtkazishingiz haqida savollar va javoblar "
+                    "yozing."),
+            ("3.1", "Gaplarni tuzating. Toʻgʻri gapni yoki notoʻgʻri boʻlgan qismini yozing."),
+            ("4.1", "Gaplarni tuzating. Toʻgʻri gapni yoki notoʻgʻri yozilgan soʻzni yozing."),
+            ("5.1", "Gap hosil qilish uchun 1–8 ni a–h bilan moslang."),
+            ("5.2", "Oʻz yutuqlaringizni baholang. Endi bularni qanchalik yaxshi qila olasiz? 3 — juda yaxshi, "
+                    "2 — yaxshi, 1 — unchalik emas.")]:
+        h.say_also(label, text)
+    return h.build(K, "Pre-Intermediate", 1, "Workbook · Unit 1 ASRP — Extension and review")
+
+
 if __name__ == "__main__":
-    for build, name in [(unit1ac, "wb_pi_01ac.json"), (unit1bd, "wb_pi_01bd.json")]:
+    for build, name in [(unit1ac, "wb_pi_01ac.json"), (unit1bd, "wb_pi_01bd.json"),
+                        (unit1review, "wb_pi_01asrp.json")]:
         data = build()
         data["series"] = "workbook"
         data["layout"] = data["layout"].replace('<div class="booklet">', '<div class="booklet" data-lang="uz">', 1)

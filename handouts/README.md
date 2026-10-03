@@ -180,8 +180,9 @@ docstring lists where the key was put right.
 
 `wb_pi_digital.py` writes the Empower Pre-Intermediate Workbook (the scan in
 `~/Desktop/Empower Second Edition - Books/3. B1 Pre-Intermediate/`, its key on
-page 87) as handouts: unit 1 A & C (test 128) and B & D (test 140, 3 October
-2026), both open to the level. They carry `"series": "workbook"`:
+page 87) as handouts: unit 1 A & C (test 128), B & D (test 140) and the unit's
+extension and review pages, "Unit 1 ASRP" (test 141, linked from the Academic Skills
+lesson's workbook line) - 3 October 2026, all open to the level. They carry `"series": "workbook"`:
 
 - they sit on the students' own "Workbook handouts" shelf, under the course
   booklets (`core.workbook_shelf`): the level's units that are published, and
