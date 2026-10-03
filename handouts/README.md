@@ -180,12 +180,20 @@ docstring lists where the key was put right.
 
 `wb_pi_digital.py` writes the Empower Pre-Intermediate Workbook (the scan in
 `~/Desktop/Empower Second Edition - Books/3. B1 Pre-Intermediate/`, its key on
-page 87) as handouts: unit 1 A & C so far, live as test 128. They carry
-`"series": "workbook"`:
+page 87) as handouts: unit 1 A & C (test 128) and B & D (test 140, 3 October
+2026), both open to the level. They carry `"series": "workbook"`:
 
+- they sit on the students' own "Workbook handouts" shelf, under the course
+  booklets (`core.workbook_shelf`): the level's units that are published, and
+  any set to the class;
 - a homework line "Workbook unit 1 A&C", set to a class of that level, links
   to it by itself (`core.workbook_test`);
-- it opens only where it is set, and is never in the booklet chain.
+- they are never in the booklet chain: they never lock and are never locked.
+
+Upload one with `--hidden`, then press Publish on its page after checking it
+says "Publish to students": `upload_live.py` checks the publish switch on
+Set homework, which does not list workbook units, so it would press it
+blindly.
 
 Its recordings are the workbook's own, uploaded to `/audio/new` under the
 level "Pre-Intermediate Workbook". They are kept apart from the class tracks,
