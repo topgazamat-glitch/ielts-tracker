@@ -10801,6 +10801,7 @@ def act_new_test(req, db):
         return redirect("/tests")
     tid = core.load_test(db, data)
     core.add_recorders(db, tid)          # its speaking tasks get a recorder
+    core.link_workbook_lines(db)         # a workbook unit: homework that names it, set before it came
     return redirect(f"/tests/{tid}")
 
 

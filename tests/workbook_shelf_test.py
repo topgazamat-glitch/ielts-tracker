@@ -84,6 +84,35 @@ page = server.handout_shelf_page(db, student, student["token"], "/s/x?tab=handou
 check("with no booklet open, the workbook shelf is still there", "Workbook handouts" in page
       and "Nothing here yet" not in page)
 
+print("\n3. HOMEWORK SET BEFORE ITS WORKBOOK UNIT CAME")
+g216 = db.execute("INSERT INTO groups (name, join_code, created_at, level_id) VALUES ('216','B',?,?)",
+                  (now, pre)).lastrowid
+gi = db.execute("INSERT INTO groups (name, join_code, created_at, level_id) VALUES ('116','C',?,?)",
+                (now, inter)).lastrowid
+
+
+def line(gid, title, test_id=None):
+    aid = db.execute("INSERT INTO assignments (group_id, title, due_at, created_at, published, test_id)"
+                     " VALUES (?,?,?,?,1,?)", (gid, title, now, now, test_id)).lastrowid
+    db.commit()
+    return aid
+
+
+early = line(g216, "Workbook unit 3 B&D")             # set before unit 3 B & D is on the site
+other = line(gi, "Workbook unit 3 B&D")               # another level's class
+loose = line(g216, "workbook 3B/D")                   # a line that names no unit the way the site reads
+kept = line(g216, "Workbook unit 1 A&C", wb_bd)       # already linked: left as it is
+check("nothing to link while the unit is not there", core.link_workbook_lines(db) == 0)
+wb_3 = shelf_item("Pre-Intermediate", 3, "Workbook · Unit 3B & 3D — Money", "workbook")
+check("once it is, the line that names it is linked", core.link_workbook_lines(db) == 1)
+tid = lambda aid: db.execute("SELECT test_id FROM assignments WHERE id=?", (aid,)).fetchone()["test_id"]
+check("to that unit", tid(early) == wb_3)
+check("not another level's line, nor one that names no unit", tid(other) is None and tid(loose) is None)
+check("a line already linked is left alone", tid(kept) == wb_bd)
+check("and the unit is on that class's shelf now",
+      wb_3 in [b["id"] for b in core.workbook_shelf(
+          db, db.execute("SELECT * FROM students WHERE id=?", (core.add_student(db, "Sardor", g216),)).fetchone())])
+
 print()
 print("workbook_shelf: %d checks, %d failed" % (checks, len(fails)))
 sys.exit(1 if fails else 0)

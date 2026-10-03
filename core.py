@@ -1382,6 +1382,7 @@ def init_db():
     seed_prompts(db)
     seed_coursebook(db)
     add_all_recorders(db)
+    link_workbook_lines(db)
     return db
 
 
@@ -6778,6 +6779,28 @@ def workbook_test(db, text, level_id):
         "SELECT id FROM dtests WHERE series='workbook' AND kind='handout' AND level_id=? AND number=?"
         " AND title LIKE ? ORDER BY id DESC LIMIT 1", (level_id, unit, like)).fetchone()
     return row["id"] if row else None
+
+
+def link_workbook_lines(db):
+    """Homework lines that name a workbook unit - "Workbook unit 1 B&D" - set
+    before that unit was on the site, linked to it once it is: at start-up and
+    whenever a handout is uploaded (his request, 3 October 2026, for 216's
+    workbook homework). A line already linked is left alone, and the unit must
+    be of the class's level. The marks are safe: a linked line counts the
+    better of the digital work and the teacher's mark for the photographs.
+    Returns how many lines were linked."""
+    rows = db.execute(
+        "SELECT a.id, a.title, g.level_id FROM assignments a JOIN groups g ON g.id=a.group_id"
+        " WHERE a.test_id IS NULL AND LOWER(a.title) LIKE '%workbook%'").fetchall()
+    linked = 0
+    for r in rows:
+        tid = workbook_test(db, r["title"], r["level_id"])
+        if tid:
+            db.execute("UPDATE assignments SET test_id=? WHERE id=? AND test_id IS NULL", (tid, r["id"]))
+            linked += 1
+    if linked:
+        db.commit()
+    return linked
 
 
 def destination_for(db, level_id, unit, text=None):
